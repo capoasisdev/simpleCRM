@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getLeadScope } from '../lib/permissions';
@@ -142,6 +142,151 @@ export default function LeadsView({ currentUser, onNavigate }) {
 
   // Team members list for assignee dropdown
   const [teamMembers, setTeamMembers] = useState([]);
+
+  // Drag and Drop & Auto-scroll State
+  const boardRef = useRef(null);
+  const [draggedLeadId, setDraggedLeadId] = useState(null);
+  const [dragOverColumnId, setDragOverColumnId] = useState(null);
+  const justDraggedRef = useRef(false);
+
+  // Auto-scroll loop
+  const scrollVelocityRef = useRef(0);
+  const scrollAnimationIdRef = useRef(null);
+
+  const startAutoScroll = () => {
+    if (scrollAnimationIdRef.current) return;
+    const loop = () => {
+      if (boardRef.current && scrollVelocityRef.current !== 0) {
+        boardRef.current.scrollLeft += scrollVelocityRef.current;
+      }
+      scrollAnimationIdRef.current = requestAnimationFrame(loop);
+    };
+    scrollAnimationIdRef.current = requestAnimationFrame(loop);
+  };
+
+  const stopAutoScroll = () => {
+    if (scrollAnimationIdRef.current) {
+      cancelAnimationFrame(scrollAnimationIdRef.current);
+      scrollAnimationIdRef.current = null;
+    }
+    scrollVelocityRef.current = 0;
+  };
+
+  useEffect(() => {
+    return () => {
+      stopAutoScroll();
+    };
+  }, []);
+
+  const handleDragStart = (e, lead) => {
+    e.stopPropagation();
+    setDraggedLeadId(lead.id);
+    justDraggedRef.current = true;
+    e.dataTransfer.setData('text/plain', lead.id);
+    e.dataTransfer.effectAllowed = 'move';
+
+    setOpenDropdownLeadId(null);
+    setOpenAssigneeLeadId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedLeadId(null);
+    setDragOverColumnId(null);
+    stopAutoScroll();
+    setTimeout(() => {
+      justDraggedRef.current = false;
+    }, 150);
+  };
+
+  const handleBoardDragOver = (e) => {
+    e.preventDefault();
+    if (!boardRef.current) return;
+    const rect = boardRef.current.getBoundingClientRect();
+    const x = e.clientX;
+    const edgeThreshold = 100;
+    const maxSpeed = 16;
+
+    // Near left edge of board
+    if (x < rect.left + edgeThreshold && x >= rect.left - 50) {
+      const distance = Math.max(0, rect.left + edgeThreshold - x);
+      const intensity = distance / edgeThreshold;
+      scrollVelocityRef.current = -Math.max(4, Math.round(intensity * maxSpeed));
+      startAutoScroll();
+    }
+    // Near right edge of board
+    else if (x > rect.right - edgeThreshold && x <= rect.right + 50) {
+      const distance = Math.max(0, x - (rect.right - edgeThreshold));
+      const intensity = distance / edgeThreshold;
+      scrollVelocityRef.current = Math.max(4, Math.round(intensity * maxSpeed));
+      startAutoScroll();
+    } else {
+      scrollVelocityRef.current = 0;
+    }
+
+    // Vertical auto-scroll for tall columns
+    const colCards = e.target.closest?.('.leads-column-cards');
+    if (colCards) {
+      const colRect = colCards.getBoundingClientRect();
+      const y = e.clientY;
+      if (y < colRect.top + 60 && y >= colRect.top) {
+        colCards.scrollTop -= 8;
+      } else if (y > colRect.bottom - 60 && y <= colRect.bottom) {
+        colCards.scrollTop += 8;
+      }
+    }
+  };
+
+  const handleColumnDragOver = (e, columnId) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverColumnId !== columnId) {
+      setDragOverColumnId(columnId);
+    }
+  };
+
+  const handleColumnDrop = async (e, targetColumnId) => {
+    e.preventDefault();
+    stopAutoScroll();
+    setDragOverColumnId(null);
+
+    const leadId = e.dataTransfer.getData('text/plain') || draggedLeadId;
+    if (!leadId) return;
+
+    const leadToMove = leads.find((l) => l.id === leadId);
+    if (!leadToMove || leadToMove.stage === targetColumnId) {
+      setDraggedLeadId(null);
+      return;
+    }
+
+    justDraggedRef.current = true;
+    setTimeout(() => {
+      justDraggedRef.current = false;
+    }, 150);
+
+    // Optimistic local state update
+    setLeads((prev) =>
+      prev.map((l) => (l.id === leadId ? { ...l, stage: targetColumnId } : l))
+    );
+    setDraggedLeadId(null);
+
+    // Persist stage update in Supabase
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ stage: targetColumnId })
+        .eq('id', leadId);
+
+      if (error) {
+        console.error('Error updating lead stage on drop:', error);
+        // Revert on error
+        setLeads((prev) =>
+          prev.map((l) => (l.id === leadId ? { ...l, stage: leadToMove.stage } : l))
+        );
+      }
+    } catch (err) {
+      console.error('Network error on lead drop:', err);
+    }
+  };
 
   // Fetch dynamic pipeline stages from Supabase & subscribe to realtime
   useEffect(() => {
@@ -652,7 +797,13 @@ export default function LeadsView({ currentUser, onNavigate }) {
       </div>
 
       {/* Board Container with Common Separators */}
-      <div className="leads-board">
+      <div
+        ref={boardRef}
+        className="leads-board"
+        onDragOver={handleBoardDragOver}
+        onDragLeave={stopAutoScroll}
+        onDrop={stopAutoScroll}
+      >
         {columns.length === 0 ? (
           [1, 2, 3, 4].map((n) => (
             <div key={n} className="leads-column">
@@ -687,7 +838,12 @@ export default function LeadsView({ currentUser, onNavigate }) {
             });
 
             return (
-              <div key={column.id} className="leads-column">
+              <div
+                key={column.id}
+                className={`leads-column ${dragOverColumnId === column.id ? 'drag-over-column' : ''}`}
+                onDragOver={(e) => handleColumnDragOver(e, column.id)}
+                onDrop={(e) => handleColumnDrop(e, column.id)}
+              >
                 {/* Column Header */}
                 <div className="leads-column-header">
                   <div className="leads-col-title-group">
@@ -749,18 +905,25 @@ export default function LeadsView({ currentUser, onNavigate }) {
                     return (
                       <div
                         key={lead.id}
-                        className={`lead-card-item ${animClass} ${isOpen ? 'has-open-dropdown' : ''}`}
+                        className={`lead-card-item ${animClass} ${isOpen ? 'has-open-dropdown' : ''} ${draggedLeadId === lead.id ? 'is-dragging' : ''}`}
                         onClick={() => {
+                          if (justDraggedRef.current) return;
                           setSelectedLead(lead);
                           setIsDetailOpen(true);
                         }}
                         style={{ cursor: 'pointer', ...(isOpen ? { zIndex: 100 } : {}) }}
                       >
-                        <div className="lead-card-top-row">
+                        <div
+                          className="lead-card-header-handle"
+                          draggable={true}
+                          onDragStart={(e) => handleDragStart(e, lead)}
+                          onDragEnd={handleDragEnd}
+                          title="Drag to move card to another column"
+                        >
                           <span className="lead-card-name" title={lead.name}>{lead.name}</span>
 
                           {isAdmin && (
-                            <div className="lead-card-assign-wrap" onClick={(e) => e.stopPropagation()}>
+                            <div className="lead-card-assign-wrap" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
                               {assignedUser ? (
                                 <button
                                   type="button"

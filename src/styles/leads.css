@@ -314,11 +314,54 @@
   background-color: #f8fafc;
 }
 
+.lead-card-item.is-dragging {
+  opacity: 0.45;
+  background-color: #f1f5f9 !important;
+  box-shadow: 0 8px 20px -4px rgba(15, 23, 42, 0.15);
+}
+
+/* Card Drag Handle covering the top header and top padding */
+.lead-card-header-handle {
+  margin: -10px -16px 2px -16px;
+  padding: 10px 16px 4px 16px;
+  cursor: grab;
+  cursor: -webkit-grab;
+  user-select: none;
+  -webkit-user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.lead-card-header-handle:hover {
+  background-color: #f1f5f9;
+}
+
+.lead-card-header-handle:active {
+  cursor: grabbing;
+  cursor: -webkit-grabbing;
+}
+
+/* Drop Target Visual Cue */
+.leads-column.drag-over-column {
+  background-color: #f8fafc;
+}
+
+.leads-column.drag-over-column .leads-column-cards {
+  background-color: #f8fafc;
+  outline: 2px dashed #94a3b8;
+  outline-offset: -4px;
+  border-radius: 6px;
+}
+
 .lead-card-top-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 2px;
+  width: 100%;
 }
 
 .lead-card-name {
