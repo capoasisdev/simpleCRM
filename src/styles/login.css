@@ -1,0 +1,193 @@
+/* Login Screen Layout & Aesthetics (Strict 50/50 Equal Split) */
+.login-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 100%;
+  min-height: 100vh;
+  background-color: var(--bg-page);
+  overflow: hidden;
+}
+
+/* Left Section: Form (Exactly 50% width) */
+.login-form-section {
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-2xl);
+  background-color: var(--color-white);
+}
+
+.login-form-container {
+  width: 100%;
+  max-width: 370px;
+}
+
+.brand-heading {
+  font-size: 32px;
+  font-weight: var(--font-weight-semibold); /* Exactly 600, never higher */
+  letter-spacing: -0.03em;
+  color: var(--color-black);
+  margin-bottom: 48px;
+  line-height: 1.2;
+  text-transform: lowercase;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group {
+  margin-bottom: 32px;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-label {
+  font-size: 12.5px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  user-select: none;
+}
+
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border-line);
+  transition: border-color var(--transition-normal);
+}
+
+.input-wrapper:focus-within {
+  border-bottom-color: var(--border-line-focus);
+}
+
+.input-field {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 11px 0;
+  font-size: 16.5px;
+  font-weight: var(--font-weight-regular);
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.input-field::placeholder {
+  font-size: 16.5px;
+  color: var(--text-placeholder);
+  font-weight: var(--font-weight-light);
+}
+
+.password-input {
+  padding-right: 36px;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  color: var(--text-muted);
+  transition: color var(--transition-fast);
+}
+
+.password-toggle-btn:hover {
+  color: var(--text-primary);
+}
+
+.password-toggle-btn:focus-visible {
+  outline: 1px solid var(--color-black);
+  border-radius: var(--radius-sm);
+}
+
+/* Submit Button - Low border-radius 8px, no pills */
+.submit-btn {
+  margin-top: 14px;
+  width: 100%;
+  height: 50px;
+  background-color: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border-radius: var(--radius-standard); /* Standard 8px radius */
+  font-size: 14.5px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.submit-btn:hover {
+  background-color: var(--btn-primary-hover);
+}
+
+.submit-btn:active {
+  background-color: var(--btn-primary-active);
+  transform: scale(0.995);
+}
+
+.submit-btn:focus-visible {
+  outline: 2px solid var(--color-black);
+  outline-offset: 2px;
+}
+
+/* Monochromatic Error Feedback */
+.form-feedback-error {
+  margin-top: 20px;
+  padding: 12px 14px;
+  background-color: var(--color-gray-50);
+  border: 1px solid var(--color-gray-300);
+  border-radius: var(--radius-standard);
+  font-size: 13px;
+  font-weight: var(--font-weight-regular);
+  color: var(--color-gray-900);
+  line-height: 1.4;
+}
+
+
+/* Right Section: Hero Visual (Exactly 50% width) */
+.login-visual-section {
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  position: relative;
+  background-color: var(--color-gray-100);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hero-sculpture-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Responsive Handling */
+@media (max-width: 900px) {
+  .login-page {
+    grid-template-columns: 1fr;
+  }
+
+  .login-visual-section {
+    display: none;
+  }
+
+  .login-form-section {
+    padding: var(--spacing-xl) var(--spacing-lg);
+  }
+}

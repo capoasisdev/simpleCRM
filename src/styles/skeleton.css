@@ -1,0 +1,96 @@
+/* Global Shimmer Skeleton Loader & Transition System */
+
+.skeleton-shimmer {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  background-color: #e2e5e9;
+  border-radius: var(--radius-sm, 4px);
+  vertical-align: middle;
+}
+
+.skeleton-shimmer.circle {
+  border-radius: 50% !important;
+}
+
+.skeleton-shimmer::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  transform: translateX(-150%);
+  background-image: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0) 15%,
+    rgba(255, 255, 255, 0.55) 38%,
+    rgba(255, 255, 255, 0.98) 50%,
+    rgba(255, 255, 255, 0.55) 62%,
+    rgba(255, 255, 255, 0) 85%
+  );
+  animation: shimmerSweep 0.85s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  content: '';
+}
+
+@keyframes shimmerSweep {
+  100% {
+    transform: translateX(150%);
+  }
+}
+
+/* Smooth Entrance Transition for Dynamic Content */
+.fade-in-value {
+  display: inline-block;
+  animation: shimmerContentFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.fade-in-card,
+.fade-in-row,
+.fade-in-item {
+  animation: shimmerContentFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes shimmerContentFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Skeleton Card Placers */
+.lead-card-skeleton {
+  background: var(--color-white, #ffffff);
+  border: none;
+  border-bottom: 1.5px solid #94a3b8;
+  border-radius: 0;
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 0;
+  box-shadow: none;
+}
+
+.deal-row-skeleton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border-line, #f0f0f0);
+}
+
+.activity-item-skeleton {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+}
+
+.table-row-skeleton td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-line, #f0f0f0);
+}
