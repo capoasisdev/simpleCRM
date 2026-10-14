@@ -151,6 +151,25 @@
   overflow-x: auto;
   overflow-y: hidden;
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.leads-board::-webkit-scrollbar {
+  height: 6px;
+}
+
+.leads-board::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.leads-board::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 4px;
+}
+
+.leads-board::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
 }
 
 /* Columns - Shared 1px Vertical Separators */
@@ -251,14 +270,25 @@
   flex-direction: column;
   flex: 1;
   overflow-y: auto;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
 }
 
 .leads-column-cards::-webkit-scrollbar {
-  display: none; /* Chrome, Safari, Opera */
-  width: 0;
-  height: 0;
+  width: 6px;
+}
+
+.leads-column-cards::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.leads-column-cards::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 4px;
+}
+
+.leads-column-cards::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
 }
 
 /* Lead Card - Shared 1px Horizontal Separator between items */
