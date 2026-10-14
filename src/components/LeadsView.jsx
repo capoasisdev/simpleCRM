@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock } from 'lucide-react';
+import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getLeadScope } from '../lib/permissions';
 import Skeleton from './common/Skeleton';
@@ -69,7 +69,7 @@ const formatPhoneNumber = (phone) => {
   return trimmed;
 };
 
-export default function LeadsView({ currentUser }) {
+export default function LeadsView({ currentUser, onNavigate }) {
   const [leads, setLeads] = useState(() => {
     try {
       const cached = localStorage.getItem('crm_cached_leads');
@@ -625,6 +625,18 @@ export default function LeadsView({ currentUser }) {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+
+          {currentUser?.role === 'admin' && onNavigate && (
+            <button
+              type="button"
+              className="lead-import-btn"
+              onClick={() => onNavigate('Admin', 'import')}
+              title="Import leads in bulk from CSV"
+            >
+              <UploadCloud size={14} strokeWidth={1.8} />
+              <span>Import CSV</span>
+            </button>
+          )}
 
           {canEditLead && (
             <button

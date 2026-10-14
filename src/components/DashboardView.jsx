@@ -26,7 +26,8 @@ import {
   IndianRupee,
   X,
   Plug,
-  GitBranch
+  GitBranch,
+  UploadCloud
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission } from '../lib/permissions';
@@ -35,6 +36,7 @@ import AdminUsersView from './AdminUsersView';
 import MetaIntegrationView from './MetaIntegrationView';
 import LeadRoutingView from './LeadRoutingView';
 import PipelineSettingsView from './PipelineSettingsView';
+import CsvImportView from './CsvImportView';
 import Skeleton from './common/Skeleton';
 import '../styles/dashboard.css';
 
@@ -815,7 +817,7 @@ export default function DashboardView({ currentUser, onLogout }) {
             </div>
           )}
 
-          {activeTab === 'Leads' && <LeadsView currentUser={user} />}
+          {activeTab === 'Leads' && <LeadsView currentUser={user} onNavigate={navigateTo} />}
           {activeTab === 'Admin' && (
             <div className="settings-workspace-layout">
               {/* Secondary Settings Sub-navigation inside Settings Main Section */}
@@ -824,6 +826,7 @@ export default function DashboardView({ currentUser, onLogout }) {
                   {[
                     ...(canManageUsers || user.role === 'admin' ? [{ id: 'users', label: 'Users', icon: Users }] : []),
                     ...(canManageRouting || user.role === 'admin' ? [{ id: 'routing', label: 'Lead Routing', icon: GitBranch }] : []),
+                    ...(user.role === 'admin' ? [{ id: 'import', label: 'Import Leads', icon: UploadCloud }] : []),
                     ...(canManageMeta || user.role === 'admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
                     { id: 'company', label: 'Company', icon: Building2 },
                     ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : []),
@@ -852,6 +855,9 @@ export default function DashboardView({ currentUser, onLogout }) {
                   <AdminUsersView currentUser={user} onLogout={onLogout} />
                 )}
                 {adminSubTab === 'routing' && (canManageRouting || user.role === 'admin') && <LeadRoutingView />}
+                {adminSubTab === 'import' && user.role === 'admin' && (
+                  <CsvImportView currentUser={user} onNavigate={navigateTo} />
+                )}
                 {adminSubTab === 'integrations' && (canManageMeta || user.role === 'admin') && (
                   <MetaIntegrationView currentUser={user} />
                 )}
