@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, UserCheck, CalendarClock, RotateCcw, Download } from 'lucide-react';
+import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, UserCheck, CalendarClock, RotateCcw, Download, GitFork } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getLeadScope, getFollowUpScope, canDeleteFollowUp, isLeadAssignedToUser } from '../lib/permissions';
 import { recordActivity, fetchLeadActivities } from '../lib/activities';
@@ -655,55 +655,87 @@ export default function LeadsView({ currentUser, onNavigate }) {
     }
   };
 
-  // Fetch dynamic pipeline stages from Supabase & subscribe to realtime
+  // Multi-Pipeline States
+  const [pipelinesList, setPipelinesList] = useState(() => {
+    try {
+      const cached = localStorage.getItem('crm_cached_pipelines');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return [];
+  });
+  const [activePipelineId, setActivePipelineId] = useState(() => {
+    try {
+      return localStorage.getItem('crm_active_pipeline_id') || null;
+    } catch (e) {}
+    return null;
+  });
+  const [isPipelineDropdownOpen, setIsPipelineDropdownOpen] = useState(false);
+  const [pipelineForms, setPipelineForms] = useState([]);
+  const pipelineDropdownRef = useRef(null);
+
+  // Fetch dynamic pipelines from Supabase & subscribe to realtime
   useEffect(() => {
     let isMounted = true;
 
-    const fetchPipeline = async () => {
+    const fetchPipelines = async () => {
       try {
-        const { data, error } = await supabase
-          .from('pipelines')
-          .select('*')
-          .order('is_default', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const [{ data, error }, { data: formsData }] = await Promise.all([
+          supabase
+            .from('pipelines')
+            .select('*')
+            .order('is_default', { ascending: false }),
+          supabase
+            .from('connected_forms')
+            .select('form_id, form_name, pipeline_id')
+        ]);
 
-        if (!error && isMounted && data?.stages && Array.isArray(data.stages) && data.stages.length > 0) {
-          const sorted = [...data.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-          setColumns(sorted);
+        if (formsData && isMounted) {
+          setPipelineForms(formsData);
+        }
+
+        if (!error && isMounted && data && Array.isArray(data) && data.length > 0) {
+          setPipelinesList(data);
           try {
-            localStorage.setItem('crm_pipeline_columns', JSON.stringify(sorted));
-          } catch (e) { }
-          const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
-          if (entryCol?.id) {
-            setNewLeadStage((prev) => (sorted.some((c) => c.id === prev) ? prev : entryCol.id));
+            localStorage.setItem('crm_cached_pipelines', JSON.stringify(data));
+          } catch (e) {}
+
+          const savedId = localStorage.getItem('crm_active_pipeline_id');
+          const targetPipe = data.find((p) => p.id === (activePipelineId || savedId)) || data.find((p) => p.is_default) || data[0];
+
+          if (targetPipe) {
+            setActivePipelineId(targetPipe.id);
+            try {
+              localStorage.setItem('crm_active_pipeline_id', targetPipe.id);
+            } catch (e) {}
+
+            if (targetPipe.stages && Array.isArray(targetPipe.stages) && targetPipe.stages.length > 0) {
+              const sorted = [...targetPipe.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+              setColumns(sorted);
+              try {
+                localStorage.setItem('crm_pipeline_columns', JSON.stringify(sorted));
+              } catch (e) {}
+              const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
+              if (entryCol?.id) {
+                setNewLeadStage((prev) => (sorted.some((c) => c.id === prev) ? prev : entryCol.id));
+              }
+            }
           }
         }
       } catch (err) {
-        console.warn('Error fetching dynamic pipeline stages:', err);
+        console.warn('Error fetching dynamic pipelines:', err);
       }
     };
 
-    fetchPipeline();
+    fetchPipelines();
 
     const pipeChannel = supabase
       .channel('pipeline-stages-realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'pipelines' },
-        (payload) => {
+        () => {
           if (!isMounted) return;
-          if (payload.new?.stages && Array.isArray(payload.new.stages) && payload.new.stages.length > 0) {
-            const sorted = [...payload.new.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-            setColumns(sorted);
-            try {
-              localStorage.setItem('crm_pipeline_columns', JSON.stringify(sorted));
-            } catch (e) { }
-            const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
-            if (entryCol?.id) {
-              setNewLeadStage((prev) => (sorted.some((c) => c.id === prev) ? prev : entryCol.id));
-            }
-          }
+          fetchPipelines();
         }
       )
       .subscribe();
@@ -713,6 +745,27 @@ export default function LeadsView({ currentUser, onNavigate }) {
       supabase.removeChannel(pipeChannel);
     };
   }, []);
+
+  const handleSelectPipeline = (pipeId) => {
+    setActivePipelineId(pipeId);
+    setIsPipelineDropdownOpen(false);
+    try {
+      localStorage.setItem('crm_active_pipeline_id', pipeId);
+    } catch (e) {}
+
+    const pipe = pipelinesList.find((p) => p.id === pipeId);
+    if (pipe?.stages && Array.isArray(pipe.stages) && pipe.stages.length > 0) {
+      const sorted = [...pipe.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      setColumns(sorted);
+      try {
+        localStorage.setItem('crm_pipeline_columns', JSON.stringify(sorted));
+      } catch (e) {}
+      const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
+      if (entryCol?.id) {
+        setNewLeadStage(entryCol.id);
+      }
+    }
+  };
 
   // Fetch team members from crm_users
   useEffect(() => {
@@ -738,14 +791,17 @@ export default function LeadsView({ currentUser, onNavigate }) {
 
   // Outside click listener to auto-close dropdowns
   useEffect(() => {
-    if (!openDropdownLeadId && !openAssigneeLeadId) return;
-    const handleOutsideClick = () => {
+    if (!openDropdownLeadId && !openAssigneeLeadId && !isPipelineDropdownOpen) return;
+    const handleOutsideClick = (e) => {
       setOpenDropdownLeadId(null);
       setOpenAssigneeLeadId(null);
+      if (pipelineDropdownRef.current && !pipelineDropdownRef.current.contains(e.target)) {
+        setIsPipelineDropdownOpen(false);
+      }
     };
     window.addEventListener('click', handleOutsideClick);
     return () => window.removeEventListener('click', handleOutsideClick);
-  }, [openDropdownLeadId, openAssigneeLeadId]);
+  }, [openDropdownLeadId, openAssigneeLeadId, isPipelineDropdownOpen]);
 
   // New Lead Form State
   const [newLeadName, setNewLeadName] = useState('');
@@ -846,6 +902,26 @@ export default function LeadsView({ currentUser, onNavigate }) {
 
   const filteredLeads = useMemo(() => {
     return leads.filter((lead) => {
+      // Multi-Pipeline Filter
+      if (activePipelineId) {
+        let leadPipeId = lead.pipeline_id;
+        if (!leadPipeId && lead.form_id && pipelineForms.length > 0) {
+          const matchedForm = pipelineForms.find((f) => String(f.form_id) === String(lead.form_id));
+          if (matchedForm?.pipeline_id) {
+            leadPipeId = matchedForm.pipeline_id;
+          }
+        }
+
+        if (leadPipeId) {
+          if (leadPipeId !== activePipelineId) return false;
+        } else {
+          // If lead does not have a pipeline_id and its form is not mapped,
+          // only show in the designated default pipeline
+          const defaultPipeline = pipelinesList.find((p) => p.is_default);
+          if (!defaultPipeline || activePipelineId !== defaultPipeline.id) return false;
+        }
+      }
+
       // If user scope is restricted to assigned leads only
       if (!canViewAllLeads) {
         if (!isLeadAssignedToUser(lead, currentUser)) return false;
@@ -912,7 +988,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
 
       return true;
     });
-  }, [leads, filterType, searchQuery, currentUser, canViewAllLeads, dateFilter, customStartDate, customEndDate]);
+  }, [leads, activePipelineId, pipelineForms, pipelinesList, filterType, searchQuery, currentUser, canViewAllLeads, dateFilter, customStartDate, customEndDate]);
 
   const handleExportCSV = () => {
     if (!filteredLeads || filteredLeads.length === 0) {
@@ -1096,7 +1172,8 @@ export default function LeadsView({ currentUser, onNavigate }) {
       email: newLeadEmail.trim() || `${newLeadName.toLowerCase().replace(/\s+/g, '.')}@client.in`,
       date: todayStr,
       stage: newLeadStage,
-      assigned_to: 'pranav'
+      assigned_to: 'pranav',
+      pipeline_id: activePipelineId || null
     };
 
     // Optimistic ID for instant UI feedback
@@ -1648,6 +1725,49 @@ export default function LeadsView({ currentUser, onNavigate }) {
       {/* Top Controls Toolbar */}
       <div className="leads-toolbar">
         <div className="leads-filters-group">
+          {/* Multi-Pipeline Switcher */}
+          {pipelinesList.length > 1 && (
+            <div className="leads-filter-dropdown-wrap" ref={pipelineDropdownRef}>
+              <button
+                type="button"
+                className={`lead-filter-dropdown-btn ${isPipelineDropdownOpen ? 'active' : ''}`}
+                onClick={() => setIsPipelineDropdownOpen((prev) => !prev)}
+                title="Switch Sales Pipeline"
+                style={{ borderColor: '#cbd5e1' }}
+              >
+                <GitFork size={13} strokeWidth={2} style={{ color: '#2563eb' }} />
+                <span style={{ fontWeight: 600, color: '#0f172a' }}>
+                  {pipelinesList.find((p) => p.id === activePipelineId)?.name || 'Pipeline'}
+                </span>
+                <ChevronDown size={14} strokeWidth={2} className={`filter-chevron ${isPipelineDropdownOpen ? 'open' : ''}`} />
+              </button>
+
+              {isPipelineDropdownOpen && (
+                <div className="lead-filter-dropdown-menu" role="listbox" style={{ minWidth: '160px' }}>
+                  {pipelinesList.map((pipe) => {
+                    const isSelected = activePipelineId === pipe.id;
+                    return (
+                      <button
+                        key={pipe.id}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        className={`lead-filter-dropdown-item ${isSelected ? 'selected' : ''}`}
+                        onClick={() => handleSelectPipeline(pipe.id)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <GitFork size={13} style={{ color: isSelected ? '#ffffff' : '#64748b' }} />
+                          <span>{pipe.name}</span>
+                        </div>
+                        {isSelected && <Check size={13} strokeWidth={2.5} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="leads-filter-dropdown-wrap" ref={filterDropdownRef}>
             <button
               type="button"

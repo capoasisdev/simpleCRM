@@ -16,7 +16,8 @@ create table if not exists public.leads (
   date text,
   stage text not null default 'new',
   assigned_to text default 'pranav',
-  leadgen_id text
+  leadgen_id text,
+  pipeline_id uuid references public.pipelines(id) on delete set null
 );
 
 alter table public.leads enable row level security;
@@ -252,3 +253,35 @@ create policy "Allow public access to crm_todos" on public.crm_todos
 create index if not exists idx_crm_todos_list_id on public.crm_todos(list_id);
 create index if not exists idx_crm_todos_due_date on public.crm_todos(due_date asc);
 alter publication supabase_realtime add table public.crm_todos;
+
+-- 13. CONNECTED LEAD FORMS (Multi-Form Ingestion & Dedicated Routing)
+create table if not exists public.connected_forms (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  updated_at timestamptz default timezone('utc'::text, now()) not null,
+  form_id text not null,
+  form_name text not null,
+  source text default 'meta',
+  page_name text,
+  page_id text,
+  access_token text,
+  pipeline_id uuid references public.pipelines(id) on delete set null,
+  entry_stage_id text default 'new',
+  allocation_mode text default 'inherit_global', -- 'inherit_global' | 'specific_user' | 'round_robin' | 'weighted' | 'unassigned'
+  assigned_to text,
+  user_rules jsonb default '[]'::jsonb,
+  round_robin_index integer default 0,
+  whatsapp_template text,
+  whatsapp_auto_welcome boolean default false,
+  tags text[] default '{}',
+  is_active boolean default true
+);
+
+create unique index if not exists idx_connected_forms_form_id on public.connected_forms(form_id);
+
+alter table public.connected_forms enable row level security;
+drop policy if exists "Allow public access to connected_forms" on public.connected_forms;
+create policy "Allow public access to connected_forms" on public.connected_forms
+  for all using (true) with check (true);
+
+alter publication supabase_realtime add table public.connected_forms;

@@ -505,3 +505,352 @@
     transform: translateY(0);
   }
 }
+
+/* ==========================================================================
+   Multi-Pipeline Switcher & Attached Forms
+   ========================================================================== */
+
+.pipeline-switcher-container {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.pipeline-tabs-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #f4f4f5;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.pipeline-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: #71717a;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.pipeline-tab-btn:hover {
+  color: #09090b;
+}
+
+.pipeline-tab-btn.active {
+  background-color: #ffffff;
+  color: #09090b;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.pipeline-default-pill {
+  font-size: 10px;
+  padding: 1px 5px;
+  background-color: #e4e4e7;
+  color: #52525b;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.pipeline-tab-btn.active .pipeline-default-pill {
+  background-color: #f4f4f5;
+  color: #18181b;
+}
+
+.pipeline-add-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: #71717a;
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pipeline-add-tab-btn:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+  color: #09090b;
+}
+
+.pipeline-new-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: #ffffff;
+  padding: 2px 6px;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.pipeline-new-input {
+  border: none;
+  outline: none;
+  font-size: 12.5px;
+  color: #09090b;
+  padding: 4px 6px;
+  width: 140px;
+  background: transparent;
+}
+
+.pipeline-new-submit-btn,
+.pipeline-new-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+  color: #71717a;
+  transition: all 0.15s ease;
+}
+
+.pipeline-new-submit-btn:hover:not(:disabled) {
+  background-color: #09090b;
+  color: #ffffff;
+}
+
+.pipeline-new-cancel-btn:hover {
+  background-color: #f4f4f5;
+  color: #ef4444;
+}
+
+/* Pipeline Name Edit in Header */
+.pipeline-title-edit-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pipeline-title-input {
+  font-size: 18px;
+  font-weight: 600;
+  color: #09090b;
+  letter-spacing: -0.02em;
+  border: 1px solid #e4e4e7;
+  border-radius: 6px;
+  padding: 2px 8px;
+  outline: none;
+  background: #ffffff;
+}
+
+.pipeline-title-input:focus {
+  border-color: #09090b;
+}
+
+.pipeline-title-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: #a1a1aa;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pipeline-title-action-btn:hover {
+  background-color: #f4f4f5;
+  color: #09090b;
+}
+
+.pipeline-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid #fee2e2;
+  background: #fff5f5;
+  color: #ef4444;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pipeline-delete-btn:hover {
+  background-color: #fee2e2;
+}
+
+/* Attached Forms Card */
+.pipeline-attached-forms-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background-color: #fafafa;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  gap: 12px;
+}
+
+.pipeline-attached-forms-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.pipeline-attached-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #52525b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.pipeline-attached-empty {
+  font-size: 12.5px;
+  color: #a1a1aa;
+  font-style: italic;
+}
+
+.pipeline-forms-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pipeline-form-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background-color: #ffffff;
+  border: 1px solid #e4e4e7;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #18181b;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.pipeline-form-chip.active-single {
+  background-color: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
+}
+
+.pipeline-form-chip-name {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.pipeline-form-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: #93c5fd;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.pipeline-form-chip-remove:hover {
+  background-color: #fee2e2;
+  color: #ef4444;
+}
+
+.pipeline-form-chip-remove:hover {
+  background-color: #fee2e2;
+  color: #ef4444;
+}
+
+.pipeline-attach-dropdown-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.btn-attach-form-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #e4e4e7;
+  background-color: #ffffff;
+  color: #3f3f46;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-attach-form-trigger:hover {
+  background-color: #f4f4f5;
+  color: #09090b;
+}
+
+.pipeline-attach-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 260px;
+  background-color: #ffffff;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  padding: 6px;
+  z-index: 50;
+}
+
+.pipeline-attach-dropdown-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #71717a;
+  padding: 6px 8px 4px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pipeline-attach-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.pipeline-attach-dropdown-item:hover {
+  background-color: #f4f4f5;
+}
+
+.pipeline-attach-dropdown-item.selected {
+  background-color: #f0fdf4;
+}
