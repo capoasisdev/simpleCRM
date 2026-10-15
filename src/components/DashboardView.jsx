@@ -3,12 +3,10 @@ import {
   LayoutDashboard,
   UserCheck,
   Briefcase,
-  Building2,
   Users,
   Calendar,
   CalendarCheck,
   GitFork,
-  BarChart3,
   Settings,
   Bell,
   Plus,
@@ -22,21 +20,22 @@ import {
   PhoneCall,
   FileText,
   Mail,
-  ShieldCheck,
   IndianRupee,
   X,
   Plug,
   GitBranch,
-  UploadCloud
+  UploadCloud,
+  Zap
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { hasPermission } from '../lib/permissions';
+import { hasPermission, getDashboardScope } from '../lib/permissions';
+import { getStoredActivities } from '../lib/activities';
 import LeadsView from './LeadsView';
 import AdminUsersView from './AdminUsersView';
 import MetaIntegrationView from './MetaIntegrationView';
-import LeadRoutingView from './LeadRoutingView';
 import PipelineSettingsView from './PipelineSettingsView';
 import CsvImportView from './CsvImportView';
+import AutomationsView from './AutomationsView';
 import Skeleton from './common/Skeleton';
 import '../styles/dashboard.css';
 
@@ -49,6 +48,10 @@ export default function DashboardView({ currentUser, onLogout }) {
 
   const isAdmin = user.role === 'admin' || hasPermission(user, 'admin', 'manage_users');
   const canViewDashboard = hasPermission(user, 'dashboard', 'view');
+  const canViewDashboardDeals = hasPermission(user, 'dashboard', 'view_deals');
+  const canViewDashboardActivity = hasPermission(user, 'dashboard', 'view_activity');
+  const dashboardScope = getDashboardScope(user);
+  const isDashboardGlobal = isAdmin || dashboardScope === 'all';
   const canViewLeads = hasPermission(user, 'leads', 'view');
   const canViewPipelines = hasPermission(user, 'pipeline', 'view');
   const canManageUsers = hasPermission(user, 'admin', 'manage_users');
@@ -60,12 +63,6 @@ export default function DashboardView({ currentUser, onLogout }) {
   const TAB_ROUTES = {
     dashboard: 'Dashboard',
     leads: 'Leads',
-    deals: 'Deals',
-    accounts: 'Accounts',
-    contacts: 'Contacts',
-    pipelines: 'Pipelines',
-    activities: 'Activities',
-    reports: 'Reports',
     admin: 'Admin'
   };
 
@@ -83,10 +80,17 @@ export default function DashboardView({ currentUser, onLogout }) {
     }
     if (path.startsWith('/admin')) {
       const parts = path.split('/').filter(Boolean);
-      const sub = parts[1] || 'users';
+      let sub = parts[1] || 'users';
+      if (sub === 'routing') sub = 'automations';
       return { tab: 'Admin', adminSub: sub };
     }
     const clean = path.replace(/^\//, '');
+    if (clean === 'pipelines') {
+      return { tab: 'Admin', adminSub: 'stages' };
+    }
+    if (clean === 'automations') {
+      return { tab: 'Admin', adminSub: 'automations' };
+    }
     const matched = TAB_ROUTES[clean];
     if (matched) {
       return { tab: matched, adminSub: 'users' };
@@ -104,7 +108,9 @@ export default function DashboardView({ currentUser, onLogout }) {
   })();
 
   const [activeTab, setActiveTab] = useState(validInitialTab);
-  const [adminSubTab, setAdminSubTab] = useState(initialLoc.adminSub || (canManageUsers ? 'users' : 'routing'));
+  const [adminSubTab, setAdminSubTab] = useState(
+    initialLoc.adminSub === 'routing' ? 'automations' : (initialLoc.adminSub || (canManageUsers ? 'users' : 'automations'))
+  );
 
   const navigateTo = (tabName, subTab = 'users') => {
     setActiveTab(tabName);
@@ -140,6 +146,7 @@ export default function DashboardView({ currentUser, onLogout }) {
   // Dynamic Supabase data states
   const [leads, setLeads] = useState([]);
   const [deals, setDeals] = useState([]);
+  const [activities, setActivities] = useState(() => getStoredActivities());
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isDealModalOpen, setIsDealModalOpen] = useState(false);
   const [isSubmittingDeal, setIsSubmittingDeal] = useState(false);
@@ -217,6 +224,66 @@ export default function DashboardView({ currentUser, onLogout }) {
     };
   }, []);
 
+  // Subscribe to real-time activity events
+  useEffect(() => {
+    const handleActivityLogged = (e) => {
+      if (e.detail) {
+        setActivities((prev) => [e.detail, ...prev.filter((a) => a.id !== e.detail.id)].slice(0, 50));
+      }
+    };
+    window.addEventListener('crm-activity-logged', handleActivityLogged);
+
+    const handleStorage = (e) => {
+      if (e.key === 'crm_lead_activities') {
+        setActivities(getStoredActivities());
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // Optional: fetch recent activities from Supabase
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('lead_activities')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(30);
+        if (data && data.length > 0) {
+          setActivities((prev) => {
+            const map = new Map();
+            [...prev, ...data].forEach((item) => {
+              if (item.id) map.set(item.id, item);
+            });
+            return Array.from(map.values()).sort(
+              (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
+            );
+          });
+        }
+      } catch (err) {
+        // Table might not exist yet
+      }
+    })();
+
+    return () => {
+      window.removeEventListener('crm-activity-logged', handleActivityLogged);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
+  // Format relative time for activities
+  const formatRelativeTime = (timestamp) => {
+    if (!timestamp) return 'Recently';
+    const diff = Date.now() - new Date(timestamp).getTime();
+    if (isNaN(diff) || diff < 0) return 'Recently';
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  };
+
   // Format INR currency values
   const formatINR = (val) => {
     const num = Number(val);
@@ -230,32 +297,55 @@ export default function DashboardView({ currentUser, onLogout }) {
     return `₹${num.toLocaleString('en-IN')}`;
   };
 
-  // Pipeline metrics computed dynamically
+  // Scoped leads & deals based on user permissions
+  const scopedLeads = useMemo(() => {
+    if (isDashboardGlobal) return leads;
+    const userName = (user.name || '').toLowerCase().trim();
+    const userEmail = (user.email || '').toLowerCase().trim();
+    const userId = (user.id || '').toLowerCase().trim();
+    return leads.filter((l) => {
+      const assigned = (l.assigned_to || l.assignedTo || '').toLowerCase().trim();
+      return assigned && (assigned === userName || assigned === userEmail || (userId && assigned === userId));
+    });
+  }, [leads, isDashboardGlobal, user]);
+
+  const scopedDeals = useMemo(() => {
+    if (isDashboardGlobal) return deals;
+    const userName = (user.name || '').toLowerCase().trim();
+    const userEmail = (user.email || '').toLowerCase().trim();
+    const userId = (user.id || '').toLowerCase().trim();
+    return deals.filter((d) => {
+      const assigned = (d.assigned_to || d.assignedTo || d.owner || '').toLowerCase().trim();
+      return assigned && (assigned === userName || assigned === userEmail || (userId && assigned === userId));
+    });
+  }, [deals, isDashboardGlobal, user]);
+
+  // Pipeline metrics computed dynamically from scoped deals
   const pipelineMetrics = useMemo(() => {
-    const totalVal = deals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
-    const activeCount = deals.filter((d) => d.stage !== 'Closed Lost').length;
-    const closedWonCount = deals.filter((d) => d.stage === 'Closed Won').length;
-    const winRate = deals.length > 0 ? Math.round((closedWonCount / deals.length) * 100) : 0;
+    const totalVal = scopedDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
+    const activeCount = scopedDeals.filter((d) => d.stage !== 'Closed Lost').length;
+    const closedWonCount = scopedDeals.filter((d) => d.stage === 'Closed Won').length;
+    const winRate = scopedDeals.length > 0 ? Math.round((closedWonCount / scopedDeals.length) * 100) : 0;
 
     return {
       totalValFormatted: formatINR(totalVal),
       activeDealsCount: activeCount,
       winRateFormatted: `${winRate}%`
     };
-  }, [deals]);
+  }, [scopedDeals]);
 
-  // Lead conversion metrics computed dynamically from leads
+  // Lead conversion metrics computed dynamically from scoped leads
   const conversionMetrics = useMemo(() => {
-    const totalLeads = leads.length;
-    const contactedCount = leads.filter((l) => l.stage === 'contacted').length;
-    const qualifiedCount = leads.filter((l) => l.stage === 'qualified').length;
-    const proposalCount = leads.filter((l) => l.stage === 'proposal').length;
+    const totalLeads = scopedLeads.length;
+    const contactedCount = scopedLeads.filter((l) => l.stage === 'contacted').length;
+    const qualifiedCount = scopedLeads.filter((l) => l.stage === 'qualified').length;
+    const proposalCount = scopedLeads.filter((l) => l.stage === 'proposal').length;
 
     return [
       {
-        label: 'Inbound Leads',
+        label: isDashboardGlobal ? 'Inbound Leads' : 'My Leads',
         count: totalLeads,
-        sub: totalLeads > 0 ? '100% total pool' : '0 leads'
+        sub: totalLeads > 0 ? (isDashboardGlobal ? '100% total pool' : '100% assigned') : '0 leads'
       },
       {
         label: 'Contacted',
@@ -273,35 +363,69 @@ export default function DashboardView({ currentUser, onLogout }) {
         sub: totalLeads > 0 ? `${Math.round((proposalCount / totalLeads) * 100)}% converted` : '0% converted'
       }
     ];
-  }, [leads]);
+  }, [scopedLeads, isDashboardGlobal]);
 
   // Filtered deals for current tab ('Today', 'This Week', 'This Month')
   const filteredDeals = useMemo(() => {
-    return deals.filter((d) => (d.period || 'Today') === dealFilter);
-  }, [deals, dealFilter]);
+    return scopedDeals.filter((d) => (d.period || 'Today') === dealFilter);
+  }, [scopedDeals, dealFilter]);
 
-  // Recent dynamic activity feed from leads and deals
+  // Recent dynamic activity feed from scoped activities, leads, and deals
   const dynamicActivities = useMemo(() => {
     const items = [];
-    deals.slice(0, 3).forEach((d) => {
+    const userName = (user.name || '').toLowerCase().trim();
+    const userEmail = (user.email || '').toLowerCase().trim();
+    const userId = (user.id || '').toLowerCase().trim();
+
+    // 1. Pipeline Stage Change Activities
+    const scopedActivities = isDashboardGlobal
+      ? activities
+      : activities.filter((act) => {
+          const assigned = (act.assigned_to || '').toLowerCase().trim();
+          return !assigned || assigned === userName || assigned === userEmail || (userId && assigned === userId);
+        });
+
+    scopedActivities.forEach((act) => {
+      items.push({
+        id: act.id,
+        icon: GitBranch,
+        sortTime: new Date(act.created_at || Date.now()).getTime(),
+        text: (
+          <>
+            Stage changed: <strong>{act.lead_name}</strong> moved to <strong>{act.to_stage}</strong>
+          </>
+        ),
+        time: formatRelativeTime(act.created_at)
+      });
+    });
+
+    // 2. Deals Activities
+    scopedDeals.slice(0, 3).forEach((d) => {
       items.push({
         id: `deal-${d.id}`,
         icon: Briefcase,
+        sortTime: new Date(d.created_at || Date.now()).getTime() - 60000,
         text: (
           <>
             Deal in {d.stage}: <strong>{d.company}</strong> for {formatINR(d.value)}
           </>
         ),
-        time: 'Recently'
+        time: d.created_at ? formatRelativeTime(d.created_at) : 'Recently'
       });
     });
 
-    leads.slice(0, 3).forEach((l) => {
+    // 3. Inbound Leads Assigned Activities
+    scopedLeads.slice(0, 3).forEach((l) => {
+      let sortTime = Date.now() - 120000;
       let formattedTime = 'Recently';
-      if (l.date) {
+      if (l.created_at) {
+        sortTime = new Date(l.created_at).getTime();
+        formattedTime = formatRelativeTime(l.created_at);
+      } else if (l.date) {
         if (/^\d{4}-\d{2}-\d{2}$/.test(l.date)) {
           const [y, m, d] = l.date.split('-');
           formattedTime = `${d}/${m}/${y}`;
+          sortTime = new Date(l.date).getTime();
         } else {
           formattedTime = l.date;
         }
@@ -310,6 +434,7 @@ export default function DashboardView({ currentUser, onLogout }) {
       items.push({
         id: `lead-${l.id}`,
         icon: UserCheck,
+        sortTime,
         text: (
           <>
             Inbound lead assigned: <strong>{l.name}</strong>
@@ -319,8 +444,9 @@ export default function DashboardView({ currentUser, onLogout }) {
       });
     });
 
-    return items.slice(0, 5);
-  }, [leads, deals]);
+    // Sort newest first and limit to top 6
+    return items.sort((a, b) => b.sortTime - a.sortTime).slice(0, 6);
+  }, [scopedLeads, scopedDeals, activities, isDashboardGlobal, user]);
 
   // Create new deal in Supabase
   const handleCreateDeal = async (e) => {
@@ -399,8 +525,8 @@ export default function DashboardView({ currentUser, onLogout }) {
                 <span className="breadcrumb-current">
                   {adminSubTab === 'integrations'
                     ? 'Integrations'
-                    : adminSubTab === 'routing'
-                    ? 'Lead Routing'
+                    : adminSubTab === 'automations'
+                    ? 'Automations'
                     : adminSubTab === 'users'
                     ? 'Users'
                     : adminSubTab.charAt(0).toUpperCase() + adminSubTab.slice(1)}
@@ -460,66 +586,13 @@ export default function DashboardView({ currentUser, onLogout }) {
         >
           <div>
             <div className="nav-section">
-              <div className="nav-section-title">Main</div>
               <ul className="nav-list">
                 {[
                   canViewDashboard && { name: 'Dashboard', icon: LayoutDashboard },
-                  canViewLeads && { name: 'Leads', icon: UserCheck },
-                  { name: 'Deals', icon: Briefcase }
+                  canViewLeads && { name: 'Leads', icon: UserCheck }
                 ]
                   .filter(Boolean)
                   .map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <li key={item.name}>
-                      <button
-                        type="button"
-                        className={`nav-item-btn ${activeTab === item.name ? 'active' : ''}`}
-                        onClick={() => navigateTo(item.name)}
-                        title={item.name}
-                      >
-                        <Icon size={20} strokeWidth={1.75} />
-                        <span>{item.name}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-
-            <div className="nav-section">
-              <div className="nav-section-title">Work</div>
-              <ul className="nav-list">
-                {[
-                  { name: 'Accounts', icon: Building2 },
-                  { name: 'Contacts', icon: Users },
-                  ...(canViewPipelines ? [{ name: 'Pipelines', icon: GitFork }] : []),
-                  { name: 'Activities', icon: Calendar }
-                ].map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <li key={item.name}>
-                      <button
-                        type="button"
-                        className={`nav-item-btn ${activeTab === item.name ? 'active' : ''}`}
-                        onClick={() => navigateTo(item.name)}
-                        title={item.name}
-                      >
-                        <Icon size={20} strokeWidth={1.75} />
-                        <span>{item.name}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-
-            <div className="nav-section">
-              <div className="nav-section-title">Analytics</div>
-              <ul className="nav-list">
-                {[
-                  { name: 'Reports', icon: BarChart3 }
-                ].map((item) => {
                   const Icon = item.icon;
                   return (
                     <li key={item.name}>
@@ -627,57 +700,61 @@ export default function DashboardView({ currentUser, onLogout }) {
                 </section>
 
                 {/* Card 2: Recent Deals (Dynamic) */}
-                <section className="dashboard-card" aria-label="Recent Deals">
-                  <div className="card-header-row">
-                    <div className="card-title-group">
-                      <Briefcase size={18} strokeWidth={1.5} />
-                      <h2 className="card-title">Recent Deals</h2>
-                    </div>
-                    <button type="button" className="card-action-link">Company wide</button>
-                  </div>
-
-                  <div className="filter-tabs-row" role="tablist">
-                    {['Today', 'This Week', 'This Month'].map((tab) => (
-                      <button
-                        key={tab}
-                        type="button"
-                        role="tab"
-                        className={`filter-tab-btn ${dealFilter === tab ? 'active' : ''}`}
-                        onClick={() => setDealFilter(tab)}
-                      >
-                        {tab}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="deals-list">
-                    {isLoadingData ? (
-                      [1, 2, 3].map((i) => (
-                        <div key={i} className="deal-row-skeleton">
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                            <Skeleton width="130px" height="15px" />
-                            <Skeleton width="75px" height="11px" />
-                          </div>
-                          <Skeleton width="68px" height="20px" borderRadius="10px" />
-                        </div>
-                      ))
-                    ) : filteredDeals.length > 0 ? (
-                      filteredDeals.map((deal) => (
-                        <div key={deal.id || deal.company} className="deal-row fade-in-row">
-                          <div>
-                            <div className="deal-company">{deal.company}</div>
-                            <div className="deal-stage">{deal.stage}</div>
-                          </div>
-                          <div className="deal-value">{formatINR(deal.value)}</div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="deals-empty-state">
-                        No deals recorded for {dealFilter.toLowerCase()}
+                {canViewDashboardDeals && (
+                  <section className="dashboard-card" aria-label="Recent Deals">
+                    <div className="card-header-row">
+                      <div className="card-title-group">
+                        <Briefcase size={18} strokeWidth={1.5} />
+                        <h2 className="card-title">Recent Deals</h2>
                       </div>
-                    )}
-                  </div>
-                </section>
+                      <span className="card-action-link" style={{ cursor: 'default' }}>
+                        {isDashboardGlobal ? 'Company wide' : 'Assigned to me'}
+                      </span>
+                    </div>
+
+                    <div className="filter-tabs-row" role="tablist">
+                      {['Today', 'This Week', 'This Month'].map((tab) => (
+                        <button
+                          key={tab}
+                          type="button"
+                          role="tab"
+                          className={`filter-tab-btn ${dealFilter === tab ? 'active' : ''}`}
+                          onClick={() => setDealFilter(tab)}
+                        >
+                          {tab}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="deals-list">
+                      {isLoadingData ? (
+                        [1, 2, 3].map((i) => (
+                          <div key={i} className="deal-row-skeleton">
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <Skeleton width="130px" height="15px" />
+                              <Skeleton width="75px" height="11px" />
+                            </div>
+                            <Skeleton width="68px" height="20px" borderRadius="10px" />
+                          </div>
+                        ))
+                      ) : filteredDeals.length > 0 ? (
+                        filteredDeals.map((deal) => (
+                          <div key={deal.id || deal.company} className="deal-row fade-in-row">
+                            <div>
+                              <div className="deal-company">{deal.company}</div>
+                              <div className="deal-stage">{deal.stage}</div>
+                            </div>
+                            <div className="deal-value">{formatINR(deal.value)}</div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="deals-empty-state">
+                          No deals recorded for {dealFilter.toLowerCase()}
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
 
                 {/* Card 3: Tasks Overview */}
                 <section className="dashboard-card tasks-card" aria-label="Tasks Overview">
@@ -736,7 +813,9 @@ export default function DashboardView({ currentUser, onLogout }) {
                       <UserCheck size={18} strokeWidth={1.5} />
                       <h2 className="card-title">Lead Conversion</h2>
                     </div>
-                    <button type="button" className="card-action-link">This Month</button>
+                    <button type="button" className="card-action-link">
+                      {isDashboardGlobal ? 'Company wide' : 'Assigned to me'}
+                    </button>
                   </div>
 
                   <div className="conversion-tiles-grid">
@@ -825,12 +904,10 @@ export default function DashboardView({ currentUser, onLogout }) {
                 <ul className="settings-subnav-list">
                   {[
                     ...(canManageUsers || user.role === 'admin' ? [{ id: 'users', label: 'Users', icon: Users }] : []),
-                    ...(canManageRouting || user.role === 'admin' ? [{ id: 'routing', label: 'Lead Routing', icon: GitBranch }] : []),
                     ...(user.role === 'admin' ? [{ id: 'import', label: 'Import Leads', icon: UploadCloud }] : []),
+                    ...(canManageMeta || user.role === 'admin' ? [{ id: 'automations', label: 'Automations', icon: Zap }] : []),
                     ...(canManageMeta || user.role === 'admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
-                    { id: 'company', label: 'Company', icon: Building2 },
-                    ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : []),
-                    { id: 'security', label: 'Security', icon: ShieldCheck }
+                    ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : [])
                   ].map((sub) => {
                     const SubIcon = sub.icon;
                     return (
@@ -854,28 +931,19 @@ export default function DashboardView({ currentUser, onLogout }) {
                 {adminSubTab === 'users' && (canManageUsers || user.role === 'admin') && (
                   <AdminUsersView currentUser={user} onLogout={onLogout} />
                 )}
-                {adminSubTab === 'routing' && (canManageRouting || user.role === 'admin') && <LeadRoutingView />}
                 {adminSubTab === 'import' && user.role === 'admin' && (
                   <CsvImportView currentUser={user} onNavigate={navigateTo} />
                 )}
+                {adminSubTab === 'automations' && <AutomationsView currentUser={user} />}
                 {adminSubTab === 'integrations' && (canManageMeta || user.role === 'admin') && (
                   <MetaIntegrationView currentUser={user} />
                 )}
                 {adminSubTab === 'stages' && <PipelineSettingsView currentUser={user} />}
-                {(adminSubTab === 'company' || adminSubTab === 'security') && (
-                  <div className="tab-placeholder-view">
-                    <h2 className="placeholder-title">
-                      {adminSubTab === 'company' ? 'Company' : 'Security'}
-                    </h2>
-                    <p className="placeholder-desc">This section is currently under development.</p>
-                  </div>
-                )}
               </div>
             </div>
           )}
 
-          {activeTab === 'Pipelines' && <PipelineSettingsView currentUser={user} />}
-          {activeTab !== 'Dashboard' && activeTab !== 'Leads' && activeTab !== 'Admin' && activeTab !== 'Pipelines' && (
+          {activeTab !== 'Dashboard' && activeTab !== 'Leads' && activeTab !== 'Admin' && (
             <div className="tab-placeholder-view">
               <h2 className="placeholder-title">{activeTab}</h2>
               <p className="placeholder-desc">This section is currently under development.</p>
@@ -885,7 +953,7 @@ export default function DashboardView({ currentUser, onLogout }) {
         </main>
 
         {/* Right Sidebar - Activity Feed (Dynamic) */}
-        {activeTab === 'Dashboard' && (
+        {activeTab === 'Dashboard' && canViewDashboardActivity && (
           <aside className="dashboard-sidebar-right" aria-label="Recent CRM Activity Feed">
             <div className="right-sidebar-title-row">
               <Activity size={18} strokeWidth={1.5} />

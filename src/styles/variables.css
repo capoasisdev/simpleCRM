@@ -29,7 +29,7 @@
   --bg-main: ghostwhite; /* Main section background */
   --bg-card: #ffffff;
   --card-shadow: 0 10px 15px -3px #00000014, 0 4px 6px -4px #00000014;
-  --border-main-section: 1px solid rgb(211, 211, 211);
+  --border-main-section: 1px solid rgb(150 150 150);
   --radius-main-corner: 10px;
 
   --btn-primary-bg: #141416;

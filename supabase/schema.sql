@@ -90,7 +90,12 @@ create table if not exists public.meta_config (
   lead_form_ids text[] default '{}',
   is_connected boolean default false,
   connected_page_name text,
-  connected_account_name text
+  connected_account_name text,
+  whatsapp_phone_number_id text,
+  whatsapp_business_account_id text,
+  whatsapp_access_token text,
+  whatsapp_template text default 'salado_lead_welcome',
+  whatsapp_auto_welcome boolean default false
 );
 
 alter table public.meta_config enable row level security;
@@ -128,4 +133,56 @@ alter table public.pipelines enable row level security;
 
 create policy "Allow public access to pipelines" on public.pipelines
   for all using (true) with check (true);
+
+-- 8. LEAD & PIPELINE ACTIVITIES TABLE
+create table if not exists public.lead_activities (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  lead_id uuid references public.leads(id) on delete cascade,
+  lead_name text not null,
+  type text not null default 'stage_change',
+  from_stage text,
+  to_stage text,
+  assigned_to text,
+  user_name text,
+  details text
+);
+
+alter table public.lead_activities enable row level security;
+
+drop policy if exists "Allow public access to lead_activities" on public.lead_activities;
+create policy "Allow public access to lead_activities" on public.lead_activities
+  for all using (true) with check (true);
+
+create index if not exists idx_lead_activities_lead_id on public.lead_activities(lead_id);
+alter publication supabase_realtime add table public.lead_activities;
+
+-- 9. FOLLOW-UPS TABLE
+create table if not exists public.follow_ups (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  lead_id uuid references public.leads(id) on delete cascade,
+  lead_name text not null,
+  lead_phone text,
+  lead_email text,
+  title text not null,
+  description text,
+  due_date timestamptz not null,
+  status text not null default 'pending', -- 'pending' | 'completed'
+  completed_at timestamptz,
+  created_by text
+);
+
+alter table public.follow_ups enable row level security;
+
+drop policy if exists "Allow public access to follow_ups" on public.follow_ups;
+create policy "Allow public access to follow_ups" on public.follow_ups
+  for all using (true) with check (true);
+
+create index if not exists idx_follow_ups_due_date on public.follow_ups(due_date asc);
+create index if not exists idx_follow_ups_lead_id on public.follow_ups(lead_id);
+create index if not exists idx_follow_ups_status on public.follow_ups(status);
+
+alter publication supabase_realtime add table public.follow_ups;
+
 

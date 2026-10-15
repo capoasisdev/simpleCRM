@@ -51,7 +51,12 @@ export default function MetaIntegrationView({ currentUser }) {
       lead_form_ids: '',
       is_connected: false,
       connected_page_name: '',
-      connected_account_name: ''
+      connected_account_name: '',
+      whatsapp_phone_number_id: '',
+      whatsapp_business_account_id: '',
+      whatsapp_access_token: '',
+      whatsapp_template: 'salado_lead_welcome',
+      whatsapp_auto_welcome: false
     };
   });
 
@@ -93,7 +98,12 @@ export default function MetaIntegrationView({ currentUser }) {
             lead_form_ids: (data.lead_form_ids || []).join(', '),
             is_connected: data.is_connected || false,
             connected_page_name: data.connected_page_name || '',
-            connected_account_name: data.connected_account_name || ''
+            connected_account_name: data.connected_account_name || '',
+            whatsapp_phone_number_id: data.whatsapp_phone_number_id || '',
+            whatsapp_business_account_id: data.whatsapp_business_account_id || '',
+            whatsapp_access_token: data.whatsapp_access_token || '',
+            whatsapp_template: data.whatsapp_template || 'salado_lead_welcome',
+            whatsapp_auto_welcome: Boolean(data.whatsapp_auto_welcome)
           };
           setConfig(newConf);
           try {
@@ -128,10 +138,15 @@ export default function MetaIntegrationView({ currentUser }) {
       access_token: config.access_token.trim(),
       verify_token: config.verify_token.trim(),
       ad_account_id: config.ad_account_id.trim(),
-      lead_form_ids: config.lead_form_ids
+      lead_form_ids: (config.lead_form_ids || '')
         .split(',')
         .map(s => s.trim())
         .filter(Boolean),
+      whatsapp_phone_number_id: (config.whatsapp_phone_number_id || '').trim(),
+      whatsapp_business_account_id: (config.whatsapp_business_account_id || '').trim(),
+      whatsapp_access_token: (config.whatsapp_access_token || '').trim(),
+      whatsapp_template: (config.whatsapp_template || '').trim() || 'salado_lead_welcome',
+      whatsapp_auto_welcome: Boolean(config.whatsapp_auto_welcome),
       updated_at: new Date().toISOString()
     };
 
@@ -671,7 +686,6 @@ export default function MetaIntegrationView({ currentUser }) {
             )}
           </div>
         )}
-
         {/* Webhook Info */}
         <div className="meta-card">
           <h2 className="meta-card-title">Webhook Configuration</h2>

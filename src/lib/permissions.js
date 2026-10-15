@@ -15,7 +15,10 @@ export const DEFAULT_MEMBER_PERMISSIONS = {
     delete: false
   },
   dashboard: {
-    view: true
+    scope: 'assigned', // 'assigned' | 'all'
+    view: true,
+    view_deals: true,
+    view_activity: true
   },
   admin: {
     manage_users: false,
@@ -37,7 +40,10 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
     delete: true
   },
   dashboard: {
-    view: true
+    scope: 'all',
+    view: true,
+    view_deals: true,
+    view_activity: true
   },
   admin: {
     manage_users: true,
@@ -79,7 +85,10 @@ export function normalizePermissions(user) {
         delete: raw.pipeline?.delete === true
       },
       dashboard: {
-        view: raw.dashboard?.view !== false
+        scope: raw.dashboard?.scope === 'all' ? 'all' : (raw.leads?.scope === 'all' ? 'all' : 'assigned'),
+        view: raw.dashboard?.view !== false,
+        view_deals: raw.dashboard?.view_deals !== false,
+        view_activity: raw.dashboard?.view_activity !== false
       },
       admin: {
         manage_users: raw.admin?.manage_users === true || raw.manage_users === true,
@@ -90,7 +99,6 @@ export function normalizePermissions(user) {
   }
 
   // Fallback migration for legacy flat permissions:
-  // e.g. { view_dashboard: true, manage_leads: true, manage_deals: true, manage_users: false }
   return {
     leads: {
       scope: 'assigned',
@@ -104,7 +112,10 @@ export function normalizePermissions(user) {
       delete: false
     },
     dashboard: {
-      view: raw.view_dashboard !== false
+      scope: 'assigned',
+      view: raw.view_dashboard !== false,
+      view_deals: true,
+      view_activity: true
     },
     admin: {
       manage_users: raw.manage_users === true,
@@ -136,6 +147,7 @@ export function hasPermission(user, section, action) {
   }
 
   if (section === 'dashboard') {
+    if (action === 'all_data') return perms.dashboard?.scope === 'all';
     return perms.dashboard?.[action] !== false;
   }
 
@@ -154,4 +166,14 @@ export function getLeadScope(user) {
   if (user.role === 'admin') return 'all';
   const perms = normalizePermissions(user);
   return perms.leads?.scope || 'assigned';
+}
+
+/**
+ * Get dashboard visibility scope: 'assigned' or 'all'
+ */
+export function getDashboardScope(user) {
+  if (!user) return 'assigned';
+  if (user.role === 'admin') return 'all';
+  const perms = normalizePermissions(user);
+  return perms.dashboard?.scope || 'assigned';
 }

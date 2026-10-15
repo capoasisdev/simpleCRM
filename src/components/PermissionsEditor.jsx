@@ -146,7 +146,15 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
             <span className="perm-module-name">Dashboard</span>
           </div>
           <div className="perm-td-scope">
-            <span className="perm-scope-na">—</span>
+            <select
+              value={perms.dashboard.scope || 'assigned'}
+              onChange={(e) => updateSection('dashboard', { scope: e.target.value })}
+              disabled={isAdmin}
+              className="perm-scope-select"
+            >
+              <option value="assigned">Only Assigned</option>
+              <option value="all">Company-wide</option>
+            </select>
           </div>
           <div className="perm-td-actions">
             <label className="perm-pill-checkbox">
@@ -156,7 +164,25 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
                 onChange={(e) => updateSection('dashboard', { view: e.target.checked })}
                 disabled={isAdmin}
               />
-              <span>View Metrics</span>
+              <span>View</span>
+            </label>
+            <label className="perm-pill-checkbox">
+              <input
+                type="checkbox"
+                checked={perms.dashboard.view_deals !== false}
+                onChange={(e) => updateSection('dashboard', { view_deals: e.target.checked })}
+                disabled={isAdmin}
+              />
+              <span>Deals</span>
+            </label>
+            <label className="perm-pill-checkbox">
+              <input
+                type="checkbox"
+                checked={perms.dashboard.view_activity !== false}
+                onChange={(e) => updateSection('dashboard', { view_activity: e.target.checked })}
+                disabled={isAdmin}
+              />
+              <span>Activity</span>
             </label>
           </div>
         </div>
