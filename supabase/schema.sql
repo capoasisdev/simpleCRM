@@ -185,4 +185,70 @@ create index if not exists idx_follow_ups_status on public.follow_ups(status);
 
 alter publication supabase_realtime add table public.follow_ups;
 
+-- 10. CRM BACKUPS TABLE (Rolling 7-day backups)
+create table if not exists public.crm_backups (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  backup_name text not null,
+  backup_type text not null default 'auto', -- 'auto' | 'manual'
+  record_counts jsonb not null default '{}'::jsonb,
+  file_size_bytes integer default 0,
+  created_by text default 'system',
+  payload jsonb not null default '{}'::jsonb
+);
 
+alter table public.crm_backups enable row level security;
+
+drop policy if exists "Allow public access to crm_backups" on public.crm_backups;
+create policy "Allow public access to crm_backups" on public.crm_backups
+  for all using (true) with check (true);
+
+create index if not exists idx_crm_backups_created_at on public.crm_backups(created_at desc);
+alter publication supabase_realtime add table public.crm_backups;
+
+-- 11. CRM TO-DO LISTS & CUSTOM PIPELINES TABLE
+create table if not exists public.crm_todo_lists (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  name text not null,
+  description text,
+  stages jsonb not null default '[
+    {"id": "todo", "name": "To Do", "color": "#64748b"},
+    {"id": "in_progress", "name": "In Progress", "color": "#3b82f6"},
+    {"id": "done", "name": "Done", "color": "#10b981"}
+  ]'::jsonb,
+  created_by text
+);
+
+alter table public.crm_todo_lists enable row level security;
+drop policy if exists "Allow public access to crm_todo_lists" on public.crm_todo_lists;
+create policy "Allow public access to crm_todo_lists" on public.crm_todo_lists
+  for all using (true) with check (true);
+
+-- 12. CRM TO-DO TASKS TABLE
+create table if not exists public.crm_todos (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  list_id uuid references public.crm_todo_lists(id) on delete cascade,
+  title text not null,
+  description text,
+  stage_id text not null default 'todo',
+  priority text not null default 'medium', -- 'low' | 'medium' | 'high' | 'urgent'
+  due_date timestamptz,
+  is_completed boolean default false,
+  completed_at timestamptz,
+  assigned_to text,
+  lead_id uuid references public.leads(id) on delete set null,
+  lead_name text,
+  sort_order integer default 0,
+  created_by text
+);
+
+alter table public.crm_todos enable row level security;
+drop policy if exists "Allow public access to crm_todos" on public.crm_todos;
+create policy "Allow public access to crm_todos" on public.crm_todos
+  for all using (true) with check (true);
+
+create index if not exists idx_crm_todos_list_id on public.crm_todos(list_id);
+create index if not exists idx_crm_todos_due_date on public.crm_todos(due_date asc);
+alter publication supabase_realtime add table public.crm_todos;

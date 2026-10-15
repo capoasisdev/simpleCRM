@@ -25,17 +25,24 @@ import {
   Plug,
   GitBranch,
   UploadCloud,
-  Zap
+  Zap,
+  Database,
+  ListTodo
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getDashboardScope } from '../lib/permissions';
 import { getStoredActivities } from '../lib/activities';
 import LeadsView from './LeadsView';
+import TodosView from './TodosView';
 import AdminUsersView from './AdminUsersView';
 import MetaIntegrationView from './MetaIntegrationView';
 import PipelineSettingsView from './PipelineSettingsView';
 import CsvImportView from './CsvImportView';
 import AutomationsView from './AutomationsView';
+import BackupsView from './BackupsView';
+import NotificationDrawer from './NotificationDrawer';
+import { getStoredNotifications, clearAllNotifications, markAllNotificationsRead } from '../lib/notifications';
+import { checkAndRunDailyAutoBackup } from '../lib/backups';
 import Skeleton from './common/Skeleton';
 import '../styles/dashboard.css';
 
@@ -63,12 +70,17 @@ export default function DashboardView({ currentUser, onLogout }) {
   const TAB_ROUTES = {
     dashboard: 'Dashboard',
     leads: 'Leads',
+    todos: 'Todos',
+    tasks: 'Todos',
     admin: 'Admin'
   };
 
   const getRouteForTab = (tab, adminSub = 'users') => {
     if (tab === 'Admin') {
       return adminSub === 'users' ? '/admin' : `/admin/${adminSub}`;
+    }
+    if (tab === 'Todos') {
+      return '/todos';
     }
     return `/${tab.toLowerCase()}`;
   };
@@ -142,6 +154,37 @@ export default function DashboardView({ currentUser, onLogout }) {
   const [dealFilter, setDealFilter] = useState('Today');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef(null);
+
+  // In-app Notifications State
+  const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
+  const [notifications, setNotifications] = useState(() => getStoredNotifications());
+
+  useEffect(() => {
+    const handleNotifAdded = (e) => {
+      setNotifications(getStoredNotifications());
+      if (e.detail?.openDrawer) {
+        setIsNotifDrawerOpen(true);
+      }
+    };
+    const handleNotifsUpdated = (e) => {
+      setNotifications(e.detail || getStoredNotifications());
+    };
+
+    window.addEventListener('crm-notification-added', handleNotifAdded);
+    window.addEventListener('crm-notifications-updated', handleNotifsUpdated);
+
+    return () => {
+      window.removeEventListener('crm-notification-added', handleNotifAdded);
+      window.removeEventListener('crm-notifications-updated', handleNotifsUpdated);
+    };
+  }, []);
+
+  // Daily Automated Backup Check for Admin
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      checkAndRunDailyAutoBackup(user);
+    }
+  }, [user?.role]);
 
   // Dynamic Supabase data states
   const [leads, setLeads] = useState([]);
@@ -508,7 +551,14 @@ export default function DashboardView({ currentUser, onLogout }) {
       {/* Top Header */}
       <header className="dashboard-header">
         <div className="header-left-cluster">
-          <span className="header-brand">simplecrm</span>
+          <div
+            className="header-brand-wrap"
+            onClick={() => navigateTo('Dashboard')}
+            title="Go to Dashboard"
+          >
+            <img src="/logo_cropped.png" alt="SimpleCRM Logo" className="header-brand-logo" />
+            <span className="header-brand">simplecrm</span>
+          </div>
           <nav className="header-breadcrumb" aria-label="Breadcrumb">
             <span style={{ cursor: 'pointer' }} onClick={() => navigateTo('Dashboard')}>CRM</span>
             <span className="breadcrumb-separator">/</span>
@@ -533,14 +583,32 @@ export default function DashboardView({ currentUser, onLogout }) {
                 </span>
               </>
             ) : (
-              <span className="breadcrumb-current">{activeTab}</span>
+              <span className="breadcrumb-current">
+                {activeTab === 'Todos' ? "To-Do's" : activeTab}
+              </span>
             )}
           </nav>
         </div>
 
         <div className="header-right-cluster">
-          <button type="button" className="header-icon-btn" aria-label="Notifications">
+          <button
+            type="button"
+            className="header-icon-btn"
+            aria-label="Notifications"
+            onClick={() => {
+              setIsNotifDrawerOpen((prev) => !prev);
+              if (!isNotifDrawerOpen) {
+                markAllNotificationsRead();
+              }
+            }}
+            title="Notifications & Alerts"
+          >
             <Bell size={18} strokeWidth={1.5} />
+            {notifications.filter((n) => !n.read).length > 0 && (
+              <span className="header-icon-badge">
+                {notifications.filter((n) => !n.read).length}
+              </span>
+            )}
           </button>
           
           <div className="header-user-menu-wrapper" ref={userMenuRef}>
@@ -588,8 +656,9 @@ export default function DashboardView({ currentUser, onLogout }) {
             <div className="nav-section">
               <ul className="nav-list">
                 {[
-                  canViewDashboard && { name: 'Dashboard', icon: LayoutDashboard },
-                  canViewLeads && { name: 'Leads', icon: UserCheck }
+                  canViewDashboard && { name: 'Dashboard', label: 'Dashboard', icon: LayoutDashboard },
+                  canViewLeads && { name: 'Leads', label: 'Leads', icon: UserCheck },
+                  { name: 'Todos', label: "To-Do's", icon: ListTodo }
                 ]
                   .filter(Boolean)
                   .map((item) => {
@@ -600,10 +669,10 @@ export default function DashboardView({ currentUser, onLogout }) {
                         type="button"
                         className={`nav-item-btn ${activeTab === item.name ? 'active' : ''}`}
                         onClick={() => navigateTo(item.name)}
-                        title={item.name}
+                        title={item.label || item.name}
                       >
                         <Icon size={20} strokeWidth={1.75} />
-                        <span>{item.name}</span>
+                        <span>{item.label || item.name}</span>
                       </button>
                     </li>
                   );
@@ -897,6 +966,7 @@ export default function DashboardView({ currentUser, onLogout }) {
           )}
 
           {activeTab === 'Leads' && <LeadsView currentUser={user} onNavigate={navigateTo} />}
+          {activeTab === 'Todos' && <TodosView currentUser={user} />}
           {activeTab === 'Admin' && (
             <div className="settings-workspace-layout">
               {/* Secondary Settings Sub-navigation inside Settings Main Section */}
@@ -907,7 +977,8 @@ export default function DashboardView({ currentUser, onLogout }) {
                     ...(user.role === 'admin' ? [{ id: 'import', label: 'Import Leads', icon: UploadCloud }] : []),
                     ...(canManageMeta || user.role === 'admin' ? [{ id: 'automations', label: 'Automations', icon: Zap }] : []),
                     ...(canManageMeta || user.role === 'admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
-                    ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : [])
+                    ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : []),
+                    ...(user.role === 'admin' ? [{ id: 'backups', label: 'Backups', icon: Database }] : [])
                   ].map((sub) => {
                     const SubIcon = sub.icon;
                     return (
@@ -939,11 +1010,12 @@ export default function DashboardView({ currentUser, onLogout }) {
                   <MetaIntegrationView currentUser={user} />
                 )}
                 {adminSubTab === 'stages' && <PipelineSettingsView currentUser={user} />}
+                {adminSubTab === 'backups' && user.role === 'admin' && <BackupsView currentUser={user} />}
               </div>
             </div>
           )}
 
-          {activeTab !== 'Dashboard' && activeTab !== 'Leads' && activeTab !== 'Admin' && (
+          {activeTab !== 'Dashboard' && activeTab !== 'Leads' && activeTab !== 'Todos' && activeTab !== 'Admin' && (
             <div className="tab-placeholder-view">
               <h2 className="placeholder-title">{activeTab}</h2>
               <p className="placeholder-desc">This section is currently under development.</p>
@@ -1107,6 +1179,27 @@ export default function DashboardView({ currentUser, onLogout }) {
           </div>
         </div>
       )}
+
+      {/* Slide-in Notifications Drawer */}
+      <NotificationDrawer
+        isOpen={isNotifDrawerOpen}
+        onClose={() => setIsNotifDrawerOpen(false)}
+        notifications={notifications}
+        onClearAll={() => {
+          clearAllNotifications();
+          setNotifications([]);
+        }}
+        onViewLead={(leadId, lead) => {
+          navigateTo('Leads');
+          setTimeout(() => {
+            window.dispatchEvent(
+              new CustomEvent('crm-open-lead-detail', {
+                detail: { leadId, lead }
+              })
+            );
+          }, 80);
+        }}
+      />
     </div>
   );
 }

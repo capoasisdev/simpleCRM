@@ -3,6 +3,7 @@ export default function Skeleton({
   height = '14px',
   borderRadius,
   circle = false,
+  count = 1,
   className = '',
   style = {}
 }) {
@@ -13,6 +14,21 @@ export default function Skeleton({
     ...style
   };
 
+  if (count > 1) {
+    return (
+      <div className={`skeleton-group ${className}`} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {Array.from({ length: count }).map((_, idx) => (
+          <span
+            key={idx}
+            className={`skeleton-shimmer ${circle ? 'circle' : ''}`}
+            style={customStyle}
+            aria-hidden="true"
+          />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <span
       className={`skeleton-shimmer ${circle ? 'circle' : ''} ${className}`}
@@ -21,3 +37,4 @@ export default function Skeleton({
     />
   );
 }
+

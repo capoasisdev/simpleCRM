@@ -63,16 +63,16 @@
 
 /* Skeleton Card Placers */
 .lead-card-skeleton {
-  background: var(--color-white, #ffffff);
-  border: none;
-  border-bottom: 1.5px solid #94a3b8;
-  border-radius: 0;
-  padding: 10px 16px;
+  position: relative;
+  margin: 10px 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.06);
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  margin-bottom: 0;
-  box-shadow: none;
+  gap: 8px;
 }
 
 .deal-row-skeleton {
@@ -94,3 +94,23 @@
   padding: 14px 16px;
   border-bottom: 1px solid var(--border-line, #f0f0f0);
 }
+
+/* Todo Kanban Card Skeleton */
+.todo-card-skeleton {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.todo-card-skeleton-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+}
+

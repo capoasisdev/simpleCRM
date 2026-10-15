@@ -683,6 +683,14 @@
   cursor: pointer;
 }
 
+.perm-pill-checkbox.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  background-color: #f1f5f9;
+}
+
+
 /* Modal Dialog Sizing & Scroll Boundaries */
 .admin-permissions-modal {
   max-width: 540px !important;

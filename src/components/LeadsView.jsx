@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, UserCheck, CalendarClock, RotateCcw } from 'lucide-react';
+import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, UserCheck, CalendarClock, RotateCcw, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { hasPermission, getLeadScope } from '../lib/permissions';
+import { hasPermission, getLeadScope, getFollowUpScope, canDeleteFollowUp, isLeadAssignedToUser } from '../lib/permissions';
 import { recordActivity, fetchLeadActivities } from '../lib/activities';
 import { fetchFollowUps, getStoredFollowUps, getFollowUpUrgency, formatFollowUpTime, completeFollowUp, reopenFollowUp, deleteFollowUp } from '../lib/followups';
+import { addNotification } from '../lib/notifications';
 import ScheduleFollowUpModal from './common/ScheduleFollowUpModal';
 import Skeleton from './common/Skeleton';
 import '../styles/leads.css';
@@ -138,36 +139,29 @@ export default function LeadsView({ currentUser, onNavigate }) {
   const canViewAllLeads = currentUser?.role === 'admin' || leadScope === 'all';
   const canEditLead = hasPermission(currentUser, 'leads', 'edit');
   const canDeleteLead = hasPermission(currentUser, 'leads', 'delete');
+  const followUpScope = getFollowUpScope(currentUser);
+  const canViewFollowUps = hasPermission(currentUser, 'followups', 'view');
 
-  const [isLoading, setIsLoading] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_leads');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return false;
-      }
-    } catch (e) { }
-    return true;
-  });
+  const [isLoading, setIsLoading] = useState(true);
   const [tableMissing, setTableMissing] = useState(false);
   const [filterType, setFilterType] = useState(canViewAllLeads ? 'all' : 'my'); // 'all' | 'my' | 'unassigned'
   const [searchQuery, setSearchQuery] = useState('');
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
   const filterDropdownRef = useRef(null);
 
-  const filterOptions = [
-    { value: 'all', label: 'All Leads' },
-    { value: 'my', label: 'My Leads' },
-    { value: 'unassigned', label: 'Unassigned' },
-    { value: 'followups', label: 'Follow-ups' }
-  ];
-
-  const userFilterOptions = canViewAllLeads
-    ? filterOptions
+  const baseFilterOptions = canViewAllLeads
+    ? [
+      { value: 'all', label: 'All Leads' },
+      { value: 'my', label: 'My Leads' },
+      { value: 'unassigned', label: 'Unassigned' }
+    ]
     : [
-        { value: 'my', label: 'My Assigned Leads' },
-        { value: 'followups', label: 'Follow-ups' }
-      ];
+      { value: 'my', label: 'My Assigned Leads' }
+    ];
+
+  const userFilterOptions = canViewFollowUps
+    ? [...baseFilterOptions, { value: 'followups', label: 'Follow-ups' }]
+    : baseFilterOptions;
 
   const activeFilterLabel = userFilterOptions.find((o) => o.value === filterType)?.label || (canViewAllLeads ? 'All Leads' : 'My Assigned Leads');
 
@@ -183,12 +177,45 @@ export default function LeadsView({ currentUser, onNavigate }) {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [duplicateLeadWarning, setDuplicateLeadWarning] = useState(null);
+
+  // Date Filter State
+  const [dateFilter, setDateFilter] = useState('all'); // 'all', 'today', 'yesterday', '7days', '30days', 'this_month', 'custom'
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [isDateDropdownOpen, setIsDateDropdownOpen] = useState(false);
+  const dateDropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (dateDropdownRef.current && !dateDropdownRef.current.contains(e.target)) {
+        setIsDateDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  const getDateFilterLabel = () => {
+    switch (dateFilter) {
+      case 'today': return 'Today';
+      case 'yesterday': return 'Yesterday';
+      case '7days': return 'Last 7 Days';
+      case '30days': return 'Last 30 Days';
+      case 'this_month': return 'This Month';
+      case 'custom': return customStartDate || customEndDate ? 'Custom Date' : 'Custom Range';
+      default: return 'Date';
+    }
+  };
 
   useEffect(() => {
     if (!canViewAllLeads && filterType !== 'followups' && filterType !== 'my') {
       setFilterType('my');
     }
-  }, [canViewAllLeads]);
+    if (!canViewFollowUps && filterType === 'followups') {
+      setFilterType(canViewAllLeads ? 'all' : 'my');
+    }
+  }, [canViewAllLeads, canViewFollowUps, filterType]);
 
   // Selected Lead Details Modal State
   const [selectedLead, setSelectedLead] = useState(null);
@@ -207,6 +234,21 @@ export default function LeadsView({ currentUser, onNavigate }) {
   const [followUps, setFollowUps] = useState(() => getStoredFollowUps());
   const [isScheduleFollowUpOpen, setIsScheduleFollowUpOpen] = useState(false);
   const [followUpTargetLead, setFollowUpTargetLead] = useState(null);
+
+  // Listen for open lead detail event from notification drawer or elsewhere
+  useEffect(() => {
+    const handleOpenDetail = (e) => {
+      const { leadId, lead } = e.detail || {};
+      const target = lead || leads.find((l) => l.id === leadId);
+      if (target) {
+        setSelectedLead(target);
+        setIsDetailOpen(true);
+      }
+    };
+
+    window.addEventListener('crm-open-lead-detail', handleOpenDetail);
+    return () => window.removeEventListener('crm-open-lead-detail', handleOpenDetail);
+  }, [leads]);
 
   useEffect(() => {
     let isMounted = true;
@@ -267,11 +309,32 @@ export default function LeadsView({ currentUser, onNavigate }) {
   };
 
   const followUpColumnsData = useMemo(() => {
-    if (!followUps || !Array.isArray(followUps)) {
+    if (!followUps || !Array.isArray(followUps) || !canViewFollowUps) {
       return { missed: [], today: [], upcoming: [], done: [] };
     }
 
     let items = [...followUps];
+
+    // Filter by scope if 'self'
+    if (followUpScope === 'self') {
+      const currentUserName = (currentUser?.name || '').trim().toLowerCase();
+      items = items.filter((f) => {
+        const isCreatedBySelf =
+          f.created_by &&
+          currentUserName &&
+          f.created_by.trim().toLowerCase() === currentUserName;
+
+        const matchedLead = leads.find(
+          (l) =>
+            (f.lead_id && l.id === f.lead_id) ||
+            (f.lead_name && l.name?.toLowerCase() === f.lead_name?.toLowerCase())
+        );
+        const isAssignedLead = matchedLead ? isLeadAssignedToUser(matchedLead, currentUser) : false;
+
+        return isCreatedBySelf || isAssignedLead;
+      });
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       items = items.filter(
@@ -344,7 +407,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
       upcoming: dedupeLeads(upcomingItems),
       done: dedupeLeads(doneItems)
     };
-  }, [followUps, leads, searchQuery, columns]);
+  }, [followUps, leads, searchQuery, columns, followUpScope, canViewFollowUps, currentUser]);
 
   const followUpColumns = useMemo(() => [
     { id: 'missed', label: 'Missed', items: followUpColumnsData.missed, isMissed: true },
@@ -705,9 +768,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
 
     const fetchLeads = async () => {
       try {
-        if (!leads || leads.length === 0) {
-          setIsLoading(true);
-        }
+        setIsLoading(true);
         const { data, error } = await supabase
           .from('leads')
           .select('*')
@@ -781,26 +842,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
 
   const isAdmin = currentUser?.role === 'admin';
 
-  // Strict check whether a lead is assigned to a specific user
-  const isLeadAssignedToUser = (lead, user) => {
-    if (!lead || !user) return false;
-    const assigned = (lead.assigned_to || lead.assignedTo || '').toLowerCase().trim();
-    if (!assigned || assigned === 'unassigned' || assigned === 'none') return false;
 
-    const userName = (user.name || '').toLowerCase().trim();
-    const userFirst = userName.split(' ')[0] || '';
-    const userEmail = (user.email || '').toLowerCase().trim();
-    const userId = (user.id || '').toLowerCase().trim();
-
-    return (
-      assigned === userName ||
-      assigned === userFirst ||
-      (userEmail && assigned === userEmail) ||
-      (userId && assigned === userId) ||
-      (userName.includes('pranav') && assigned === 'pranav') ||
-      (userName.includes('dipak') && (assigned.includes('dipak') || assigned === 'bd01@salado.in'))
-    );
-  };
 
   const filteredLeads = useMemo(() => {
     return leads.filter((lead) => {
@@ -822,6 +864,43 @@ export default function LeadsView({ currentUser, onNavigate }) {
         }
       }
 
+      // Date Range Filter
+      if (dateFilter && dateFilter !== 'all') {
+        const dateStr = lead.created_at || lead.date;
+        if (dateStr) {
+          const leadDate = new Date(dateStr);
+          if (!isNaN(leadDate.getTime())) {
+            const now = new Date();
+            const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+            if (dateFilter === 'today') {
+              if (leadDate < startOfToday) return false;
+            } else if (dateFilter === 'yesterday') {
+              const startOfYesterday = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000);
+              if (leadDate < startOfYesterday || leadDate >= startOfToday) return false;
+            } else if (dateFilter === '7days') {
+              const sevenDaysAgo = new Date(startOfToday.getTime() - 7 * 24 * 60 * 60 * 1000);
+              if (leadDate < sevenDaysAgo) return false;
+            } else if (dateFilter === '30days') {
+              const thirtyDaysAgo = new Date(startOfToday.getTime() - 30 * 24 * 60 * 60 * 1000);
+              if (leadDate < thirtyDaysAgo) return false;
+            } else if (dateFilter === 'this_month') {
+              const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+              if (leadDate < startOfMonth) return false;
+            } else if (dateFilter === 'custom') {
+              if (customStartDate) {
+                const start = new Date(`${customStartDate}T00:00:00`);
+                if (leadDate < start) return false;
+              }
+              if (customEndDate) {
+                const end = new Date(`${customEndDate}T23:59:59.999`);
+                if (leadDate > end) return false;
+              }
+            }
+          }
+        }
+      }
+
       // Search query across name, email, phone
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
@@ -833,7 +912,58 @@ export default function LeadsView({ currentUser, onNavigate }) {
 
       return true;
     });
-  }, [leads, filterType, searchQuery, currentUser, canViewAllLeads]);
+  }, [leads, filterType, searchQuery, currentUser, canViewAllLeads, dateFilter, customStartDate, customEndDate]);
+
+  const handleExportCSV = () => {
+    if (!filteredLeads || filteredLeads.length === 0) {
+      alert('No leads to export matching the current filters.');
+      return;
+    }
+
+    const headers = [
+      'ID',
+      'Name',
+      'Phone',
+      'Email',
+      'Stage',
+      'Deal Value',
+      'Assigned To',
+      'Source',
+      'City',
+      'Created Date'
+    ];
+
+    const escapeCSV = (str) => {
+      if (str === null || str === undefined) return '""';
+      const s = String(str).replace(/"/g, '""');
+      return `"${s}"`;
+    };
+
+    const rows = filteredLeads.map((l) => [
+      escapeCSV(l.id),
+      escapeCSV(l.name || ''),
+      escapeCSV(l.phone || ''),
+      escapeCSV(l.email || ''),
+      escapeCSV(l.stage || ''),
+      escapeCSV(l.value || l.deal_value || ''),
+      escapeCSV(l.assigned_to || l.assignedTo || 'Unassigned'),
+      escapeCSV(l.source || 'Direct'),
+      escapeCSV(l.city || ''),
+      escapeCSV(l.created_at || l.date || '')
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const dateTag = new Date().toISOString().slice(0, 10);
+    link.setAttribute('download', `crm-leads-${filterType}-${dateTag}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const resolveAssignee = (assignedTo) => {
     if (!assignedTo || assignedTo === 'unassigned' || assignedTo === 'none') return null;
@@ -884,9 +1014,77 @@ export default function LeadsView({ currentUser, onNavigate }) {
     }
   };
 
-  const handleCreateLead = async (e) => {
-    e.preventDefault();
+  const normalizePhone = (p) => (p || '').replace(/\D/g, '');
+  const findDuplicateLead = (phone, email) => {
+    const cleanPhone = normalizePhone(phone);
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanPhone && !cleanEmail) return null;
+
+    return leads.find((l) => {
+      if (cleanPhone && cleanPhone.length >= 7) {
+        const existingPhone = normalizePhone(l.phone);
+        if (existingPhone && (existingPhone === cleanPhone || existingPhone.endsWith(cleanPhone) || cleanPhone.endsWith(existingPhone))) {
+          return l;
+        }
+      }
+      if (cleanEmail && l.email) {
+        if (l.email.trim().toLowerCase() === cleanEmail) {
+          return l;
+        }
+      }
+      return null;
+    });
+  };
+
+  const handlePhoneBlur = () => {
+    const found = findDuplicateLead(newLeadPhone, newLeadEmail);
+    if (found) {
+      setDuplicateLeadWarning(found);
+      addNotification({
+        type: 'warning',
+        title: 'Duplicate Contact Detected',
+        message: `A lead with this phone already exists: "${found.name}" in stage "${found.stage?.toUpperCase()}".`,
+        lead: found,
+        leadId: found.id,
+        openDrawer: true
+      });
+    }
+  };
+
+  const handleEmailBlur = () => {
+    const found = findDuplicateLead(newLeadPhone, newLeadEmail);
+    if (found) {
+      setDuplicateLeadWarning(found);
+      addNotification({
+        type: 'warning',
+        title: 'Duplicate Contact Detected',
+        message: `A lead with this email already exists: "${found.name}" in stage "${found.stage?.toUpperCase()}".`,
+        lead: found,
+        leadId: found.id,
+        openDrawer: true
+      });
+    }
+  };
+
+  const handleCreateLead = async (e, forceCreate = false) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!newLeadName.trim() || isSubmitting) return;
+
+    if (!forceCreate) {
+      const duplicate = findDuplicateLead(newLeadPhone, newLeadEmail);
+      if (duplicate) {
+        setDuplicateLeadWarning(duplicate);
+        addNotification({
+          type: 'warning',
+          title: 'Duplicate Lead Detected',
+          message: `Attempted to create lead "${newLeadName}", but "${duplicate.name}" already exists with this contact information.`,
+          lead: duplicate,
+          leadId: duplicate.id,
+          openDrawer: true
+        });
+        return;
+      }
+    }
 
     setIsSubmitting(true);
     const now = new Date();
@@ -987,10 +1185,10 @@ export default function LeadsView({ currentUser, onNavigate }) {
         prev.map((f) =>
           f.id === followUpId
             ? {
-                ...f,
-                status: shouldComplete ? 'completed' : 'pending',
-                completed_at: shouldComplete ? new Date().toISOString() : null
-              }
+              ...f,
+              status: shouldComplete ? 'completed' : 'pending',
+              completed_at: shouldComplete ? new Date().toISOString() : null
+            }
             : f
         )
       );
@@ -1352,26 +1550,41 @@ export default function LeadsView({ currentUser, onNavigate }) {
               </div>
             )}
 
-            {canDeleteLead && (
-              <button
-                type="button"
-                className="lead-action-icon-btn lead-delete-btn"
-                title={isFollowUpCol ? "Delete follow-up" : "Delete lead"}
-                aria-label={isFollowUpCol ? "Delete follow-up" : "Delete lead"}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (isFollowUpCol) {
-                    const fu = lead._followUp || getLeadFollowUp(lead.id, lead.name, includeCompletedFollowUp);
-                    if (fu) {
-                      setFollowUpToDelete({ lead, followUp: fu });
-                    }
-                    return;
-                  }
-                  setLeadToDelete(lead);
-                }}
-              >
-                <Trash2 size={14} strokeWidth={2} />
-              </button>
+            {isFollowUpCol ? (
+              (() => {
+                const fu = lead._followUp || getLeadFollowUp(lead.id, lead.name, includeCompletedFollowUp);
+                return canDeleteFollowUp(currentUser, fu, lead) ? (
+                  <button
+                    type="button"
+                    className="lead-action-icon-btn lead-delete-btn"
+                    title="Delete follow-up"
+                    aria-label="Delete follow-up"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (fu) {
+                        setFollowUpToDelete({ lead, followUp: fu });
+                      }
+                    }}
+                  >
+                    <Trash2 size={14} strokeWidth={2} />
+                  </button>
+                ) : null;
+              })()
+            ) : (
+              canDeleteLead && (
+                <button
+                  type="button"
+                  className="lead-action-icon-btn lead-delete-btn"
+                  title="Delete lead"
+                  aria-label="Delete lead"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLeadToDelete(lead);
+                  }}
+                >
+                  <Trash2 size={14} strokeWidth={2} />
+                </button>
+              )
             )}
           </div>
         </div>
@@ -1481,6 +1694,105 @@ export default function LeadsView({ currentUser, onNavigate }) {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+
+          {/* Date Range Filter */}
+          <div className="lead-date-filter-wrapper" ref={dateDropdownRef}>
+            <button
+              type="button"
+              className={`lead-date-filter-btn ${dateFilter !== 'all' ? 'active' : ''}`}
+              onClick={() => setIsDateDropdownOpen((prev) => !prev)}
+              title="Filter by Creation Date"
+            >
+              <Calendar size={14} strokeWidth={1.8} />
+              <span>{getDateFilterLabel()}</span>
+              <ChevronDown size={12} strokeWidth={2} />
+            </button>
+
+            {dateFilter !== 'all' && (
+              <button
+                type="button"
+                className="lead-date-clear-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDateFilter('all');
+                  setCustomStartDate('');
+                  setCustomEndDate('');
+                }}
+                title="Reset date filter"
+              >
+                <X size={14} strokeWidth={2} />
+              </button>
+            )}
+
+            {isDateDropdownOpen && (
+              <div className="lead-date-dropdown-menu">
+                {[
+                  { id: 'all', label: 'All Time' },
+                  { id: 'today', label: 'Today' },
+                  { id: 'yesterday', label: 'Yesterday' },
+                  { id: '7days', label: 'Last 7 Days' },
+                  { id: '30days', label: 'Last 30 Days' },
+                  { id: 'this_month', label: 'This Month' },
+                  { id: 'custom', label: 'Custom Range...' }
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`lead-date-preset-item ${dateFilter === item.id ? 'selected' : ''}`}
+                    onClick={() => {
+                      setDateFilter(item.id);
+                      if (item.id !== 'custom') {
+                        setIsDateDropdownOpen(false);
+                      }
+                    }}
+                  >
+                    <span>{item.label}</span>
+                    {dateFilter === item.id && <Check size={13} strokeWidth={2} />}
+                  </button>
+                ))}
+
+                {dateFilter === 'custom' && (
+                  <div className="lead-date-custom-box">
+                    <div className="lead-date-custom-row">
+                      <input
+                        type="date"
+                        className="lead-date-custom-input"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        placeholder="From"
+                      />
+                      <span>to</span>
+                      <input
+                        type="date"
+                        className="lead-date-custom-input"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        placeholder="To"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="lead-date-apply-btn"
+                      onClick={() => setIsDateDropdownOpen(false)}
+                    >
+                      Apply Range
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Export Leads to CSV */}
+          <button
+            type="button"
+            className="lead-export-btn"
+            onClick={handleExportCSV}
+            title="Export filtered leads to CSV"
+          >
+            <Download size={14} strokeWidth={1.8} />
+            <span>Export</span>
+          </button>
 
           {currentUser?.role === 'admin' && onNavigate && (
             <button
@@ -1761,6 +2073,38 @@ export default function LeadsView({ currentUser, onNavigate }) {
 
             <form onSubmit={handleCreateLead}>
               <div className="lead-modal-body">
+                {duplicateLeadWarning && (
+                  <div className="lead-duplicate-warning-banner">
+                    <AlertCircle size={16} className="lead-duplicate-warning-icon" />
+                    <div className="lead-duplicate-warning-content">
+                      <div className="lead-duplicate-warning-title">Duplicate Lead Detected</div>
+                      <div className="lead-duplicate-warning-desc">
+                        A lead matching these contact details already exists: <strong>{duplicateLeadWarning.name}</strong> (Stage: {duplicateLeadWarning.stage?.toUpperCase()}). See right notification panel for details.
+                      </div>
+                      <div className="lead-duplicate-warning-actions">
+                        <button
+                          type="button"
+                          className="lead-duplicate-action-btn"
+                          onClick={() => {
+                            setIsModalOpen(false);
+                            setSelectedLead(duplicateLeadWarning);
+                            setIsDetailOpen(true);
+                          }}
+                        >
+                          View Existing Lead
+                        </button>
+                        <button
+                          type="button"
+                          className="lead-duplicate-action-btn"
+                          onClick={(e) => handleCreateLead(e, true)}
+                        >
+                          Create Anyway
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="lead-field-group">
                   <label className="lead-field-label">Contact Name</label>
                   <input
@@ -1768,7 +2112,10 @@ export default function LeadsView({ currentUser, onNavigate }) {
                     className="lead-field-input"
                     placeholder="e.g. Rahul Sharma"
                     value={newLeadName}
-                    onChange={(e) => setNewLeadName(e.target.value)}
+                    onChange={(e) => {
+                      setNewLeadName(e.target.value);
+                      setDuplicateLeadWarning(null);
+                    }}
                     autoFocus
                     required
                   />
@@ -1782,6 +2129,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
                     placeholder="e.g. +91 98201 44582"
                     value={newLeadPhone}
                     onChange={(e) => setNewLeadPhone(e.target.value)}
+                    onBlur={handlePhoneBlur}
                   />
                 </div>
 
@@ -1793,6 +2141,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
                     placeholder="e.g. rahul.sharma@company.in"
                     value={newLeadEmail}
                     onChange={(e) => setNewLeadEmail(e.target.value)}
+                    onBlur={handleEmailBlur}
                   />
                 </div>
 
@@ -1915,11 +2264,10 @@ export default function LeadsView({ currentUser, onNavigate }) {
                         </span>
                       </div>
                       <span
-                        className={`lead-modal-followup-card-badge badge-${
-                          selectedLeadFollowUp.status === 'completed'
-                            ? 'done'
-                            : getFollowUpUrgency(selectedLeadFollowUp.due_date)
-                        }`}
+                        className={`lead-modal-followup-card-badge badge-${selectedLeadFollowUp.status === 'completed'
+                          ? 'done'
+                          : getFollowUpUrgency(selectedLeadFollowUp.due_date)
+                          }`}
                       >
                         {selectedLeadFollowUp.status === 'completed'
                           ? 'Completed'
@@ -2133,23 +2481,22 @@ export default function LeadsView({ currentUser, onNavigate }) {
                             </td>
                             <td className="audit-cell-event">
                               <span
-                                className={`audit-pill ${
-                                  isStageChange
-                                    ? 'audit-pill-stage'
-                                    : isAssignment
+                                className={`audit-pill ${isStageChange
+                                  ? 'audit-pill-stage'
+                                  : isAssignment
                                     ? 'audit-pill-assign'
                                     : isArrival
-                                    ? 'audit-pill-arrival'
-                                    : 'audit-pill-default'
-                                }`}
+                                      ? 'audit-pill-arrival'
+                                      : 'audit-pill-default'
+                                  }`}
                               >
                                 {isStageChange
                                   ? 'Stage Change'
                                   : isAssignment
-                                  ? 'Assignment'
-                                  : isArrival
-                                  ? 'Lead Ingested'
-                                  : 'Update'}
+                                    ? 'Assignment'
+                                    : isArrival
+                                      ? 'Lead Ingested'
+                                      : 'Update'}
                               </span>
                             </td>
                             <td className="audit-cell-details">
@@ -2212,25 +2559,25 @@ export default function LeadsView({ currentUser, onNavigate }) {
                     )}
                   </button>
                 </div>
-                {canDeleteLead && (
-                  filterType === 'followups' ? (
-                    selectedLeadFollowUp && (
-                      <button
-                        type="button"
-                        className="lead-detail-delete-btn"
-                        onClick={() =>
-                          setFollowUpToDelete({
-                            lead: selectedLead,
-                            followUp: selectedLeadFollowUp
-                          })
-                        }
-                        title="Remove follow-up"
-                      >
-                        <Trash2 size={13} strokeWidth={2} />
-                        <span>Delete Follow-up</span>
-                      </button>
-                    )
-                  ) : (
+                {filterType === 'followups' ? (
+                  selectedLeadFollowUp && canDeleteFollowUp(currentUser, selectedLeadFollowUp, selectedLead) && (
+                    <button
+                      type="button"
+                      className="lead-detail-delete-btn"
+                      onClick={() =>
+                        setFollowUpToDelete({
+                          lead: selectedLead,
+                          followUp: selectedLeadFollowUp
+                        })
+                      }
+                      title="Remove follow-up"
+                    >
+                      <Trash2 size={13} strokeWidth={2} />
+                      <span>Delete Follow-up</span>
+                    </button>
+                  )
+                ) : (
+                  canDeleteLead && (
                     <button
                       type="button"
                       className="lead-detail-delete-btn"

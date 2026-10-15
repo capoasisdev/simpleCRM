@@ -3,6 +3,7 @@ import {
   UserCheck,
   GitFork,
   LayoutDashboard,
+  CalendarClock,
   Shield,
   Info
 } from 'lucide-react';
@@ -187,7 +188,46 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
           </div>
         </div>
 
-        {/* Row 4: Admin */}
+        {/* Row 4: Follow-ups */}
+        <div className="perm-table-row">
+          <div className="perm-td-module">
+            <CalendarClock size={14} strokeWidth={2} />
+            <span className="perm-module-name">Follow-ups</span>
+          </div>
+          <div className="perm-td-scope">
+            <select
+              value={perms.followups?.scope || 'self'}
+              onChange={(e) => updateSection('followups', { scope: e.target.value })}
+              disabled={isAdmin}
+              className="perm-scope-select"
+            >
+              <option value="self">Only Self</option>
+              <option value="all">All Follow-ups</option>
+            </select>
+          </div>
+          <div className="perm-td-actions">
+            <label className="perm-pill-checkbox">
+              <input
+                type="checkbox"
+                checked={perms.followups?.view !== false}
+                onChange={(e) => updateSection('followups', { view: e.target.checked })}
+                disabled={isAdmin}
+              />
+              <span>View</span>
+            </label>
+            <label className="perm-pill-checkbox">
+              <input
+                type="checkbox"
+                checked={perms.followups?.delete !== false}
+                onChange={(e) => updateSection('followups', { delete: e.target.checked })}
+                disabled={isAdmin}
+              />
+              <span>Delete</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Row 5: Admin */}
         <div className="perm-table-row">
           <div className="perm-td-module">
             <Shield size={14} strokeWidth={2} />

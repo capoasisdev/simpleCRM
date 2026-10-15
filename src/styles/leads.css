@@ -233,6 +233,226 @@
   color: #0f172a;
 }
 
+/* Date Filter & Export in Leads Toolbar */
+.lead-date-filter-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.lead-date-filter-btn {
+  height: 36px;
+  padding: 0 11px;
+  background-color: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.lead-date-filter-btn:hover {
+  background-color: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.lead-date-filter-btn.active {
+  background-color: #0f172a;
+  color: #ffffff;
+  border-color: #0f172a;
+}
+
+.lead-date-clear-btn {
+  margin-left: -28px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  background: #000000;
+  color: #ffffff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-right: 6px;
+}
+
+.lead-date-clear-btn:hover {
+ transform: scale(1.05);
+}
+
+.lead-date-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 250px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  padding: 8px;
+  z-index: 100;
+  animation: filterDropdownFade 0.15s ease-out;
+}
+
+.lead-date-preset-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #334155;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+  text-align: left;
+}
+
+.lead-date-preset-item:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+.lead-date-preset-item.selected {
+  background-color: #f1f5f9;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.lead-date-custom-box {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lead-date-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lead-date-custom-input {
+  flex: 1;
+  height: 30px;
+  font-size: 11.5px;
+  padding: 0 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  color: #0f172a;
+  background: #ffffff;
+}
+
+.lead-date-apply-btn {
+  height: 28px;
+  background-color: #0f172a;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.lead-date-apply-btn:hover {
+  background-color: #334155;
+}
+
+.lead-export-btn {
+  height: 36px;
+  padding: 0 13px;
+  background-color: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.lead-export-btn:hover {
+  background-color: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+/* Duplicate lead alert inside Create Modal */
+.lead-duplicate-warning-banner {
+  background-color: #fffbeb;
+  border: 1px solid #fef3c7;
+  border-left: 3.5px solid #f59e0b;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.lead-duplicate-warning-icon {
+  color: #f59e0b;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.lead-duplicate-warning-content {
+  flex: 1;
+}
+
+.lead-duplicate-warning-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #92400e;
+  margin-bottom: 2px;
+}
+
+.lead-duplicate-warning-desc {
+  font-size: 11.5px;
+  color: #b45309;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.lead-duplicate-warning-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.lead-duplicate-action-btn {
+  background-color: #fef3c7;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.lead-duplicate-action-btn:hover {
+  background-color: #fde68a;
+}
+
+
 /* Board Outer Container - Flush Edge-to-Edge, Seamless with Main Section */
 .leads-board {
   display: flex;
