@@ -207,6 +207,7 @@ export default function MetaIntegrationView({ currentUser }) {
     code: null,
     name: ''
   });
+  const [isHealthBannerDismissed, setIsHealthBannerDismissed] = useState(false);
 
   // Manual Credentials Drawer/Card
   const [showManualConfig, setShowManualConfig] = useState(false);
@@ -243,6 +244,7 @@ export default function MetaIntegrationView({ currentUser }) {
     setTokenHealth(prev => ({ ...prev, status: 'checking' }));
     const res = await validateMetaToken(targetToken.trim());
     if (res.isValid) {
+      setIsHealthBannerDismissed(false);
       setTokenHealth({
         status: 'valid',
         message: `Token is active and verified for "${res.name || 'Meta Account'}".`,
@@ -453,6 +455,9 @@ export default function MetaIntegrationView({ currentUser }) {
         lead_form_ids: ''
       }));
       setForms([]);
+      setTokenHealth({ status: 'missing', message: 'No access token configured.', code: null, name: '' });
+      setIsHealthBannerDismissed(false);
+      setFbConnectError('');
       try {
         localStorage.removeItem('crm_cached_connected_forms');
         localStorage.removeItem('crm_cached_meta_config');
@@ -694,8 +699,19 @@ export default function MetaIntegrationView({ currentUser }) {
       } catch (e) { }
 
       setIsModalOpen(false);
+      setFbConnectError('');
+      setIsHealthBannerDismissed(false);
+      setTokenHealth({
+        status: 'valid',
+        message: `Token is active and verified for "${selectedPage.name}".`,
+        name: selectedPage.name,
+        code: null
+      });
       setFbSuccessBanner(`Connected successfully to "${selectedPage.name}" with ${chosenForms.length} form(s)!`);
       setTimeout(() => setFbSuccessBanner(''), 6000);
+
+      // Re-verify in background to confirm live token health
+      checkTokenHealth(pageToken);
     } catch (err) {
       console.error('Error confirming asset selection:', err);
       setFbConnectError(err.message || 'Failed to complete connection.');
@@ -817,7 +833,7 @@ export default function MetaIntegrationView({ currentUser }) {
         )}
 
         {/* Token Expired Warning Banner */}
-        {tokenHealth.status === 'expired' && (
+        {tokenHealth.status === 'expired' && !isHealthBannerDismissed && (
           <div className="meta-sync-banner error" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderRadius: '8px', border: '1px solid #fecaca', backgroundColor: '#fef2f2' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
               <AlertCircle size={18} style={{ color: '#dc2626', marginTop: '2px', flexShrink: 0 }} />
@@ -830,7 +846,7 @@ export default function MetaIntegrationView({ currentUser }) {
                 </span>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
               <button
                 type="button"
                 className="meta-btn-secondary"
@@ -846,6 +862,14 @@ export default function MetaIntegrationView({ currentUser }) {
                 style={{ fontSize: '12px', padding: '6px 12px', backgroundColor: '#ffffff', color: '#475569' }}
               >
                 Paste Token
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsHealthBannerDismissed(true)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b', display: 'flex', alignItems: 'center', padding: '4px' }}
+                title="Dismiss warning"
+              >
+                <X size={16} />
               </button>
             </div>
           </div>
