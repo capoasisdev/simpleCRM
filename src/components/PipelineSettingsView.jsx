@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import {
-  Plus,
   ChevronUp,
   ChevronDown,
   Trash2,
@@ -8,18 +7,24 @@ import {
   RotateCcw,
   RefreshCw,
   ShieldAlert,
+  Plus,
+  ArrowLeft,
+  ArrowRight,
   Edit2,
+  Link2,
+  GitFork,
   FileText,
-  X
+  CheckCircle2,
+  ArrowDownLeft,
+  Unlink,
+  Sliders
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission } from '../lib/permissions';
 import Skeleton from './common/Skeleton';
 import '../styles/pipeline.css';
 
-const AUTO_DOT_CLASSES = ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'won', 'nurture'];
-
-export default function PipelineSettingsView({ currentUser }) {
+export default function PipelineSettingsView({ currentUser, onConfigureStateChange }) {
   const canView = hasPermission(currentUser, 'pipeline', 'view');
   const canEdit = hasPermission(currentUser, 'pipeline', 'edit');
   const canDelete = hasPermission(currentUser, 'pipeline', 'delete');
@@ -35,126 +40,56 @@ export default function PipelineSettingsView({ currentUser }) {
     return [];
   });
 
-  const [activePipelineId, setActivePipelineId] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_pipelines');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed[0]?.id) {
-          const def = parsed.find((p) => p.is_default) || parsed[0];
-          return def.id;
-        }
-      }
-    } catch (e) { }
-    return null;
-  });
+  // State A: null = viewing Master Pipelines List; string id = viewing Detail Stage Editor
+  const [editingPipelineId, setEditingPipelineId] = useState(null);
 
-  const [stages, setStages] = useState(() => {
-    try {
-      const cachedCol = localStorage.getItem('crm_pipeline_columns');
-      if (cachedCol) {
-        const parsed = JSON.parse(cachedCol);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) { }
-    return [];
-  });
+  // Sub-tabs inside Pipeline Configure sidebar: 'source' | 'stages'
+  const [configureSubTab, setConfigureSubTab] = useState('stages');
 
-  const [initialStages, setInitialStages] = useState(() => {
-    try {
-      const cachedCol = localStorage.getItem('crm_pipeline_columns');
-      if (cachedCol) {
-        const parsed = JSON.parse(cachedCol);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) { }
-    return [];
-  });
-
+  const [stages, setStages] = useState([]);
+  const [initialStages, setInitialStages] = useState([]);
   const [allLeads, setAllLeads] = useState([]);
   const [connectedForms, setConnectedForms] = useState([]);
-  const [isLoading, setIsLoading] = useState(() => {
-    try {
-      const cachedCol = localStorage.getItem('crm_pipeline_columns');
-      if (cachedCol) {
-        const parsed = JSON.parse(cachedCol);
-        if (Array.isArray(parsed) && parsed.length > 0) return false;
-      }
-    } catch (e) { }
-    return true;
-  });
-
+  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
-  // New stage form state
+  // Detail view state
   const [newStageName, setNewStageName] = useState('');
-
-  // Multi-pipeline creation state
-  const [isCreatingPipeline, setIsCreatingPipeline] = useState(false);
-  const [newPipelineName, setNewPipelineName] = useState('');
-
-  // Pipeline renaming state
-  const [isEditingPipelineName, setIsEditingPipelineName] = useState(false);
-  const [editingNameValue, setEditingNameValue] = useState('');
-
-  // Attach form dropdown state
-  const [isAttachDropdownOpen, setIsAttachDropdownOpen] = useState(false);
-  const attachDropdownRef = useRef(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [isChangingForm, setIsChangingForm] = useState(false);
 
   const showToast = (message) => {
     setToast(message);
-    setTimeout(() => {
-      setToast(null);
-    }, 2800);
+    setTimeout(() => setToast(null), 2800);
   };
 
-  // Close attach dropdown on outside click
+  // Reset form changing state on pipeline or tab change
   useEffect(() => {
-    const handleOutsideClick = (e) => {
-      if (attachDropdownRef.current && !attachDropdownRef.current.contains(e.target)) {
-        setIsAttachDropdownOpen(false);
-      }
-    };
-    if (isAttachDropdownOpen) {
-      document.addEventListener('mousedown', handleOutsideClick);
+    setIsChangingForm(false);
+  }, [editingPipelineId, configureSubTab]);
+
+  // Sync renameValue when switching pipeline
+  useEffect(() => {
+    if (activePipeline?.name) {
+      setRenameValue(activePipeline.name);
     }
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [isAttachDropdownOpen]);
+  }, [editingPipelineId]);
 
-  // Determine dirty state (unsaved changes in current pipeline's stages)
-  const isDirty = JSON.stringify(stages) !== JSON.stringify(initialStages);
+  // Sync configure state with parent to collapse admin subnav
+  useEffect(() => {
+    onConfigureStateChange?.(editingPipelineId !== null);
+  }, [editingPipelineId, onConfigureStateChange]);
 
-  // Active pipeline object
-  const currentPipeline = pipelines.find((p) => p.id === activePipelineId) || pipelines[0];
-
-  // Single form attached to active pipeline (1-to-1 mapping)
-  const attachedForm = connectedForms.find((f) => f.pipeline_id === activePipelineId);
-
-  // Scoped lead counts for active pipeline
-  const activePipelineLeads = allLeads.filter(
-    (l) => l.pipeline_id === activePipelineId || (!l.pipeline_id && currentPipeline?.is_default)
-  );
-  const leadCounts = {};
-  activePipelineLeads.forEach((l) => {
-    const st = l.stage || 'new';
-    leadCounts[st] = (leadCounts[st] || 0) + 1;
-  });
-
-  // Fetch pipelines, leads, and forms from Supabase
+  // Fetch initial pipelines, leads, and forms
   useEffect(() => {
     let isMounted = true;
 
     async function loadData() {
-      if (stages.length === 0) {
-        setIsLoading(true);
-      }
+      setIsLoading(true);
       try {
         const [pipeRes, leadsRes, formsRes] = await Promise.all([
-          supabase
-            .from('pipelines')
-            .select('*')
-            .order('is_default', { ascending: false }),
+          supabase.from('pipelines').select('*').order('is_default', { ascending: false }),
           supabase.from('leads').select('id, stage, pipeline_id'),
           supabase.from('connected_forms').select('*')
         ]);
@@ -166,17 +101,6 @@ export default function PipelineSettingsView({ currentUser }) {
           try {
             localStorage.setItem('crm_cached_pipelines', JSON.stringify(pipeRes.data));
           } catch (e) { }
-
-          // Maintain active selection or pick default
-          const targetPipe =
-            pipeRes.data.find((p) => p.id === activePipelineId) ||
-            pipeRes.data.find((p) => p.is_default) ||
-            pipeRes.data[0];
-
-          setActivePipelineId(targetPipe.id);
-          const rawStages = targetPipe.stages || [];
-          setStages(rawStages);
-          setInitialStages(rawStages);
         }
 
         if (isMounted && leadsRes.data) {
@@ -194,48 +118,66 @@ export default function PipelineSettingsView({ currentUser }) {
     }
 
     loadData();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, []);
 
-  // Switch active pipeline
-  const handleSelectPipeline = (pipeId) => {
+  const isDirty = JSON.stringify(stages) !== JSON.stringify(initialStages);
+
+  // Active editing pipeline object
+  const activePipeline = pipelines.find(p => p.id === editingPipelineId);
+  const attachedForm = connectedForms.find(f => f.pipeline_id === editingPipelineId);
+
+  // Active pipeline leads
+  const activePipelineLeads = allLeads.filter(
+    (l) => l.pipeline_id === editingPipelineId || (!l.pipeline_id && activePipeline?.is_default)
+  );
+
+  const leadCounts = {};
+  activePipelineLeads.forEach((l) => {
+    const st = l.stage || 'new';
+    leadCounts[st] = (leadCounts[st] || 0) + 1;
+  });
+
+  // Open a pipeline for stage editing
+  const handleOpenConfigure = (pipe, initialTab = 'stages') => {
+    setEditingPipelineId(pipe.id);
+    setConfigureSubTab(initialTab);
+    setRenameValue(pipe.name || '');
+    const pipeStages = pipe.stages || [];
+    setStages(pipeStages);
+    setInitialStages(pipeStages);
+  };
+
+  // Back to master list
+  const handleBackToList = () => {
     if (isDirty) {
-      if (!window.confirm('You have unsaved changes in the current pipeline stages. Switch anyway?')) {
+      if (!window.confirm('Discard unsaved stage changes and return to pipelines list?')) {
         return;
       }
     }
-    setActivePipelineId(pipeId);
-    setIsEditingPipelineName(false);
-    const selected = pipelines.find((p) => p.id === pipeId);
-    if (selected) {
-      const rawStages = selected.stages || [];
-      setStages(rawStages);
-      setInitialStages(rawStages);
-    }
+    setEditingPipelineId(null);
+    setStages([]);
+    setInitialStages([]);
   };
 
   // Create new pipeline
-  const handleCreatePipelineSubmit = async (e) => {
-    e.preventDefault();
-    const name = newPipelineName.trim();
-    if (!name) return;
+  const handleCreatePipeline = async () => {
+    const name = window.prompt('Enter new pipeline name:');
+    if (!name || !name.trim()) return;
 
     const starterStages = [
-      { id: 'new', label: 'New Leads', dotClass: 'new', order: 0, is_entry: true },
-      { id: 'contacted', label: 'Contacted', dotClass: 'contacted', order: 1, is_entry: false },
-      { id: 'proposal', label: 'Proposal Sent', dotClass: 'proposal', order: 2, is_entry: false },
-      { id: 'won', label: 'Won', dotClass: 'won', order: 3, is_entry: false },
-      { id: 'lost', label: 'Lost', dotClass: 'nurture', order: 4, is_entry: false }
+      { id: 'new', label: 'New Leads', order: 0, is_entry: true },
+      { id: 'contacted', label: 'Contacted', order: 1, is_entry: false },
+      { id: 'proposal', label: 'Proposal Sent', order: 2, is_entry: false },
+      { id: 'won', label: 'Won', order: 3, is_entry: false },
+      { id: 'lost', label: 'Lost', order: 4, is_entry: false }
     ];
 
     try {
       const { data: newPipe, error } = await supabase
         .from('pipelines')
         .insert([{
-          name,
+          name: name.trim(),
           is_default: pipelines.length === 0,
           stages: starterStages
         }])
@@ -250,12 +192,8 @@ export default function PipelineSettingsView({ currentUser }) {
         localStorage.setItem('crm_cached_pipelines', JSON.stringify(updated));
       } catch (e) { }
 
-      setActivePipelineId(newPipe.id);
-      setStages(starterStages);
-      setInitialStages(starterStages);
-      setIsCreatingPipeline(false);
-      setNewPipelineName('');
-      showToast(`Created pipeline "${newPipe.name}"`);
+      handleOpenConfigure(newPipe, 'stages');
+      showToast(`Created pipeline "${name.trim()}"`);
     } catch (err) {
       console.error('Error creating pipeline:', err);
       showToast('Failed to create pipeline.');
@@ -263,28 +201,23 @@ export default function PipelineSettingsView({ currentUser }) {
   };
 
   // Rename pipeline
-  const handleRenamePipelineSubmit = async (e) => {
-    e.preventDefault();
-    const newName = editingNameValue.trim();
-    if (!newName || !activePipelineId) return;
+  const handleRenameSubmit = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const trimmed = renameValue.trim();
+    if (!trimmed || trimmed === activePipeline?.name) {
+      if (activePipeline?.name) setRenameValue(activePipeline.name);
+      return;
+    }
 
     try {
       const { error } = await supabase
         .from('pipelines')
-        .update({ name: newName, updated_at: new Date().toISOString() })
-        .eq('id', activePipelineId);
+        .update({ name: trimmed, updated_at: new Date().toISOString() })
+        .eq('id', editingPipelineId);
 
       if (error) throw error;
 
-      const updated = pipelines.map((p) =>
-        p.id === activePipelineId ? { ...p, name: newName } : p
-      );
-      setPipelines(updated);
-      try {
-        localStorage.setItem('crm_cached_pipelines', JSON.stringify(updated));
-      } catch (e) { }
-
-      setIsEditingPipelineName(false);
+      setPipelines(prev => prev.map(p => p.id === editingPipelineId ? { ...p, name: trimmed } : p));
       showToast('Pipeline renamed.');
     } catch (err) {
       console.error('Error renaming pipeline:', err);
@@ -293,220 +226,230 @@ export default function PipelineSettingsView({ currentUser }) {
   };
 
   // Delete pipeline
-  const handleDeletePipeline = async () => {
+  const handleDeletePipeline = async (pipeToDelete, e) => {
+    if (e) e.stopPropagation();
+
     if (pipelines.length <= 1) {
-      showToast('Cannot delete the only pipeline.');
-      return;
-    }
-    const target = currentPipeline;
-    if (target?.is_default) {
-      showToast('The default pipeline cannot be deleted.');
+      alert('You must have at least one pipeline in your CRM.');
       return;
     }
 
-    if (!window.confirm(`Delete pipeline "${target?.name}"? Any attached forms will be unlinked.`)) {
-      return;
-    }
+    const pLeads = allLeads.filter(l => l.pipeline_id === pipeToDelete.id || (!l.pipeline_id && pipeToDelete.is_default));
+    const otherPipes = pipelines.filter(p => p.id !== pipeToDelete.id);
+    const targetFallbackPipe = otherPipes.find(p => p.is_default) || otherPipes[0];
+
+    const confirmMsg = pLeads.length > 0
+      ? `Delete pipeline "${pipeToDelete.name}"? ${pLeads.length} lead(s) will be transferred to "${targetFallbackPipe.name}".`
+      : `Delete pipeline "${pipeToDelete.name}"?`;
+
+    if (!window.confirm(confirmMsg)) return;
 
     try {
-      const { error } = await supabase.from('pipelines').delete().eq('id', activePipelineId);
+      if (pipeToDelete.is_default && targetFallbackPipe) {
+        await supabase
+          .from('pipelines')
+          .update({ is_default: true })
+          .eq('id', targetFallbackPipe.id);
+      }
+
+      if (pLeads.length > 0 && targetFallbackPipe) {
+        await supabase
+          .from('leads')
+          .update({ pipeline_id: targetFallbackPipe.id })
+          .eq('pipeline_id', pipeToDelete.id);
+      }
+
+      await supabase
+        .from('connected_forms')
+        .update({ pipeline_id: targetFallbackPipe?.id || null })
+        .eq('pipeline_id', pipeToDelete.id);
+
+      const { error } = await supabase.from('pipelines').delete().eq('id', pipeToDelete.id);
       if (error) throw error;
 
-      // Unlink forms in state
-      setConnectedForms((prev) =>
-        prev.map((f) => (f.pipeline_id === activePipelineId ? { ...f, pipeline_id: null } : f))
-      );
+      const remaining = pipelines
+        .filter(p => p.id !== pipeToDelete.id)
+        .map(p => pipeToDelete.is_default && p.id === targetFallbackPipe.id ? { ...p, is_default: true } : p);
 
-      const remaining = pipelines.filter((p) => p.id !== activePipelineId);
       setPipelines(remaining);
-      try {
-        localStorage.setItem('crm_cached_pipelines', JSON.stringify(remaining));
-      } catch (e) { }
 
-      const nextActive = remaining.find((p) => p.is_default) || remaining[0];
-      setActivePipelineId(nextActive.id);
-      setStages(nextActive.stages || []);
-      setInitialStages(nextActive.stages || []);
-      showToast('Pipeline deleted.');
+      if (editingPipelineId === pipeToDelete.id) {
+        setEditingPipelineId(null);
+        setStages([]);
+        setInitialStages([]);
+      }
+
+      showToast(`Pipeline deleted.${pLeads.length > 0 ? ` Leads moved to "${targetFallbackPipe.name}".` : ''}`);
     } catch (err) {
       console.error('Error deleting pipeline:', err);
       showToast('Failed to delete pipeline.');
     }
   };
 
-  // Set or unlink attached form for the active pipeline (1-to-1)
-  const handleSetAttachedForm = async (targetFormId) => {
+  // Form association
+  const handleFormChange = async (formId) => {
     try {
-      // 1. Unlink whatever form was previously attached to activePipelineId
-      if (attachedForm && attachedForm.form_id !== targetFormId) {
+      if (attachedForm) {
         await supabase
           .from('connected_forms')
-          .update({ pipeline_id: null, updated_at: new Date().toISOString() })
+          .update({ pipeline_id: null })
           .eq('form_id', attachedForm.form_id);
       }
 
-      // 2. If targetFormId provided, link it to activePipelineId
-      if (targetFormId) {
+      if (formId) {
         await supabase
           .from('connected_forms')
-          .update({ pipeline_id: activePipelineId, updated_at: new Date().toISOString() })
-          .eq('form_id', targetFormId);
+          .update({ pipeline_id: editingPipelineId })
+          .eq('form_id', formId);
       }
 
-      // 3. Update local state
-      setConnectedForms((prev) =>
-        prev.map((f) => {
-          if (f.form_id === targetFormId) {
-            return { ...f, pipeline_id: activePipelineId };
-          }
-          if (f.pipeline_id === activePipelineId && f.form_id !== targetFormId) {
-            return { ...f, pipeline_id: null };
-          }
-          return f;
-        })
-      );
+      const { data: updatedForms } = await supabase.from('connected_forms').select('*');
+      if (updatedForms) {
+        setConnectedForms(updatedForms);
+      }
 
-      const formObj = connectedForms.find((f) => f.form_id === targetFormId);
-      showToast(targetFormId ? `Attached "${formObj?.form_name || targetFormId}"` : 'Form unlinked from pipeline.');
+      showToast(formId ? 'Meta form linked.' : 'Meta form unlinked.');
     } catch (err) {
-      console.error('Error updating form mapping:', err);
+      console.error('Error updating form:', err);
       showToast('Failed to update form attachment.');
     }
   };
 
-  // Discard changes
-  const handleReset = () => {
-    setStages(initialStages);
-    showToast('Discarded unsaved changes.');
+  // Stage Manipulation
+  const handleLabelChange = (index, newLabel) => {
+    setStages(prev => prev.map((st, i) => i === index ? { ...st, label: newLabel } : st));
   };
 
-  // Move stage UP
+  const handleSetEntryStage = (stageId) => {
+    setStages(prev => prev.map(st => ({
+      ...st,
+      is_entry: st.id === stageId
+    })));
+  };
+
+  const stageItemRefs = useRef(new Map());
+  const prevRects = useRef(new Map());
+
+  const captureStagePositions = () => {
+    const map = new Map();
+    stageItemRefs.current.forEach((el, id) => {
+      if (el) {
+        map.set(id, el.getBoundingClientRect());
+      }
+    });
+    prevRects.current = map;
+  };
+
+  useLayoutEffect(() => {
+    if (prevRects.current.size === 0) return;
+
+    stageItemRefs.current.forEach((el, id) => {
+      if (!el) return;
+      const prevRect = prevRects.current.get(id);
+      if (!prevRect) return;
+
+      const newRect = el.getBoundingClientRect();
+      const deltaY = prevRect.top - newRect.top;
+
+      if (deltaY !== 0) {
+        el.style.transform = `translateY(${deltaY}px)`;
+        el.style.transition = 'none';
+
+        requestAnimationFrame(() => {
+          el.style.transition = 'transform 240ms cubic-bezier(0.2, 0, 0, 1)';
+          el.style.transform = '';
+        });
+      }
+    });
+
+    prevRects.current.clear();
+  }, [stages]);
+
   const handleMoveUp = (index) => {
     if (index === 0) return;
-    setStages((prev) => {
+    captureStagePositions();
+    setStages(prev => {
       const copy = [...prev];
       const temp = copy[index - 1];
       copy[index - 1] = copy[index];
       copy[index] = temp;
-      return copy.map((st, i) => ({ ...st, order: i }));
+      return copy;
     });
   };
 
-  // Move stage DOWN
   const handleMoveDown = (index) => {
     if (index === stages.length - 1) return;
-    setStages((prev) => {
+    captureStagePositions();
+    setStages(prev => {
       const copy = [...prev];
       const temp = copy[index + 1];
       copy[index + 1] = copy[index];
       copy[index] = temp;
-      return copy.map((st, i) => ({ ...st, order: i }));
+      return copy;
     });
   };
 
-  // Update stage label
-  const handleLabelChange = (index, newLabel) => {
-    setStages((prev) =>
-      prev.map((st, i) => (i === index ? { ...st, label: newLabel } : st))
-    );
+  const handleAddStage = (e) => {
+    e.preventDefault();
+    const label = newStageName.trim();
+    if (!label) return;
+
+    const newId = `stage_${Date.now()}`;
+    const newStage = {
+      id: newId,
+      label,
+      order: stages.length,
+      is_entry: stages.length === 0
+    };
+
+    setStages(prev => [...prev, newStage]);
+    setNewStageName('');
   };
 
-  // Set explicit entry stage
-  const handleSetEntryStage = (stageId) => {
-    setStages((prev) =>
-      prev.map((st) => ({
-        ...st,
-        is_entry: st.id === stageId
-      }))
-    );
-    const target = stages.find((s) => s.id === stageId);
-    showToast(`Set "${target?.label || stageId}" as Entry Stage.`);
-  };
-
-  // Delete stage with orphan migration
   const handleDeleteStage = async (index) => {
     const stageToDelete = stages[index];
     if (stageToDelete.is_entry) {
-      showToast('The designated Entry Stage cannot be deleted.');
+      alert('The Entry Stage cannot be deleted. Designate another stage as Entry Stage first.');
       return;
     }
-
     if (stages.length <= 2) {
-      showToast('A pipeline requires at least 2 stages.');
+      alert('A pipeline requires at least 2 stages.');
       return;
     }
 
-    const fallbackStage = stages.find((s) => s.is_entry && s.id !== stageToDelete.id) || stages[0];
-    const fallbackStageId = fallbackStage?.id;
+    const count = leadCounts[stageToDelete.id] || 0;
+    const entryStage = stages.find(s => s.is_entry) || stages[0];
 
-    try {
-      const { data: affectedLeads, error: selectErr } = await supabase
-        .from('leads')
-        .select('id')
-        .eq('stage', stageToDelete.id)
-        .eq('pipeline_id', activePipelineId);
+    const confirmMsg = count > 0
+      ? `Delete "${stageToDelete.label}"? ${count} lead(s) will be moved to "${entryStage.label}".`
+      : `Delete "${stageToDelete.label}"?`;
 
-      if (!selectErr && affectedLeads && affectedLeads.length > 0) {
+    if (!window.confirm(confirmMsg)) return;
+
+    if (count > 0 && entryStage) {
+      try {
         await supabase
           .from('leads')
-          .update({ stage: fallbackStageId })
-          .eq('stage', stageToDelete.id)
-          .eq('pipeline_id', activePipelineId);
+          .update({ stage: entryStage.id })
+          .eq('stage', stageToDelete.id);
 
-        setAllLeads((prev) =>
-          prev.map((l) =>
-            l.pipeline_id === activePipelineId && l.stage === stageToDelete.id
-              ? { ...l, stage: fallbackStageId }
-              : l
-          )
-        );
-        showToast(`Migrated ${affectedLeads.length} lead(s) to "${fallbackStage?.label}".`);
+        setAllLeads(prev => prev.map(l => l.stage === stageToDelete.id ? { ...l, stage: entryStage.id } : l));
+      } catch (err) {
+        console.error('Error migrating leads on delete:', err);
       }
-    } catch (err) {
-      console.warn('Error migrating leads on delete:', err);
     }
 
-    setStages((prev) => prev.filter((_, i) => i !== index).map((st, i) => ({ ...st, order: i })));
+    setStages(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Add new stage
-  const handleAddStage = (e) => {
-    e.preventDefault();
-    if (!newStageName.trim()) return;
-
-    const baseId = newStageName
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]/g, '_');
-    const uniqueId = stages.some((s) => s.id === baseId)
-      ? `${baseId}_${Date.now().toString().slice(-4)}`
-      : baseId;
-
-    const autoDotClass = AUTO_DOT_CLASSES[stages.length % AUTO_DOT_CLASSES.length];
-
-    const newStageObj = {
-      id: uniqueId,
-      label: newStageName.trim(),
-      dotClass: autoDotClass,
-      order: stages.length,
-      is_entry: false
-    };
-
-    setStages((prev) => [...prev, newStageObj]);
-    setNewStageName('');
-    showToast(`Added stage "${newStageObj.label}"`);
-  };
-
-  // Save changes to Supabase
   const handleSave = async () => {
-    if (!activePipelineId) return;
+    if (!editingPipelineId) return;
     setIsSaving(true);
 
     try {
       const normalizedStages = stages.map((st, idx) => ({
         id: st.id,
         label: st.label,
-        dotClass: st.dotClass || AUTO_DOT_CLASSES[idx % AUTO_DOT_CLASSES.length],
         order: idx,
         is_entry: Boolean(st.is_entry)
       }));
@@ -517,27 +460,23 @@ export default function PipelineSettingsView({ currentUser }) {
           stages: normalizedStages,
           updated_at: new Date().toISOString()
         })
-        .eq('id', activePipelineId);
+        .eq('id', editingPipelineId);
 
       if (error) throw error;
 
       setInitialStages(normalizedStages);
-      setPipelines((prev) =>
-        prev.map((p) =>
-          p.id === activePipelineId ? { ...p, stages: normalizedStages } : p
-        )
-      );
+      setPipelines(prev => prev.map(p => p.id === editingPipelineId ? { ...p, stages: normalizedStages } : p));
 
-      if (currentPipeline?.is_default) {
+      if (activePipeline?.is_default) {
         try {
           localStorage.setItem('crm_pipeline_columns', JSON.stringify(normalizedStages));
         } catch (e) { }
       }
 
-      showToast('Pipeline changes saved successfully.');
+      showToast('Changes saved.');
     } catch (err) {
-      console.error('Error saving pipeline stages:', err);
-      showToast('Failed to save pipeline changes.');
+      console.error('Error saving stages:', err);
+      showToast('Failed to save changes.');
     } finally {
       setIsSaving(false);
     }
@@ -547,14 +486,8 @@ export default function PipelineSettingsView({ currentUser }) {
     return (
       <div className="pipeline-view-container">
         <div className="pipeline-view-inner">
-          <div className="pipeline-header-block">
-            <div className="pipeline-header-left">
-              <Skeleton width="180px" height="24px" />
-              <Skeleton width="340px" height="14px" />
-            </div>
-            <Skeleton width="120px" height="32px" borderRadius="6px" />
-          </div>
-          <Skeleton width="100%" height="380px" borderRadius="8px" />
+          <Skeleton width="100%" height="36px" borderRadius="6px" />
+          <Skeleton width="100%" height="280px" borderRadius="8px" />
         </div>
       </div>
     );
@@ -567,11 +500,11 @@ export default function PipelineSettingsView({ currentUser }) {
           <div style={{ display: 'inline-flex', padding: '16px', background: '#f1f5f9', borderRadius: '50%', marginBottom: '16px', color: '#64748b' }}>
             <ShieldAlert size={32} strokeWidth={1.5} />
           </div>
-          <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#0f172a', marginBottom: '8px' }}>
+          <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a', marginBottom: '6px' }}>
             Access Restricted
           </h2>
-          <p style={{ fontSize: '13.5px', color: '#64748b', maxWidth: '420px', margin: '0 auto', lineHeight: 1.5 }}>
-            You do not have permission to view or manage pipeline stages. Please contact your CRM administrator to request access.
+          <p style={{ fontSize: '13px', color: '#64748b' }}>
+            You do not have permission to view or manage pipelines.
           </p>
         </div>
       </div>
@@ -580,381 +513,427 @@ export default function PipelineSettingsView({ currentUser }) {
 
   return (
     <div className="pipeline-view-container">
-      <div className="pipeline-view-inner">
-
-        {/* 1. Multi-Pipeline Switcher Tabs */}
-        <div className="pipeline-switcher-container">
-          <div className="pipeline-tabs-list">
-            {pipelines.map((p) => {
-              const isActive = p.id === activePipelineId;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`pipeline-tab-btn ${isActive ? 'active' : ''}`}
-                  onClick={() => handleSelectPipeline(p.id)}
-                >
-                  <span>{p.name}</span>
-                  {p.is_default && <span className="pipeline-default-pill">Default</span>}
-                </button>
-              );
-            })}
-
-            {isCreatingPipeline ? (
-              <form onSubmit={handleCreatePipelineSubmit} className="pipeline-new-form">
-                <input
-                  type="text"
-                  autoFocus
-                  placeholder="Pipeline name..."
-                  value={newPipelineName}
-                  onChange={(e) => setNewPipelineName(e.target.value)}
-                  className="pipeline-new-input"
-                />
-                <button type="submit" className="pipeline-new-submit-btn" disabled={!newPipelineName.trim()} title="Create">
-                  <Check size={12} />
-                </button>
-                <button type="button" className="pipeline-new-cancel-btn" onClick={() => setIsCreatingPipeline(false)} title="Cancel">
-                  <X size={12} />
-                </button>
-              </form>
-            ) : (
-              canEdit && (
-                <button
-                  type="button"
-                  className="pipeline-add-tab-btn"
-                  onClick={() => {
-                    setNewPipelineName('');
-                    setIsCreatingPipeline(true);
-                  }}
-                  title="Create new pipeline"
-                >
-                  <Plus size={13} />
-                  <span>New Pipeline</span>
-                </button>
-              )
-            )}
-          </div>
-        </div>
-
-        {/* 2. Active Pipeline Header Block */}
-        <div className="pipeline-header-block">
-          <div className="pipeline-header-left">
-            <div className="pipeline-header-title-row">
-              {isEditingPipelineName ? (
-                <form onSubmit={handleRenamePipelineSubmit} className="pipeline-title-edit-wrap">
-                  <input
-                    type="text"
-                    autoFocus
-                    className="pipeline-title-input"
-                    value={editingNameValue}
-                    onChange={(e) => setEditingNameValue(e.target.value)}
-                  />
-                  <button type="submit" className="pipeline-title-action-btn" title="Save name">
-                    <Check size={14} color="#16a34a" />
-                  </button>
-                  <button
-                    type="button"
-                    className="pipeline-title-action-btn"
-                    onClick={() => setIsEditingPipelineName(false)}
-                    title="Cancel"
-                  >
-                    <X size={14} color="#dc2626" />
-                  </button>
-                </form>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <h1 className="pipeline-title">{currentPipeline?.name || 'Pipeline Stages'}</h1>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      className="pipeline-title-action-btn"
-                      onClick={() => {
-                        setEditingNameValue(currentPipeline?.name || '');
-                        setIsEditingPipelineName(true);
-                      }}
-                      title="Rename pipeline"
-                    >
-                      <Edit2 size={12} />
-                    </button>
-                  )}
-                  {canDelete && !currentPipeline?.is_default && pipelines.length > 1 && (
-                    <button
-                      type="button"
-                      className="pipeline-delete-btn"
-                      onClick={handleDeletePipeline}
-                      title="Delete this pipeline"
-                    >
-                      <Trash2 size={11} /> Delete
-                    </button>
-                  )}
-                </div>
-              )}
+      {/* ==============================================================
+          STATE A: MASTER VIEW (NO STAGES DIRECTLY SHOWN ON OPEN)
+          ============================================================== */}
+      {editingPipelineId === null ? (
+        <div className="pipeline-view-inner">
+          <div className="pipeline-master-header">
+            <div className="pipeline-master-title-group">
+              <h1 className="pipeline-master-title">Pipelines</h1>
+              <span className="pipeline-master-count">{pipelines.length}</span>
             </div>
-            <p className="pipeline-subtitle">
-              Configure stages and routing. Leads enter at the designated Entry Stage.
-            </p>
-          </div>
 
-          {canEdit && (
-            <div className="pipeline-header-actions">
-              {isDirty && (
-                <button
-                  type="button"
-                  className="btn-pipeline-ghost"
-                  onClick={handleReset}
-                  disabled={isSaving}
-                  title="Discard unsaved changes"
-                >
-                  <RotateCcw size={13} />
-                  <span>Discard</span>
-                </button>
-              )}
-
+            {canEdit && (
               <button
                 type="button"
-                className={`btn-pipeline-save ${isDirty ? 'active' : ''}`}
-                onClick={handleSave}
-                disabled={isSaving}
+                className="btn-minimal-save"
+                onClick={handleCreatePipeline}
               >
-                {isSaving ? (
-                  <>
-                    <RefreshCw size={13} className="spin-icon" />
-                    <span>Saving...</span>
-                  </>
-                ) : isDirty ? (
-                  <>
-                    <span className="unsaved-dot" />
-                    <span>Save Changes</span>
-                  </>
-                ) : (
-                  <>
-                    <Check size={13} strokeWidth={2.5} />
-                    <span>Saved</span>
-                  </>
-                )}
+                <Plus size={15} strokeWidth={2} />
+                <span>New Pipeline</span>
               </button>
-            </div>
-          )}
-        </div>
-
-        {/* 3. Attached Lead Form (1-to-1 Mapping) */}
-        <div className="pipeline-attached-forms-card">
-          <div className="pipeline-attached-forms-left">
-            <span className="pipeline-attached-label">Attached Form:</span>
-            {attachedForm ? (
-              <div className="pipeline-form-chip active-single">
-                <FileText size={13} color="#2563eb" />
-                <span className="pipeline-form-chip-name">
-                  {attachedForm.form_name || `Form ${attachedForm.form_id}`}
-                </span>
-                <span style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}>
-                  ID: {attachedForm.form_id}
-                </span>
-                {canEdit && (
-                  <button
-                    type="button"
-                    className="pipeline-form-chip-remove"
-                    onClick={() => handleSetAttachedForm(null)}
-                    title="Unlink form from this pipeline"
-                  >
-                    <X size={11} />
-                  </button>
-                )}
-              </div>
-            ) : (
-              <span className="pipeline-attached-empty">No lead form currently mapped to this pipeline</span>
             )}
           </div>
 
-          {canEdit && connectedForms.length > 0 && (
-            <div className="pipeline-attach-dropdown-wrap" ref={attachDropdownRef}>
-              <button
-                type="button"
-                className="btn-attach-form-trigger"
-                onClick={() => setIsAttachDropdownOpen(!isAttachDropdownOpen)}
-              >
-                <span>{attachedForm ? 'Switch Form' : 'Select Form'}</span>
-                <ChevronDown size={12} />
-              </button>
-
-              {isAttachDropdownOpen && (
-                <div className="pipeline-attach-dropdown-menu">
-                  <div className="pipeline-attach-dropdown-header">Map a form to this pipeline:</div>
-                  {connectedForms.map((f) => {
-                    const isSelected = f.form_id === attachedForm?.form_id;
-                    const otherPipe = f.pipeline_id && f.pipeline_id !== activePipelineId
-                      ? pipelines.find((p) => p.id === f.pipeline_id)
-                      : null;
-
-                    return (
-                      <div
-                        key={f.id || f.form_id}
-                        className={`pipeline-attach-dropdown-item ${isSelected ? 'selected' : ''}`}
-                        onClick={() => {
-                          handleSetAttachedForm(f.form_id);
-                          setIsAttachDropdownOpen(false);
-                        }}
-                      >
-                        <FileText size={13} color={isSelected ? '#2563eb' : '#64748b'} />
-                        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-                          <span style={{ fontSize: '12.5px', fontWeight: isSelected ? 600 : 500, color: '#0f172a' }}>
-                            {f.form_name || `Form ${f.form_id}`}
-                          </span>
-                          <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>
-                            ID: {f.form_id} {otherPipe ? `• (Currently on: ${otherPipe.name})` : ''}
-                          </span>
-                        </div>
-                        {isSelected && <Check size={12} color="#2563eb" />}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* 4. Stages Table Card (Scoped to Active Pipeline) */}
-        <div className="pipeline-table-card">
-          {/* Table Head */}
-          <div className="pipeline-table-head">
-            <div className="th-order">Order</div>
-            <div className="th-stage">Stage Name</div>
-            <div className="th-type">Type</div>
-            <div className="th-volume">Active Leads</div>
-            <div className="th-actions">{canEdit || canDelete ? 'Actions' : ''}</div>
-          </div>
-
-          {/* Rows Stack */}
-          <div className="pipeline-rows-stack">
-            {stages.map((stage, idx) => {
-              const count = leadCounts[stage.id] || 0;
-              const isEntry = Boolean(stage.is_entry);
+          <div className="pipeline-cards-list">
+            {pipelines.map((pipe) => {
+              const pipeStages = Array.isArray(pipe.stages) ? pipe.stages : [];
+              const pipeLeads = allLeads.filter(l => l.pipeline_id === pipe.id || (!l.pipeline_id && pipe.is_default));
+              const form = connectedForms.find(f => f.pipeline_id === pipe.id);
 
               return (
                 <div
-                  key={stage.id}
-                  className={`pipeline-stage-row ${isEntry ? 'is-entry' : ''}`}
+                  key={pipe.id}
+                  className="pipeline-card-row"
+                  onClick={() => handleOpenConfigure(pipe)}
                 >
-                  {/* 1. Cell Order */}
-                  <div className="cell-order">
-                    <div className="order-reorder-group">
-                      <button
-                        type="button"
-                        className="btn-reorder-chevron"
-                        disabled={!canEdit || idx === 0}
-                        onClick={() => handleMoveUp(idx)}
-                        title={!canEdit ? 'Pipeline editing restricted' : 'Move up in pipeline'}
-                      >
-                        <ChevronUp size={11} strokeWidth={2.5} />
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-reorder-chevron"
-                        disabled={!canEdit || idx === stages.length - 1}
-                        onClick={() => handleMoveDown(idx)}
-                        title={!canEdit ? 'Pipeline editing restricted' : 'Move down in pipeline'}
-                      >
-                        <ChevronDown size={11} strokeWidth={2.5} />
-                      </button>
+                  <div className="pipeline-card-main">
+                    <h3 className="pipeline-card-title">{pipe.name}</h3>
+                    <div className="pipeline-card-meta">
+                      <span>{pipeStages.length} {pipeStages.length === 1 ? 'stage' : 'stages'}</span>
+                      <span className="pipeline-card-dot">·</span>
+                      <span>{pipeLeads.length} {pipeLeads.length === 1 ? 'lead' : 'leads'}</span>
+                      {form && (
+                        <>
+                          <span className="pipeline-card-dot">·</span>
+                          <span className="pipeline-card-form">
+                            {form.form_name || `Form ${form.form_id}`}
+                          </span>
+                        </>
+                      )}
                     </div>
-                    <span className="order-index-pill">
-                      {String(idx + 1).padStart(2, '0')}
-                    </span>
                   </div>
 
-                  {/* 2. Cell Stage Name */}
-                  <div className="cell-stage-name">
-                    <input
-                      type="text"
-                      value={stage.label}
-                      onChange={(e) => handleLabelChange(idx, e.target.value)}
-                      className="stage-name-input-clean"
-                      placeholder="Stage Name"
-                      readOnly={!canEdit}
-                      style={!canEdit ? { cursor: 'default', background: 'transparent' } : {}}
-                    />
-                  </div>
+                  <div className="pipeline-card-actions">
+                    <button
+                      type="button"
+                      className="btn-card-configure"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenConfigure(pipe);
+                      }}
+                    >
+                      <span>Configure</span>
+                      <ArrowRight size={14} strokeWidth={2} />
+                    </button>
 
-                  {/* 3. Cell Type */}
-                  <div className="cell-type">
-                    {isEntry ? (
-                      <span
-                        className="badge-entry-pill"
-                        title="Default landing stage for incoming leads"
-                      >
-                        <span className="badge-pulse-dot" />
-                        Entry Stage
-                      </span>
-                    ) : canEdit ? (
+                    {canDelete && (
                       <button
                         type="button"
-                        className="badge-set-entry-btn"
-                        onClick={() => handleSetEntryStage(stage.id)}
-                        title="Click to set as default landing stage for incoming leads"
+                        className="btn-card-delete"
+                        disabled={pipelines.length <= 1}
+                        onClick={(e) => handleDeletePipeline(pipe, e)}
+                        title={pipelines.length <= 1 ? 'Minimum 1 pipeline required' : 'Delete pipeline'}
                       >
-                        Set as Entry
+                        <Trash2 size={16} />
                       </button>
-                    ) : null}
-                  </div>
-
-                  {/* 4. Cell Active Leads Volume */}
-                  <div className="cell-volume">
-                    <span className="lead-count-chip">
-                      {count} {count === 1 ? 'lead' : 'leads'}
-                    </span>
-                  </div>
-
-                  {/* 5. Cell Actions */}
-                  <div className="cell-actions">
-                    {canDelete ? (
-                      <button
-                        type="button"
-                        className="btn-trash-action"
-                        disabled={isEntry || stages.length <= 2}
-                        onClick={() => handleDeleteStage(idx)}
-                        title={
-                          isEntry
-                            ? 'The designated Entry Stage cannot be deleted. Set another stage as Entry Stage first.'
-                            : stages.length <= 2
-                              ? 'Minimum 2 stages required'
-                              : `Remove stage (${count} lead${count === 1 ? '' : 's'} will migrate to Entry Stage)`
-                        }
-                      >
-                        <Trash2 size={13} strokeWidth={2} />
-                      </button>
-                    ) : (
-                      <span style={{ fontSize: '12px', color: '#cbd5e1' }}>—</span>
                     )}
                   </div>
                 </div>
               );
             })}
           </div>
-
-          {/* Inline Add Stage Footer */}
-          {canEdit && (
-            <form onSubmit={handleAddStage} className="pipeline-inline-add-row">
-              <input
-                type="text"
-                value={newStageName}
-                onChange={(e) => setNewStageName(e.target.value)}
-                placeholder="Add new stage name (e.g. Discovery Call, Agreement Signed)..."
-                className="inline-add-input"
-              />
-
-              <button
-                type="submit"
-                className="btn-inline-add-stage"
-                disabled={!newStageName.trim()}
-              >
-                <Plus size={13} strokeWidth={2.5} />
-                <span>Add Stage</span>
-              </button>
-            </form>
-          )}
         </div>
-      </div>
+      ) : (
+        /* ==============================================================
+           STATE B: CONFIGURE SPLIT LAYOUT (COLLAPSED ADMIN SUBNAV + DEDICATED PIPELINE SUBNAV)
+           ============================================================== */
+        <div className="pipeline-config-layout">
+          {/* Left Contextual Pipeline Sidebar */}
+          <div className="pipeline-config-subnav">
+            <div className="pipeline-config-identity">
+              <div className="pipeline-config-title-row">
+                <h2 className="pipeline-config-title" title={activePipeline?.name}>
+                  {activePipeline?.name}
+                </h2>
+              </div>
+            </div>
+
+            {/* Pipeline Configure Tabs List */}
+            <ul className="pipeline-config-nav-list">
+              <li>
+                <button
+                  type="button"
+                  className={`pipeline-config-nav-btn ${configureSubTab === 'general' ? 'active' : ''}`}
+                  onClick={() => setConfigureSubTab('general')}
+                >
+                  <Sliders size={20} strokeWidth={1.75} />
+                  <span>General</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className={`pipeline-config-nav-btn ${configureSubTab === 'stages' ? 'active' : ''}`}
+                  onClick={() => setConfigureSubTab('stages')}
+                >
+                  <GitFork size={20} strokeWidth={1.75} />
+                  <span>Stages</span>
+                </button>
+              </li>
+            </ul>
+
+            {/* Bottom Back Button */}
+            <div className="pipeline-config-bottom-back">
+              <button
+                type="button"
+                className="pipeline-config-nav-btn pipeline-config-back-btn"
+                onClick={handleBackToList}
+                title="Return to Pipelines overview"
+              >
+                <ArrowLeft size={20} strokeWidth={1.75} />
+                <span>All Pipelines</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Right Content Workspace Pane */}
+          <div className="pipeline-config-content">
+            {/* Fixed Top-Right Actions (only applicable to Stages tab) */}
+            {configureSubTab === 'stages' && (
+              <div className="pipeline-content-actions-fixed">
+                {canEdit && isDirty && (
+                  <button
+                    type="button"
+                    className="btn-minimal"
+                    onClick={() => setStages(initialStages)}
+                    disabled={isSaving}
+                  >
+                    <RotateCcw size={12} />
+                    <span>Discard</span>
+                  </button>
+                )}
+
+                {canEdit && (
+                  <button
+                    type="button"
+                    className="btn-minimal-save"
+                    onClick={handleSave}
+                    disabled={isSaving || !isDirty}
+                  >
+                    {isSaving ? (
+                      <>
+                        <RefreshCw size={12} className="spin-icon" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        {isDirty && <span className="unsaved-dot" />}
+                        <span>Save Changes</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* TAB 1: GENERAL CONTENT */}
+            {configureSubTab === 'general' && (
+              <div className="pipeline-general-wrap">
+                {/* 1. Pipeline Name Section */}
+                <div className="pipeline-general-section">
+                  <label className="pipeline-general-label">Pipeline Name</label>
+                  <form onSubmit={handleRenameSubmit} className="pipeline-name-row">
+                    <input
+                      type="text"
+                      className="pipeline-name-input"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={handleRenameSubmit}
+                      placeholder="e.g. Sales Pipeline"
+                      readOnly={!canEdit}
+                    />
+                  </form>
+                </div>
+
+                {/* 2. Lead Source Section */}
+                <div className="pipeline-general-section">
+                  <label className="pipeline-general-label">Lead Source</label>
+
+                  {attachedForm ? (
+                    <div className="pipeline-source-row">
+                      <div className="pipeline-source-info">
+                        <span className="pipeline-source-name">{attachedForm.form_name || `Form ${attachedForm.form_id}`}</span>
+                        <div className="pipeline-source-subtext">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="#1877F2" style={{ flexShrink: 0 }}>
+                            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                          </svg>
+                          <span>ID: {attachedForm.form_id}</span>
+                        </div>
+                      </div>
+
+                      {canEdit && (
+                        <div className="pipeline-source-actions">
+                          {isChangingForm ? (
+                            <>
+                              <select
+                                className="pipeline-source-select-clean"
+                                value=""
+                                autoFocus
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    handleFormChange(e.target.value);
+                                    setIsChangingForm(false);
+                                  }
+                                }}
+                              >
+                                <option value="">Choose new form...</option>
+                                {connectedForms
+                                  .filter(f => f.form_id !== attachedForm.form_id)
+                                  .map(f => {
+                                    const otherPipe = f.pipeline_id && f.pipeline_id !== editingPipelineId
+                                      ? pipelines.find(p => p.id === f.pipeline_id)
+                                      : null;
+                                    return (
+                                      <option key={f.form_id} value={f.form_id}>
+                                        {f.form_name || `Form ${f.form_id}`} {otherPipe ? `(on: ${otherPipe.name})` : ''}
+                                      </option>
+                                    );
+                                  })}
+                              </select>
+                              <button
+                                type="button"
+                                className="btn-source-cancel"
+                                onClick={() => setIsChangingForm(false)}
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="btn-source-change"
+                                onClick={() => setIsChangingForm(true)}
+                              >
+                                Change
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-source-action-icon"
+                                onClick={() => handleFormChange(null)}
+                                data-tooltip="Disconnect form"
+                                data-tooltip-pos="right-edge"
+                                aria-label="Disconnect form"
+                              >
+                                <Unlink size={15} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="pipeline-source-row">
+                      <div className="pipeline-source-info">
+                        <span className="pipeline-source-name">No Form Connected</span>
+                        <div className="pipeline-source-subtext">
+                          Select a Meta Lead form to start auto-routing leads.
+                        </div>
+                      </div>
+
+                      {canEdit && (
+                        <div className="pipeline-source-actions">
+                          <select
+                            className="pipeline-source-select-clean"
+                            value=""
+                            onChange={(e) => handleFormChange(e.target.value || null)}
+                          >
+                            <option value="">Select a form...</option>
+                            {connectedForms.map(f => {
+                              const otherPipe = f.pipeline_id && f.pipeline_id !== editingPipelineId
+                                ? pipelines.find(p => p.id === f.pipeline_id)
+                                : null;
+                              return (
+                                <option key={f.form_id} value={f.form_id}>
+                                  {f.form_name || `Form ${f.form_id}`} {otherPipe ? `(currently on: ${otherPipe.name})` : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: STAGES CONTENT */}
+            {configureSubTab === 'stages' && (
+              <div className="pipeline-numbered-list-wrap">
+                {stages.map((st, idx) => {
+                  const isEntry = Boolean(st.is_entry);
+
+                  return (
+                    <div
+                      key={st.id}
+                      ref={(el) => {
+                        if (el) {
+                          stageItemRefs.current.set(st.id, el);
+                        } else {
+                          stageItemRefs.current.delete(st.id);
+                        }
+                      }}
+                      className="pipeline-numbered-item"
+                    >
+                      <div className="pipeline-numbered-left">
+                        <span className="pipeline-number-index">{idx + 1}</span>
+                        <input
+                          type="text"
+                          className="pipeline-number-input"
+                          value={st.label}
+                          onChange={(e) => handleLabelChange(idx, e.target.value)}
+                          readOnly={!canEdit}
+                        />
+                      </div>
+
+                      <div className="pipeline-numbered-actions">
+                        {isEntry ? (
+                          <span
+                            className="btn-entry-icon active"
+                            data-tooltip="Entry Stage: All new incoming leads land here"
+                          >
+                            <ArrowDownLeft size={17} strokeWidth={2.25} />
+                          </span>
+                        ) : (
+                          canEdit && (
+                            <button
+                              type="button"
+                              className="btn-entry-icon"
+                              onClick={() => handleSetEntryStage(st.id)}
+                              data-tooltip="Set as Entry Stage for incoming leads"
+                            >
+                              <ArrowDownLeft size={17} strokeWidth={2.25} />
+                            </button>
+                          )
+                        )}
+
+                        <div className="pipeline-arrows-group">
+                          <button
+                            type="button"
+                            className="btn-arrow-standalone"
+                            disabled={!canEdit || idx === 0}
+                            onClick={() => handleMoveUp(idx)}
+                          >
+                            <ChevronUp size={18} strokeWidth={2.25} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-arrow-standalone"
+                            disabled={!canEdit || idx === stages.length - 1}
+                            onClick={() => handleMoveDown(idx)}
+                          >
+                            <ChevronDown size={18} strokeWidth={2.25} />
+                          </button>
+                        </div>
+
+                        {canDelete && (
+                          <button
+                            type="button"
+                            className="btn-number-trash"
+                            disabled={isEntry || stages.length <= 2}
+                            onClick={() => handleDeleteStage(idx)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Minimal Inline Add Stage Next Row */}
+                {canEdit && (
+                  <form onSubmit={handleAddStage} className="pipeline-numbered-item pipeline-add-row-minimal">
+                    <div className="pipeline-numbered-left">
+                      <span className="pipeline-number-index pipeline-number-index-ghost">
+                        {stages.length + 1}
+                      </span>
+                      <input
+                        type="text"
+                        className="pipeline-number-input pipeline-add-input-minimal"
+                        placeholder="Add a stage..."
+                        value={newStageName}
+                        onChange={(e) => setNewStageName(e.target.value)}
+                      />
+                    </div>
+
+                    {newStageName.trim() && (
+                      <div className="pipeline-numbered-actions">
+                        <button type="submit" className="btn-add-minimal-pill">
+                          Add
+                        </button>
+                      </div>
+                    )}
+                  </form>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Floating Toast Notification */}
       {toast && (

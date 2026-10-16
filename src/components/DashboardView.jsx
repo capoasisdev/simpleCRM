@@ -124,10 +124,17 @@ export default function DashboardView({ currentUser, onLogout }) {
     initialLoc.adminSub === 'routing' ? 'automations' : (initialLoc.adminSub || (canManageUsers ? 'users' : 'automations'))
   );
 
+  const [isPipelineConfiguring, setIsPipelineConfiguring] = useState(false);
+
   const navigateTo = (tabName, subTab = 'users') => {
     setActiveTab(tabName);
     if (tabName === 'Admin') {
       setAdminSubTab(subTab);
+      if (subTab !== 'stages') {
+        setIsPipelineConfiguring(false);
+      }
+    } else {
+      setIsPipelineConfiguring(false);
     }
     const path = getRouteForTab(tabName, subTab);
     if (window.location.pathname !== path) {
@@ -970,7 +977,7 @@ export default function DashboardView({ currentUser, onLogout }) {
           {activeTab === 'Admin' && (
             <div className="settings-workspace-layout">
               {/* Secondary Settings Sub-navigation inside Settings Main Section */}
-              <div className="settings-subnav-pane">
+              <div className={`settings-subnav-pane ${adminSubTab === 'stages' && isPipelineConfiguring ? 'settings-subnav-collapsed' : ''}`}>
                 <ul className="settings-subnav-list">
                   {[
                     ...(canManageUsers || user.role === 'admin' ? [{ id: 'users', label: 'Users', icon: Users }] : []),
@@ -1009,7 +1016,12 @@ export default function DashboardView({ currentUser, onLogout }) {
                 {adminSubTab === 'integrations' && (canManageMeta || user.role === 'admin') && (
                   <MetaIntegrationView currentUser={user} />
                 )}
-                {adminSubTab === 'stages' && <PipelineSettingsView currentUser={user} />}
+                {adminSubTab === 'stages' && (
+                  <PipelineSettingsView
+                    currentUser={user}
+                    onConfigureStateChange={setIsPipelineConfiguring}
+                  />
+                )}
                 {adminSubTab === 'backups' && user.role === 'admin' && <BackupsView currentUser={user} />}
               </div>
             </div>

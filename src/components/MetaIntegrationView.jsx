@@ -16,7 +16,8 @@ import {
   EyeOff,
   AlertTriangle,
   Key,
-  ShieldCheck
+  ShieldCheck,
+  Unlink
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
@@ -154,10 +155,10 @@ export default function MetaIntegrationView({ currentUser }) {
       }
     } catch (e) { }
     return {
-      app_id: '',
-      app_secret: '',
+      app_id: import.meta.env.VITE_META_APP_ID || '',
+      app_secret: import.meta.env.VITE_META_APP_SECRET || '',
       access_token: '',
-      verify_token: '',
+      verify_token: import.meta.env.VITE_META_VERIFY_TOKEN || '',
       ad_account_id: '',
       lead_form_ids: '',
       is_connected: false,
@@ -213,8 +214,25 @@ export default function MetaIntegrationView({ currentUser }) {
   const [showManualConfig, setShowManualConfig] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
+  const [isTokenFocused, setIsTokenFocused] = useState(false);
+  const [isSecretFocused, setIsSecretFocused] = useState(false);
   const [isSavingManual, setIsSavingManual] = useState(false);
   const [manualFeedback, setManualFeedback] = useState(null);
+
+  const formatTokenDisplay = (val, isFocused, isRevealed) => {
+    if (!val) return '';
+    if (isRevealed || isFocused) return val;
+    if (val.startsWith('EAA')) {
+      return `${val.slice(0, 4)} ••••••••••••••••`;
+    }
+    return '••••••••••••••••';
+  };
+
+  const formatSecretDisplay = (val, isFocused, isRevealed) => {
+    if (!val) return '';
+    if (isRevealed || isFocused) return val;
+    return '••••••••••••••••';
+  };
 
   // Asset Selection Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -276,10 +294,10 @@ export default function MetaIntegrationView({ currentUser }) {
         if (!error && data && isMounted) {
           setRowId(data.id);
           const newConf = {
-            app_id: data.app_id || '',
-            app_secret: data.app_secret || '',
+            app_id: data.app_id || import.meta.env.VITE_META_APP_ID || '',
+            app_secret: data.app_secret || import.meta.env.VITE_META_APP_SECRET || '',
             access_token: data.access_token || '',
-            verify_token: data.verify_token || '',
+            verify_token: data.verify_token || import.meta.env.VITE_META_VERIFY_TOKEN || '',
             ad_account_id: data.ad_account_id || '',
             lead_form_ids: (data.lead_form_ids || []).join(', '),
             is_connected: data.is_connected || false,
@@ -802,13 +820,10 @@ export default function MetaIntegrationView({ currentUser }) {
 
   return (
     <div className="meta-container">
-      <div className="meta-toolbar">
-        <div>
-          <h1 className="meta-main-title">Meta Integration</h1>
+      <div className="meta-inner">
+        <div className="meta-master-header">
+          <h1 className="meta-master-title">Meta Integration</h1>
         </div>
-      </div>
-
-      <div className="meta-body">
 
         {/* Success / Error Banners */}
         {fbSuccessBanner && (
@@ -875,158 +890,149 @@ export default function MetaIntegrationView({ currentUser }) {
           </div>
         )}
 
-        {/* 1-Click Meta Connect Hero */}
-        <div className="meta-card meta-hero-card">
-          <div className="meta-hero-content">
-            <div className="meta-hero-icon-wrap">
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" fill="#1877F2" />
-              </svg>
+        {/* Section 1: Connected Facebook Account Hero Card */}
+        <div className="meta-hero-card-container">
+          {config.is_connected && (config.connected_account_name || config.ad_account_id) && (
+            <div className="meta-card-attached-pill">
+              <span className="meta-id-pill">
+                Ad Account: <strong>{config.connected_account_name || config.ad_account_id}</strong>
+              </span>
             </div>
-            <div className="meta-hero-text">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h2 className="meta-hero-title">
-                  {config.is_connected && config.connected_page_name
-                    ? `Connected: ${config.connected_page_name}`
-                    : 'Connect with Facebook'}
-                </h2>
-                {config.is_connected && (
-                  tokenHealth.status === 'expired' ? (
-                    <span className="meta-hero-badge-expired">
-                      <AlertCircle size={12} /> Token Expired
-                    </span>
-                  ) : tokenHealth.status === 'checking' ? (
-                    <span className="meta-hero-badge-checking">
-                      <RefreshCw size={11} className="meta-spin" /> Verifying...
-                    </span>
-                  ) : (
-                    <span className="meta-hero-badge-connected">
-                      <CheckCircle2 size={12} /> Active
-                    </span>
-                  )
-                )}
-              </div>
-              {config.is_connected && (config.connected_account_name || config.ad_account_id) && (
-                <div style={{ marginTop: '4px', fontSize: '12px', color: '#64748b', fontWeight: 400 }}>
-                  Ad Account: {config.connected_account_name || config.ad_account_id}
+          )}
+          <div className="meta-panel-card">
+            {config.is_connected ? (
+              <div className="meta-account-row">
+                <div className="meta-account-identity">
+                  <div className="meta-brand-tile">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="#1877F2">
+                      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                    </svg>
+                  </div>
+                  <div className="meta-account-details">
+                    <div className="meta-account-title-line">
+                      <span className="meta-account-name">{config.connected_page_name || 'Connected Page'}</span>
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            <div className="meta-hero-actions">
-              {config.is_connected ? (
-                <>
-                  <button
-                    type="button"
-                    className="meta-btn-secondary"
-                    onClick={() => checkTokenHealth()}
-                    disabled={tokenHealth.status === 'checking'}
-                    title="Test connection with Meta Graph API"
-                    style={{ gap: '6px' }}
-                  >
-                    <RefreshCw size={13} className={tokenHealth.status === 'checking' ? 'meta-spin' : ''} />
-                    Test Token
-                  </button>
-                  <button
-                    type="button"
-                    className="meta-btn-secondary"
-                    onClick={handleOpenAssetModal}
-                    disabled={isConnectingFb}
-                    title="Change connected Facebook Page, Ad Account, or Lead Forms"
-                    style={{ gap: '6px' }}
-                  >
-                    <Layers size={13} />
-                    Switch Page / Forms
-                  </button>
-                  <button
-                    type="button"
-                    className="meta-disconnect-btn"
-                    onClick={handleDisconnect}
-                    disabled={isSaving}
-                  >
-                    Disconnect
-                  </button>
-                </>
-              ) : (
+              <div className="meta-account-actions">
                 <button
                   type="button"
-                  className="meta-btn-facebook-login"
-                  onClick={handleConnectWithFacebook}
-                  disabled={isConnectingFb}
+                  className="btn-meta-clean btn-meta-icon-only"
+                  onClick={() => checkTokenHealth()}
+                  disabled={tokenHealth.status === 'checking'}
+                  data-tooltip="Test Token"
+                  aria-label="Test Token"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+                  <RefreshCw size={15} className={tokenHealth.status === 'checking' ? 'meta-spin' : ''} />
+                </button>
+                <button
+                  type="button"
+                  className="btn-meta-clean btn-meta-icon-only"
+                  onClick={handleOpenAssetModal}
+                  disabled={isConnectingFb}
+                  data-tooltip="Switch Page / Forms"
+                  aria-label="Switch Page / Forms"
+                >
+                  <Layers size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="btn-meta-disconnect btn-meta-icon-only"
+                  onClick={handleDisconnect}
+                  disabled={isSaving}
+                  data-tooltip="Disconnect Facebook"
+                  data-tooltip-pos="right-edge"
+                  aria-label="Disconnect Facebook"
+                >
+                  <Unlink size={15} />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="meta-disconnected-row">
+              <div className="meta-account-identity">
+                <div className="meta-brand-tile muted">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#94a3b8">
                     <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
                   </svg>
-                  {isConnectingFb ? 'Connecting to Facebook...' : 'Continue with Facebook'}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Connected Lead Forms (Only shown when connected) */}
-        {config.is_connected && (
-          <div className="meta-card">
-            <div className="meta-forms-header" style={{ marginBottom: '14px' }}>
-              <h2 className="meta-card-title" style={{ margin: 0 }}>
-                Connected Lead Forms ({forms.length})
-              </h2>
+                </div>
+                <div className="meta-account-details">
+                  <span className="meta-account-name">Connect with Facebook</span>
+                </div>
+              </div>
               <button
                 type="button"
-                className="meta-btn-secondary"
+                className="btn-meta-facebook-connect"
+                onClick={handleConnectWithFacebook}
+                disabled={isConnectingFb}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                </svg>
+                {isConnectingFb ? 'Connecting...' : 'Connect Facebook'}
+              </button>
+            </div>
+          )}
+        </div>
+        </div>
+
+        {/* Section 2: Connected Lead Forms Panel */}
+        {config.is_connected && (
+          <div className="meta-panel-card">
+            <div className="meta-panel-header">
+              <div className="meta-panel-header-left">
+                <span className="meta-panel-title">Connected Lead Forms</span>
+                <span className="meta-count-badge">{forms.length} {forms.length === 1 ? 'form' : 'forms'} active</span>
+              </div>
+              <button
+                type="button"
+                className="btn-meta-add-form"
                 onClick={handleOpenAssetModal}
-                style={{ fontSize: '12px', padding: '6px 12px', gap: '6px' }}
               >
                 <Plus size={14} /> Add Form
               </button>
             </div>
 
             {forms.length === 0 ? (
-              <div className="meta-forms-empty">
-                <FileText size={22} className="meta-forms-empty-icon" />
-                <p className="meta-forms-empty-text">No lead forms actively connected</p>
-                <p className="meta-forms-empty-sub">
-                  Select which Facebook Lead Forms should send leads to your CRM.
-                </p>
+              <div className="meta-forms-empty-state">
+                <FileText size={24} color="#94a3b8" />
+                <p className="meta-empty-title">No lead forms connected</p>
                 <button
                   type="button"
-                  className="meta-btn-secondary"
+                  className="btn-meta-clean"
                   onClick={handleOpenAssetModal}
-                  style={{ marginTop: '12px', fontSize: '12px', padding: '5px 12px', gap: '4px' }}
+                  style={{ marginTop: '8px' }}
                 >
                   <Plus size={13} /> Select Forms
                 </button>
               </div>
             ) : (
-              <div className="meta-forms-list">
+              <div className="meta-forms-table">
                 {forms.map((form, index) => (
-                  <div key={form.id || form.form_id || `form-${index}`} className="meta-form-item">
-                    <div className="meta-form-item-left">
-                      <div className="meta-form-icon-box">
-                        <FileText size={15} color="#475569" />
+                  <div key={form.id || form.form_id || `form-${index}`} className="meta-form-row-item">
+                    <div className="meta-form-identity">
+                      <div className="meta-doc-tile">
+                        <FileText size={16} color="#475569" />
                       </div>
-                      <div className="meta-form-details">
-                        <span className="meta-form-name">
-                          {form.form_name || `Form ${form.form_id}`}
-                        </span>
-                        <span className="meta-form-id-pill">
-                          ID: {form.form_id}
-                        </span>
+                      <div className="meta-form-info-col">
+                        <span className="meta-form-title">{form.form_name || `Form ${form.form_id}`}</span>
+                        <div className="meta-form-meta-row">
+                          <span className="meta-id-tag">ID: {form.form_id}</span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="meta-form-item-right">
-                      <span className="meta-form-status-badge">
-                        <span className="meta-form-status-dot"></span>
-                        Active
-                      </span>
+                    <div className="meta-form-actions-col">
                       <button
                         type="button"
-                        className="meta-form-remove-btn"
+                        className="btn-meta-icon-trash"
                         onClick={() => handleRemoveFormRow(index)}
-                        title="Remove form from CRM"
+                        data-tooltip="Remove form"
+                        data-tooltip-pos="right-edge"
+                        aria-label="Remove form"
                       >
-                        <Trash2 size={14} />
+                        <Trash2 size={15} />
                       </button>
                     </div>
                   </div>
@@ -1036,179 +1042,7 @@ export default function MetaIntegrationView({ currentUser }) {
           </div>
         )}
 
-        {/* Direct API Credentials & Permanent Token (Collapsible) */}
-        <div className="meta-card">
-          <div
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}
-            onClick={() => setShowManualConfig(s => !s)}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Key size={16} color="#475569" />
-              </div>
-              <div>
-                <h2 className="meta-card-title" style={{ margin: 0, fontSize: '13.5px' }}>
-                  Direct API Credentials & Token Management
-                </h2>
-                <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#64748b' }}>
-                  Manually paste a permanent System User Token, update App Secret, or view Webhook keys.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="meta-btn-secondary"
-              style={{ fontSize: '12px', padding: '5px 12px' }}
-              onClick={(e) => { e.stopPropagation(); setShowManualConfig(s => !s); }}
-            >
-              {showManualConfig ? 'Hide Credentials' : 'Manage Credentials'}
-            </button>
-          </div>
-
-          {showManualConfig && (
-            <form onSubmit={handleSaveManualCredentials} style={{ marginTop: '18px', paddingTop: '18px', borderTop: '1px solid #e2e8f0' }}>
-              {manualFeedback && (
-                <div className={`meta-sync-banner ${manualFeedback.type}`} style={{ marginBottom: '16px' }}>
-                  {manualFeedback.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-                  <div>{manualFeedback.message}</div>
-                </div>
-              )}
-
-              <div className="meta-form-grid">
-                <div className="meta-form-row">
-                  <label className="meta-label">
-                    App ID
-                    <span className="meta-label-hint">From Meta Developer App</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="meta-input"
-                    placeholder="977193864751819"
-                    value={config.app_id}
-                    onChange={e => handleChange('app_id', e.target.value)}
-                    autoComplete="off"
-                  />
-                </div>
-
-                <div className="meta-form-row">
-                  <label className="meta-label">
-                    App Secret
-                    <span className="meta-label-hint">For token exchange</span>
-                  </label>
-                  <div className="meta-secret-wrapper">
-                    <input
-                      type={showSecret ? 'text' : 'password'}
-                      className="meta-input meta-input-secret"
-                      placeholder="••••••••••••••••"
-                      value={config.app_secret}
-                      onChange={e => handleChange('app_secret', e.target.value)}
-                      autoComplete="new-password"
-                    />
-                    <button
-                      type="button"
-                      className="meta-reveal-btn"
-                      onClick={() => setShowSecret(s => !s)}
-                      tabIndex={-1}
-                    >
-                      {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="meta-form-row meta-full-width">
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <label className="meta-label" style={{ margin: 0 }}>
-                      Access Token
-                      <span className="meta-label-hint">System User or Page Access Token</span>
-                    </label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {tokenHealth.status === 'valid' && (
-                        <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <CheckCircle2 size={12} /> Valid for {tokenHealth.name || 'Account'}
-                        </span>
-                      )}
-                      {tokenHealth.status === 'expired' && (
-                        <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <AlertCircle size={12} /> Expired (Code {tokenHealth.code || 190})
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className="meta-btn-secondary"
-                        onClick={() => checkTokenHealth(config.access_token)}
-                        disabled={tokenHealth.status === 'checking'}
-                        style={{ fontSize: '11px', padding: '3px 8px', gap: '4px' }}
-                      >
-                        <RefreshCw size={11} className={tokenHealth.status === 'checking' ? 'meta-spin' : ''} />
-                        Test
-                      </button>
-                    </div>
-                  </div>
-                  <div className="meta-secret-wrapper">
-                    <input
-                      type={showToken ? 'text' : 'password'}
-                      className="meta-input meta-input-secret"
-                      placeholder="EAA..."
-                      value={config.access_token}
-                      onChange={e => handleChange('access_token', e.target.value)}
-                      autoComplete="new-password"
-                    />
-                    <button
-                      type="button"
-                      className="meta-reveal-btn"
-                      onClick={() => setShowToken(s => !s)}
-                      tabIndex={-1}
-                    >
-                      {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="meta-form-row">
-                  <label className="meta-label">
-                    Webhook Verify Token
-                    <span className="meta-label-hint">Must match Meta Webhook configuration</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="meta-input"
-                    placeholder="saladO@123"
-                    value={config.verify_token}
-                    onChange={e => handleChange('verify_token', e.target.value)}
-                    autoComplete="off"
-                  />
-                </div>
-
-                <div className="meta-form-row">
-                  <label className="meta-label">
-                    Ad Account ID
-                    <span className="meta-label-hint">e.g. act_945711606807167</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="meta-input"
-                    placeholder="act_123456789"
-                    value={config.ad_account_id}
-                    onChange={e => handleChange('ad_account_id', e.target.value)}
-                    autoComplete="off"
-                  />
-                </div>
-              </div>
-
-              <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  type="submit"
-                  className="meta-btn-secondary"
-                  disabled={isSavingManual}
-                  style={{ fontSize: '12.5px', padding: '7px 16px', background: '#0f172a', color: '#ffffff', borderColor: '#0f172a' }}
-                >
-                  {isSavingManual ? 'Saving Credentials...' : 'Save API Credentials'}
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-
+        {/* End of Main Content */}
       </div>
 
       {/* Asset Selection Modal */}
@@ -1218,7 +1052,6 @@ export default function MetaIntegrationView({ currentUser }) {
             <div className="meta-modal-header">
               <div>
                 <h3 className="meta-modal-title">Select Facebook Assets</h3>
-                <p className="meta-modal-subtitle">Choose the Facebook Page, Ad Account, and forms to link with SimpleCRM.</p>
               </div>
               <button
                 type="button"

@@ -2,7 +2,8 @@
  * Meta (Facebook) JavaScript SDK & Graph API Helper
  */
 
-const DEFAULT_APP_ID = '977193864751819';
+const DEFAULT_APP_ID = import.meta.env.VITE_META_APP_ID || '977193864751819';
+const DEFAULT_APP_SECRET = import.meta.env.VITE_META_APP_SECRET || '';
 const API_VERSION = 'v20.0';
 
 let isSdkLoading = false;
@@ -174,11 +175,12 @@ export const validateMetaToken = async (token) => {
 /**
  * Exchange short-lived token for 60-day long-lived token
  */
-export const exchangeForLongLivedUserToken = async (shortUserToken, appId = DEFAULT_APP_ID, appSecret = '') => {
-  if (!appSecret) return shortUserToken;
+export const exchangeForLongLivedUserToken = async (shortUserToken, appId = DEFAULT_APP_ID, appSecret = DEFAULT_APP_SECRET) => {
+  const secret = appSecret || DEFAULT_APP_SECRET;
+  if (!secret) return shortUserToken;
   try {
     const res = await fetch(
-      `https://graph.facebook.com/${API_VERSION}/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortUserToken}`
+      `https://graph.facebook.com/${API_VERSION}/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${secret}&fb_exchange_token=${shortUserToken}`
     );
     const data = await res.json();
     if (data.access_token) {
