@@ -61,6 +61,8 @@ export default function CsvImportView({ currentUser, onNavigate }) {
   const [defaultAssignee, setDefaultAssignee] = useState('pranav');
   const [usersList, setUsersList] = useState([]);
   const [routingConfig, setRoutingConfig] = useState(null);
+  const [pipelinesList, setPipelinesList] = useState([]);
+  const [selectedPipelineId, setSelectedPipelineId] = useState('');
   const [pipelineStages, setPipelineStages] = useState([]);
   const [entryStageId, setEntryStageId] = useState('new');
 
@@ -104,18 +106,21 @@ export default function CsvImportView({ currentUser, onNavigate }) {
           setRoutingConfig(rData);
         }
 
-        // 3. Fetch Pipeline stages
-        const { data: pipeData } = await supabase
+        // 3. Fetch all Pipelines
+        const { data: allPipelines } = await supabase
           .from('pipelines')
-          .select('stages')
-          .order('is_default', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (pipeData?.stages && Array.isArray(pipeData.stages) && isMounted) {
-          setPipelineStages(pipeData.stages);
-          const entry = pipeData.stages.find(s => s.is_entry === true);
-          const fbNew = pipeData.stages.find(s => s.id === 'new');
-          setEntryStageId(entry?.id || fbNew?.id || pipeData.stages[0]?.id || 'new');
+          .select('id, name, is_default, stages')
+          .order('is_default', { ascending: false });
+
+        if (allPipelines && allPipelines.length > 0 && isMounted) {
+          setPipelinesList(allPipelines);
+          const defaultPipe = allPipelines.find(p => p.is_default) || allPipelines[0];
+          setSelectedPipelineId(defaultPipe.id);
+          const stages = Array.isArray(defaultPipe.stages) ? defaultPipe.stages : [];
+          setPipelineStages(stages);
+          const entry = stages.find(s => s.is_entry === true);
+          const fbNew = stages.find(s => s.id === 'new');
+          setEntryStageId(entry?.id || fbNew?.id || stages[0]?.id || 'new');
         }
       } catch (err) {
         console.warn('Error loading metadata for CSV import:', err);
@@ -126,10 +131,65 @@ export default function CsvImportView({ currentUser, onNavigate }) {
     return () => { isMounted = false; };
   }, [currentUser]);
 
-  // Robust CSV Line Parser handling quotes, commas, CRLF
+  const handlePipelineChange = (newPipelineId) => {
+    setSelectedPipelineId(newPipelineId);
+    const chosen = pipelinesList.find(p => p.id === newPipelineId);
+    if (chosen && Array.isArray(chosen.stages)) {
+      setPipelineStages(chosen.stages);
+      const entry = chosen.stages.find(s => s.is_entry === true);
+      const fbNew = chosen.stages.find(s => s.id === 'new');
+      setEntryStageId(entry?.id || fbNew?.id || chosen.stages[0]?.id || 'new');
+    }
+  };
+
+  // Auto-detect CSV/TSV Delimiter (\t, ,, ;, |)
+  const detectDelimiter = (text) => {
+    const sampleLines = text.split(/\r\n|\r|\n/).filter(l => l.trim().length > 0).slice(0, 5);
+    if (sampleLines.length === 0) return ',';
+
+    const candidates = [',', '\t', ';', '|'];
+    const scores = { ',': 0, '\t': 0, ';': 0, '|': 0 };
+
+    for (const delim of candidates) {
+      let prevCount = -1;
+      let consistent = true;
+      let total = 0;
+
+      for (const line of sampleLines) {
+        let count = 0;
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          if (line[i] === '"') inQuotes = !inQuotes;
+          else if (line[i] === delim && !inQuotes) count++;
+        }
+        total += count;
+        if (prevCount !== -1 && count !== prevCount) {
+          consistent = false;
+        }
+        prevCount = count;
+      }
+
+      scores[delim] = total * (consistent && total > 0 ? 3 : 1);
+    }
+
+    let bestDelim = ',';
+    let maxScore = 0;
+    for (const [delim, score] of Object.entries(scores)) {
+      if (score > maxScore) {
+        maxScore = score;
+        bestDelim = delim;
+      }
+    }
+
+    return maxScore > 0 ? bestDelim : ',';
+  };
+
+  // Robust CSV/TSV Line Parser handling quotes, multi-delimiters, CRLF, BOM
   const parseCSV = (text) => {
-    // Strip BOM if present
-    const clean = text.replace(/^\uFEFF/, '');
+    // Strip BOM if present (UTF-8 or UTF-16)
+    const clean = text.replace(/^[\uFEFF\uFFFE]/, '');
+    const delimiter = detectDelimiter(clean);
+
     const lines = [];
     let currentLine = [];
     let currentField = '';
@@ -146,7 +206,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
         } else {
           inQuotes = !inQuotes;
         }
-      } else if (char === ',' && !inQuotes) {
+      } else if (char === delimiter && !inQuotes) {
         currentLine.push(currentField.trim());
         currentField = '';
       } else if ((char === '\r' || char === '\n') && !inQuotes) {
@@ -196,8 +256,9 @@ export default function CsvImportView({ currentUser, onNavigate }) {
   // Process File Selection
   const handleFileChange = (selectedFile) => {
     if (!selectedFile) return;
-    if (!selectedFile.name.toLowerCase().endsWith('.csv')) {
-      alert('Please upload a valid .csv file.');
+    const lowerName = selectedFile.name.toLowerCase();
+    if (!lowerName.endsWith('.csv') && !lowerName.endsWith('.tsv') && !lowerName.endsWith('.txt')) {
+      alert('Please upload a valid .csv or .tsv file.');
       return;
     }
 
@@ -231,15 +292,15 @@ export default function CsvImportView({ currentUser, onNavigate }) {
 
       headers.forEach(h => {
         const cleanH = h.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (!autoMap.name && /^(name|fullname|contactname|customer|leadname|contact)$/i.test(cleanH)) {
+        if (!autoMap.name && /^(name|fullname|contactname|customer|leadname|contact|firstlastname)$/i.test(cleanH)) {
           autoMap.name = h;
-        } else if (!autoMap.phone && /^(phone|mobile|cell|contactno|phonenumber|mobileno)$/i.test(cleanH)) {
+        } else if (!autoMap.phone && /^(phone|mobile|cell|contactno|phonenumber|mobileno|phoneno|telephone)$/i.test(cleanH)) {
           autoMap.phone = h;
         } else if (!autoMap.email && /^(email|mail|emailaddress|e-mail)$/i.test(cleanH)) {
           autoMap.email = h;
         } else if (!autoMap.city && /^(city|location|town|state|address)$/i.test(cleanH)) {
           autoMap.city = h;
-        } else if (!autoMap.notes && /^(notes|note|comments|comment|remarks|remark|description)$/i.test(cleanH)) {
+        } else if (!autoMap.notes && /^(notes|note|comments|comment|remarks|remark|description|whichfranchisepackageareyouinterestedin|packagerequirement)$/i.test(cleanH)) {
           autoMap.notes = h;
         } else if (!autoMap.stage && /^(stage|status)$/i.test(cleanH)) {
           autoMap.stage = h;
@@ -470,6 +531,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
             city: lead.city || null,
             notes: lead.notes || null,
             stage: lead.stage || entryStageId,
+            pipeline_id: selectedPipelineId || null,
             assigned_to: assignedTo,
             form_name: 'CSV Bulk Import',
             date: dateStr,
@@ -735,6 +797,25 @@ export default function CsvImportView({ currentUser, onNavigate }) {
                   ))}
                 </select>
               </div>
+
+              {pipelinesList.length > 0 && (
+                <div className="csv-mapping-item">
+                  <label className="csv-mapping-label">
+                    Target Pipeline
+                  </label>
+                  <select
+                    className="csv-select"
+                    value={selectedPipelineId}
+                    onChange={(e) => handlePipelineChange(e.target.value)}
+                  >
+                    {pipelinesList.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} {p.is_default ? '(Default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
