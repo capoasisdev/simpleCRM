@@ -248,7 +248,10 @@ export default function MetaIntegrationView({ currentUser }) {
   const [pageFormsCache, setPageFormsCache] = useState({});
   const [isScanningPages, setIsScanningPages] = useState(false);
 
-  const checkTokenHealth = async (tokenOverride) => {
+  const [testFeedback, setTestFeedback] = useState(null);
+  const feedbackTimerRef = useRef(null);
+
+  const checkTokenHealth = async (tokenOverride, isManualTest = false) => {
     const targetToken = tokenOverride !== undefined ? tokenOverride : config.access_token;
     if (!targetToken || !targetToken.trim()) {
       setTokenHealth({
@@ -257,9 +260,18 @@ export default function MetaIntegrationView({ currentUser }) {
         code: null,
         name: ''
       });
+      if (isManualTest) {
+        if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+        setTestFeedback({ type: 'error', text: 'No token found' });
+        feedbackTimerRef.current = setTimeout(() => setTestFeedback(null), 4000);
+      }
       return;
     }
     setTokenHealth(prev => ({ ...prev, status: 'checking' }));
+    if (isManualTest) {
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      setTestFeedback({ type: 'testing', text: 'Testing token...' });
+    }
     const res = await validateMetaToken(targetToken.trim());
     if (res.isValid) {
       setIsHealthBannerDismissed(false);
@@ -269,6 +281,11 @@ export default function MetaIntegrationView({ currentUser }) {
         code: null,
         name: res.name || ''
       });
+      if (isManualTest) {
+        if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+        setTestFeedback({ type: 'success', text: `Valid for ${res.name || 'Account'}` });
+        feedbackTimerRef.current = setTimeout(() => setTestFeedback(null), 4000);
+      }
     } else {
       setTokenHealth({
         status: 'expired',
@@ -276,6 +293,11 @@ export default function MetaIntegrationView({ currentUser }) {
         code: res.code || 190,
         name: ''
       });
+      if (isManualTest) {
+        if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+        setTestFeedback({ type: 'error', text: 'Token expired' });
+        feedbackTimerRef.current = setTimeout(() => setTestFeedback(null), 4000);
+      }
     }
   };
 
@@ -891,7 +913,7 @@ export default function MetaIntegrationView({ currentUser }) {
         )}
 
         {/* Section 1: Connected Facebook Account Hero Card */}
-        <div className="meta-hero-card-container">
+        <div className={`meta-hero-card-container ${config.is_connected ? (tokenHealth.status === 'valid' ? 'is-healthy' : tokenHealth.status === 'expired' ? 'is-broken' : '') : ''}`}>
           {config.is_connected && (config.connected_account_name || config.ad_account_id) && (
             <div className="meta-card-attached-pill">
               <span className="meta-id-pill">
@@ -916,10 +938,18 @@ export default function MetaIntegrationView({ currentUser }) {
                 </div>
 
               <div className="meta-account-actions">
+                {testFeedback && (
+                  <span className={`meta-inline-feedback ${testFeedback.type}`}>
+                    {testFeedback.type === 'testing' && <RefreshCw size={11} className="meta-spin" />}
+                    {testFeedback.type === 'success' && <CheckCircle2 size={11} />}
+                    {testFeedback.type === 'error' && <AlertCircle size={11} />}
+                    <span>{testFeedback.text}</span>
+                  </span>
+                )}
                 <button
                   type="button"
                   className="btn-meta-clean btn-meta-icon-only"
-                  onClick={() => checkTokenHealth()}
+                  onClick={() => checkTokenHealth(undefined, true)}
                   disabled={tokenHealth.status === 'checking'}
                   data-tooltip="Test Token"
                   aria-label="Test Token"

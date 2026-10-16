@@ -195,6 +195,31 @@
   font-weight: 600;
 }
 
+/* Dynamic Hero Card Health Tints */
+.meta-hero-card-container.is-healthy .meta-panel-card {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  box-shadow: 0 2px 8px -1px rgba(22, 163, 74, 0.12), 0 8px 24px -4px rgba(22, 163, 74, 0.06);
+}
+
+.meta-hero-card-container.is-healthy .meta-card-attached-pill .meta-id-pill {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  border-bottom-color: #f0fdf4;
+}
+
+.meta-hero-card-container.is-broken .meta-panel-card {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  box-shadow: 0 2px 8px -1px rgba(220, 38, 38, 0.12), 0 8px 24px -4px rgba(220, 38, 38, 0.06);
+}
+
+.meta-hero-card-container.is-broken .meta-card-attached-pill .meta-id-pill {
+  background: #fef2f2;
+  border-color: #fecaca;
+  border-bottom-color: #fef2f2;
+}
+
 .meta-account-actions {
   display: flex;
   align-items: center;
@@ -202,6 +227,48 @@
   flex-shrink: 0;
   position: relative;
   z-index: 10;
+}
+
+/* Minimal Inline Test Token Feedback */
+.meta-inline-feedback {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+  animation: meta-feedback-pop 0.18s ease-out;
+}
+
+@keyframes meta-feedback-pop {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.meta-inline-feedback.success {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.meta-inline-feedback.error {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.meta-inline-feedback.testing {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
 }
 
 /* Common Buttons */
