@@ -11,7 +11,12 @@ import {
   ChevronDown,
   Check,
   Search,
-  FileText
+  FileText,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Key,
+  ShieldCheck
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
@@ -19,7 +24,9 @@ import {
   fetchUserPages,
   fetchUserAdAccounts,
   subscribePageWebhook,
-  fetchPageLeadForms
+  fetchPageLeadForms,
+  validateMetaToken,
+  exchangeForLongLivedUserToken
 } from '../lib/metaSdk';
 import Skeleton from './common/Skeleton';
 import '../styles/meta.css';
@@ -193,6 +200,21 @@ export default function MetaIntegrationView({ currentUser }) {
   const [fbConnectError, setFbConnectError] = useState('');
   const [fbSuccessBanner, setFbSuccessBanner] = useState('');
 
+  // Token Health & Diagnostics
+  const [tokenHealth, setTokenHealth] = useState({
+    status: 'idle', // 'idle' | 'checking' | 'valid' | 'expired' | 'missing'
+    message: '',
+    code: null,
+    name: ''
+  });
+
+  // Manual Credentials Drawer/Card
+  const [showManualConfig, setShowManualConfig] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+  const [showSecret, setShowSecret] = useState(false);
+  const [isSavingManual, setIsSavingManual] = useState(false);
+  const [manualFeedback, setManualFeedback] = useState(null);
+
   // Asset Selection Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [discoveredPages, setDiscoveredPages] = useState([]);
@@ -206,6 +228,36 @@ export default function MetaIntegrationView({ currentUser }) {
   const [fbUserToken, setFbUserToken] = useState('');
   const [pageFormsCache, setPageFormsCache] = useState({});
   const [isScanningPages, setIsScanningPages] = useState(false);
+
+  const checkTokenHealth = async (tokenOverride) => {
+    const targetToken = tokenOverride !== undefined ? tokenOverride : config.access_token;
+    if (!targetToken || !targetToken.trim()) {
+      setTokenHealth({
+        status: 'missing',
+        message: 'No access token found. Reconnect with Facebook or paste a token below.',
+        code: null,
+        name: ''
+      });
+      return;
+    }
+    setTokenHealth(prev => ({ ...prev, status: 'checking' }));
+    const res = await validateMetaToken(targetToken.trim());
+    if (res.isValid) {
+      setTokenHealth({
+        status: 'valid',
+        message: `Token is active and verified for "${res.name || 'Meta Account'}".`,
+        code: null,
+        name: res.name || ''
+      });
+    } else {
+      setTokenHealth({
+        status: 'expired',
+        message: res.message || 'Token is expired or invalid.',
+        code: res.code || 190,
+        name: ''
+      });
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -236,6 +288,12 @@ export default function MetaIntegrationView({ currentUser }) {
           try {
             localStorage.setItem('crm_cached_meta_config', JSON.stringify(newConf));
           } catch (e) { }
+
+          if (newConf.access_token) {
+            checkTokenHealth(newConf.access_token);
+          } else {
+            setTokenHealth({ status: 'missing', message: 'No access token configured.', code: null, name: '' });
+          }
         }
       } catch (err) {
         console.warn('Error fetching meta_config:', err);
@@ -406,6 +464,45 @@ export default function MetaIntegrationView({ currentUser }) {
     }
   };
 
+  const handleSaveManualCredentials = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    setIsSavingManual(true);
+    setManualFeedback(null);
+
+    const token = config.access_token?.trim() || '';
+    const verifyToken = config.verify_token?.trim() || '';
+    const appId = config.app_id?.trim() || '';
+    const appSecret = config.app_secret?.trim() || '';
+    const adAccountId = config.ad_account_id?.trim() || '';
+
+    try {
+      const dbPayload = {
+        app_id: appId,
+        app_secret: appSecret,
+        access_token: token,
+        verify_token: verifyToken,
+        ad_account_id: adAccountId,
+        is_connected: Boolean(token),
+        updated_at: new Date().toISOString()
+      };
+
+      if (rowId) {
+        await supabase.from('meta_config').update(dbPayload).eq('id', rowId);
+      } else {
+        const { data: newRow } = await supabase.from('meta_config').insert([dbPayload]).select().single();
+        if (newRow) setRowId(newRow.id);
+      }
+
+      setManualFeedback({ type: 'success', message: 'API credentials saved successfully!' });
+      await checkTokenHealth(token);
+      setTimeout(() => setManualFeedback(null), 4000);
+    } catch (err) {
+      setManualFeedback({ type: 'error', message: err.message || 'Failed to save credentials.' });
+    } finally {
+      setIsSavingManual(false);
+    }
+  };
+
   const handleConnectWithFacebook = async () => {
     setIsConnectingFb(true);
     setFbConnectError('');
@@ -415,12 +512,15 @@ export default function MetaIntegrationView({ currentUser }) {
       const targetAppId = config.app_id?.trim() || import.meta.env.VITE_META_APP_ID || '977193864751819';
       const auth = await loginWithMeta(targetAppId);
       const userToken = auth.accessToken;
-      setFbUserToken(userToken);
+
+      // Exchange short-lived login token for long-lived token if app secret available
+      const effectiveUserToken = await exchangeForLongLivedUserToken(userToken, targetAppId, config.app_secret);
+      setFbUserToken(effectiveUserToken);
 
       // Fetch managed Facebook Pages & Ad Accounts
       const [pages, adAccounts] = await Promise.all([
-        fetchUserPages(userToken),
-        fetchUserAdAccounts(userToken)
+        fetchUserPages(effectiveUserToken),
+        fetchUserAdAccounts(effectiveUserToken)
       ]);
 
       if (!pages || pages.length === 0) {
@@ -716,6 +816,41 @@ export default function MetaIntegrationView({ currentUser }) {
           </div>
         )}
 
+        {/* Token Expired Warning Banner */}
+        {tokenHealth.status === 'expired' && (
+          <div className="meta-sync-banner error" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderRadius: '8px', border: '1px solid #fecaca', backgroundColor: '#fef2f2' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+              <AlertCircle size={18} style={{ color: '#dc2626', marginTop: '2px', flexShrink: 0 }} />
+              <div>
+                <strong style={{ display: 'block', fontSize: '13.5px', color: '#991b1b', fontWeight: 600 }}>
+                  Meta Access Token Expired (Code {tokenHealth.code || 190})
+                </strong>
+                <span style={{ fontSize: '12px', color: '#b91c1c', display: 'block', marginTop: '2px' }}>
+                  {tokenHealth.message || 'Your Meta session has expired. Inbound leads cannot be retrieved until you reconnect or update your token.'}
+                </span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+              <button
+                type="button"
+                className="meta-btn-secondary"
+                onClick={handleConnectWithFacebook}
+                style={{ fontSize: '12px', padding: '6px 12px', backgroundColor: '#ffffff', color: '#991b1b', borderColor: '#fca5a5' }}
+              >
+                Reconnect with Facebook
+              </button>
+              <button
+                type="button"
+                className="meta-btn-secondary"
+                onClick={() => setShowManualConfig(true)}
+                style={{ fontSize: '12px', padding: '6px 12px', backgroundColor: '#ffffff', color: '#475569' }}
+              >
+                Paste Token
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* 1-Click Meta Connect Hero */}
         <div className="meta-card meta-hero-card">
           <div className="meta-hero-content">
@@ -732,9 +867,19 @@ export default function MetaIntegrationView({ currentUser }) {
                     : 'Connect with Facebook'}
                 </h2>
                 {config.is_connected && (
-                  <span className="meta-hero-badge-connected">
-                    <CheckCircle2 size={12} /> Active
-                  </span>
+                  tokenHealth.status === 'expired' ? (
+                    <span className="meta-hero-badge-expired">
+                      <AlertCircle size={12} /> Token Expired
+                    </span>
+                  ) : tokenHealth.status === 'checking' ? (
+                    <span className="meta-hero-badge-checking">
+                      <RefreshCw size={11} className="meta-spin" /> Verifying...
+                    </span>
+                  ) : (
+                    <span className="meta-hero-badge-connected">
+                      <CheckCircle2 size={12} /> Active
+                    </span>
+                  )
                 )}
               </div>
               {config.is_connected && (config.connected_account_name || config.ad_account_id) && (
@@ -747,6 +892,17 @@ export default function MetaIntegrationView({ currentUser }) {
             <div className="meta-hero-actions">
               {config.is_connected ? (
                 <>
+                  <button
+                    type="button"
+                    className="meta-btn-secondary"
+                    onClick={() => checkTokenHealth()}
+                    disabled={tokenHealth.status === 'checking'}
+                    title="Test connection with Meta Graph API"
+                    style={{ gap: '6px' }}
+                  >
+                    <RefreshCw size={13} className={tokenHealth.status === 'checking' ? 'meta-spin' : ''} />
+                    Test Token
+                  </button>
                   <button
                     type="button"
                     className="meta-btn-secondary"
@@ -855,6 +1011,179 @@ export default function MetaIntegrationView({ currentUser }) {
             )}
           </div>
         )}
+
+        {/* Direct API Credentials & Permanent Token (Collapsible) */}
+        <div className="meta-card">
+          <div
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => setShowManualConfig(s => !s)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Key size={16} color="#475569" />
+              </div>
+              <div>
+                <h2 className="meta-card-title" style={{ margin: 0, fontSize: '13.5px' }}>
+                  Direct API Credentials & Token Management
+                </h2>
+                <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                  Manually paste a permanent System User Token, update App Secret, or view Webhook keys.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="meta-btn-secondary"
+              style={{ fontSize: '12px', padding: '5px 12px' }}
+              onClick={(e) => { e.stopPropagation(); setShowManualConfig(s => !s); }}
+            >
+              {showManualConfig ? 'Hide Credentials' : 'Manage Credentials'}
+            </button>
+          </div>
+
+          {showManualConfig && (
+            <form onSubmit={handleSaveManualCredentials} style={{ marginTop: '18px', paddingTop: '18px', borderTop: '1px solid #e2e8f0' }}>
+              {manualFeedback && (
+                <div className={`meta-sync-banner ${manualFeedback.type}`} style={{ marginBottom: '16px' }}>
+                  {manualFeedback.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                  <div>{manualFeedback.message}</div>
+                </div>
+              )}
+
+              <div className="meta-form-grid">
+                <div className="meta-form-row">
+                  <label className="meta-label">
+                    App ID
+                    <span className="meta-label-hint">From Meta Developer App</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="meta-input"
+                    placeholder="977193864751819"
+                    value={config.app_id}
+                    onChange={e => handleChange('app_id', e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+
+                <div className="meta-form-row">
+                  <label className="meta-label">
+                    App Secret
+                    <span className="meta-label-hint">For token exchange</span>
+                  </label>
+                  <div className="meta-secret-wrapper">
+                    <input
+                      type={showSecret ? 'text' : 'password'}
+                      className="meta-input meta-input-secret"
+                      placeholder="••••••••••••••••"
+                      value={config.app_secret}
+                      onChange={e => handleChange('app_secret', e.target.value)}
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      className="meta-reveal-btn"
+                      onClick={() => setShowSecret(s => !s)}
+                      tabIndex={-1}
+                    >
+                      {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="meta-form-row meta-full-width">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label className="meta-label" style={{ margin: 0 }}>
+                      Access Token
+                      <span className="meta-label-hint">System User or Page Access Token</span>
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {tokenHealth.status === 'valid' && (
+                        <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <CheckCircle2 size={12} /> Valid for {tokenHealth.name || 'Account'}
+                        </span>
+                      )}
+                      {tokenHealth.status === 'expired' && (
+                        <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <AlertCircle size={12} /> Expired (Code {tokenHealth.code || 190})
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="meta-btn-secondary"
+                        onClick={() => checkTokenHealth(config.access_token)}
+                        disabled={tokenHealth.status === 'checking'}
+                        style={{ fontSize: '11px', padding: '3px 8px', gap: '4px' }}
+                      >
+                        <RefreshCw size={11} className={tokenHealth.status === 'checking' ? 'meta-spin' : ''} />
+                        Test
+                      </button>
+                    </div>
+                  </div>
+                  <div className="meta-secret-wrapper">
+                    <input
+                      type={showToken ? 'text' : 'password'}
+                      className="meta-input meta-input-secret"
+                      placeholder="EAA..."
+                      value={config.access_token}
+                      onChange={e => handleChange('access_token', e.target.value)}
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      className="meta-reveal-btn"
+                      onClick={() => setShowToken(s => !s)}
+                      tabIndex={-1}
+                    >
+                      {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="meta-form-row">
+                  <label className="meta-label">
+                    Webhook Verify Token
+                    <span className="meta-label-hint">Must match Meta Webhook configuration</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="meta-input"
+                    placeholder="saladO@123"
+                    value={config.verify_token}
+                    onChange={e => handleChange('verify_token', e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+
+                <div className="meta-form-row">
+                  <label className="meta-label">
+                    Ad Account ID
+                    <span className="meta-label-hint">e.g. act_945711606807167</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="meta-input"
+                    placeholder="act_123456789"
+                    value={config.ad_account_id}
+                    onChange={e => handleChange('ad_account_id', e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="submit"
+                  className="meta-btn-secondary"
+                  disabled={isSavingManual}
+                  style={{ fontSize: '12.5px', padding: '7px 16px', background: '#0f172a', color: '#ffffff', borderColor: '#0f172a' }}
+                >
+                  {isSavingManual ? 'Saving Credentials...' : 'Save API Credentials'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
 
       </div>
 

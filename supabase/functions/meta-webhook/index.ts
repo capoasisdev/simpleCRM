@@ -68,10 +68,10 @@ Deno.serve(async (req) => {
       console.log("[Meta Webhook] Received event payload:", JSON.stringify(payload));
 
       if (payload.object === "page") {
-        // Fetch current meta_config to get access_token
+        // Fetch current meta_config to get access_token and id
         const { data: config } = await supabase
           .from("meta_config")
-          .select("access_token")
+          .select("id, access_token")
           .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle();

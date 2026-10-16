@@ -138,3 +138,55 @@ export const fetchUserAdAccounts = async (userAccessToken) => {
   }
 };
 
+/**
+ * Validate an access token against Meta Graph API
+ */
+export const validateMetaToken = async (token) => {
+  if (!token || typeof token !== 'string' || !token.trim()) {
+    return { isValid: false, message: 'No access token configured.' };
+  }
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/${API_VERSION}/me?fields=id,name&access_token=${token.trim()}`
+    );
+    const data = await res.json();
+    if (data.error) {
+      return {
+        isValid: false,
+        code: data.error.code,
+        subcode: data.error.error_subcode,
+        message: data.error.message || 'Token is invalid or expired.'
+      };
+    }
+    return {
+      isValid: true,
+      id: data.id,
+      name: data.name
+    };
+  } catch (err) {
+    return {
+      isValid: false,
+      message: err.message || 'Failed to connect to Meta Graph API.'
+    };
+  }
+};
+
+/**
+ * Exchange short-lived token for 60-day long-lived token
+ */
+export const exchangeForLongLivedUserToken = async (shortUserToken, appId = DEFAULT_APP_ID, appSecret = '') => {
+  if (!appSecret) return shortUserToken;
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/${API_VERSION}/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortUserToken}`
+    );
+    const data = await res.json();
+    if (data.access_token) {
+      return data.access_token;
+    }
+  } catch (e) {
+    console.warn('Could not exchange for long-lived token:', e);
+  }
+  return shortUserToken;
+};
+
