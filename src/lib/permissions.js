@@ -24,6 +24,10 @@ export const DEFAULT_MEMBER_PERMISSIONS = {
     view_deals: true,
     view_activity: true
   },
+  analytics: {
+    scope: 'assigned', // 'assigned' | 'all'
+    view: true
+  },
   followups: {
     scope: 'self', // 'self' | 'all'
     view: true,
@@ -57,6 +61,10 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
     view: true,
     view_deals: true,
     view_activity: true
+  },
+  analytics: {
+    scope: 'all',
+    view: true
   },
   followups: {
     scope: 'all',
@@ -114,6 +122,10 @@ export function normalizePermissions(user) {
         view_deals: raw.dashboard?.view_deals !== false,
         view_activity: raw.dashboard?.view_activity !== false
       },
+      analytics: {
+        scope: raw.analytics?.scope === 'all' ? 'all' : (raw.dashboard?.scope === 'all' ? 'all' : (raw.leads?.scope === 'all' ? 'all' : 'assigned')),
+        view: raw.analytics?.view !== false
+      },
       followups: {
         scope: raw.followups?.scope === 'all' ? 'all' : 'self',
         view: raw.followups?.view !== false,
@@ -151,6 +163,10 @@ export function normalizePermissions(user) {
       view: raw.view_dashboard !== false,
       view_deals: true,
       view_activity: true
+    },
+    analytics: {
+      scope: 'assigned',
+      view: raw.view_dashboard !== false
     },
     followups: {
       scope: 'self',
@@ -196,6 +212,11 @@ export function hasPermission(user, section, action) {
     return perms.dashboard?.[action] !== false;
   }
 
+  if (section === 'analytics') {
+    if (action === 'all_data' || action === 'all') return perms.analytics?.scope === 'all';
+    return perms.analytics?.[action] !== false;
+  }
+
   if (section === 'followups') {
     if (action === 'all') return perms.followups?.scope === 'all';
     if (action === 'delete' || action === 'delete_all') return perms.followups?.delete === true;
@@ -237,6 +258,16 @@ export function getDashboardScope(user) {
   if (user.role === 'admin') return 'all';
   const perms = normalizePermissions(user);
   return perms.dashboard?.scope || 'assigned';
+}
+
+/**
+ * Get analytics visibility scope: 'assigned' or 'all'
+ */
+export function getAnalyticsScope(user) {
+  if (!user) return 'assigned';
+  if (user.role === 'admin') return 'all';
+  const perms = normalizePermissions(user);
+  return perms.analytics?.scope || 'assigned';
 }
 
 /**

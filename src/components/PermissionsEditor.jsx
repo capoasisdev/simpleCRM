@@ -2,6 +2,7 @@ import {
   UserCheck,
   GitFork,
   LayoutDashboard,
+  BarChart3,
   CalendarClock,
   Shield,
   Info,
@@ -22,6 +23,11 @@ const MESSAGES_SCOPE_OPTIONS = [
 ];
 
 const DASHBOARD_SCOPE_OPTIONS = [
+  { value: 'assigned', label: 'Only Assigned' },
+  { value: 'all', label: 'Company-wide' }
+];
+
+const ANALYTICS_SCOPE_OPTIONS = [
   { value: 'assigned', label: 'Only Assigned' },
   { value: 'all', label: 'Company-wide' }
 ];
@@ -230,6 +236,34 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
             >
               {perms.dashboard.view_activity !== false && <Check size={11} strokeWidth={2.5} />}
               <span>Activity</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Row: Analytics */}
+        <div className="perm-section-row">
+          <div className="perm-col-module">
+            <BarChart3 size={15} strokeWidth={1.8} className="perm-section-icon" />
+            <span className="perm-section-name">Analytics</span>
+          </div>
+          <div className="perm-col-scope">
+            <CustomSelect
+              value={perms.analytics?.scope || 'assigned'}
+              onChange={(val) => updateSection('analytics', { scope: val })}
+              options={ANALYTICS_SCOPE_OPTIONS}
+              disabled={isAdmin}
+              className="admin-scope-select"
+            />
+          </div>
+          <div className="perm-col-actions">
+            <button
+              type="button"
+              className={`perm-pill-toggle ${perms.analytics?.view !== false ? 'active' : ''}`}
+              onClick={() => updateSection('analytics', { view: !(perms.analytics?.view !== false) })}
+              disabled={isAdmin}
+            >
+              {perms.analytics?.view !== false && <Check size={11} strokeWidth={2.5} />}
+              <span>View</span>
             </button>
           </div>
         </div>

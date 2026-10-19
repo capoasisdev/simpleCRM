@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard,
+  BarChart3,
   UserCheck,
   Briefcase,
   Users,
@@ -32,7 +33,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { hasPermission, getDashboardScope } from '../lib/permissions';
+import { hasPermission, getDashboardScope, getAnalyticsScope } from '../lib/permissions';
 import { getStoredActivities } from '../lib/activities';
 import LeadsView from './LeadsView';
 import MessagesView from './MessagesView';
@@ -42,11 +43,13 @@ import MetaIntegrationView from './MetaIntegrationView';
 import PipelineSettingsView from './PipelineSettingsView';
 import CsvImportView from './CsvImportView';
 import BackupsView from './BackupsView';
+import AnalyticsView from './AnalyticsView';
 import NotificationDrawer from './NotificationDrawer';
 import { getStoredNotifications, clearAllNotifications, markAllNotificationsRead } from '../lib/notifications';
 import { checkAndRunDailyAutoBackup } from '../lib/backups';
 import Skeleton from './common/Skeleton';
 import '../styles/dashboard.css';
+import '../styles/analytics.css';
 
 export default function DashboardView({ currentUser, onLogout }) {
   const user = currentUser || {
@@ -61,6 +64,9 @@ export default function DashboardView({ currentUser, onLogout }) {
   const canViewDashboardActivity = hasPermission(user, 'dashboard', 'view_activity');
   const dashboardScope = getDashboardScope(user);
   const isDashboardGlobal = isAdmin || dashboardScope === 'all';
+  const canViewAnalytics = hasPermission(user, 'analytics', 'view');
+  const analyticsScope = getAnalyticsScope(user);
+  const isAnalyticsGlobal = isAdmin || analyticsScope === 'all';
   const canViewLeads = hasPermission(user, 'leads', 'view');
   const canViewMessages = hasPermission(user, 'messages', 'view');
   const canViewPipelines = hasPermission(user, 'pipeline', 'view');
@@ -72,6 +78,7 @@ export default function DashboardView({ currentUser, onLogout }) {
   // URL Routing Helpers
   const TAB_ROUTES = {
     dashboard: 'Dashboard',
+    analytics: 'Analytics',
     leads: 'Leads',
     messages: 'Messages',
     todos: 'Todos',
@@ -89,6 +96,12 @@ export default function DashboardView({ currentUser, onLogout }) {
     if (tab === 'Todos') {
       return '/todos';
     }
+    if (tab === 'Dashboard') {
+      return '/dashboard';
+    }
+    if (tab === 'Analytics') {
+      return '/analytics';
+    }
     return `/${tab.toLowerCase()}`;
   };
 
@@ -96,6 +109,9 @@ export default function DashboardView({ currentUser, onLogout }) {
     const path = window.location.pathname.toLowerCase().replace(/\/$/, '') || '/';
     if (path === '' || path === '/' || path === '/dashboard') {
       return { tab: 'Dashboard', adminSub: 'users' };
+    }
+    if (path === '/dashboard/analytics' || path === '/analytics') {
+      return { tab: 'Analytics', adminSub: 'users' };
     }
     if (path.startsWith('/admin')) {
       const parts = path.split('/').filter(Boolean);
@@ -120,6 +136,7 @@ export default function DashboardView({ currentUser, onLogout }) {
     if (requested === 'Pipelines' && !canViewPipelines) return canViewLeads ? 'Leads' : 'Dashboard';
     if (requested === 'Admin' && !hasAdminAccess) return canViewLeads ? 'Leads' : 'Dashboard';
     if (requested === 'Dashboard' && !canViewDashboard) return canViewLeads ? 'Leads' : 'Admin';
+    if (requested === 'Analytics' && !canViewAnalytics) return canViewLeads ? 'Leads' : 'Admin';
     return requested || (canViewDashboard ? 'Dashboard' : canViewLeads ? 'Leads' : 'Admin');
   })();
 
@@ -202,6 +219,17 @@ export default function DashboardView({ currentUser, onLogout }) {
   // Dynamic Supabase data states
   const [leads, setLeads] = useState([]);
   const [deals, setDeals] = useState([]);
+  const [pipelinesList, setPipelinesList] = useState([]);
+  const [usersList, setUsersList] = useState(() => {
+    try {
+      const cached = localStorage.getItem('crm_cached_users');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
   const [activities, setActivities] = useState(() => getStoredActivities());
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isDealModalOpen, setIsDealModalOpen] = useState(false);
@@ -223,20 +251,29 @@ export default function DashboardView({ currentUser, onLogout }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fetch live leads & deals from Supabase + subscribe to realtime
+  // Fetch live leads & deals & users & pipelines from Supabase + subscribe to realtime
   useEffect(() => {
     let isMounted = true;
 
     const fetchDashboardData = async () => {
       try {
-        const [leadsRes, dealsRes] = await Promise.all([
+        const [leadsRes, dealsRes, usersRes, pipesRes] = await Promise.all([
           supabase.from('leads').select('*').order('created_at', { ascending: false }),
-          supabase.from('deals').select('*').order('created_at', { ascending: false })
+          supabase.from('deals').select('*').order('created_at', { ascending: false }),
+          supabase.from('crm_users').select('*').order('created_at', { ascending: true }),
+          supabase.from('pipelines').select('*').order('is_default', { ascending: false })
         ]);
 
         if (isMounted) {
           if (leadsRes.data) setLeads(leadsRes.data);
           if (dealsRes.data) setDeals(dealsRes.data);
+          if (pipesRes.data) setPipelinesList(pipesRes.data);
+          if (usersRes.data) {
+            setUsersList(usersRes.data);
+            try {
+              localStorage.setItem('crm_cached_users', JSON.stringify(usersRes.data));
+            } catch (e) {}
+          }
         }
       } catch (err) {
         console.warn('Dashboard data fetch note:', err);
@@ -270,6 +307,26 @@ export default function DashboardView({ currentUser, onLogout }) {
           setDeals((prev) => prev.filter((d) => d.id !== payload.old.id));
         } else if (payload.eventType === 'UPDATE') {
           setDeals((prev) => prev.map((d) => (d.id === payload.new.id ? payload.new : d)));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_users' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          setUsersList((prev) => prev.some((u) => u.id === payload.new.id) ? prev : [...prev, payload.new]);
+        } else if (payload.eventType === 'DELETE') {
+          setUsersList((prev) => prev.filter((u) => u.id !== payload.old.id));
+        } else if (payload.eventType === 'UPDATE') {
+          setUsersList((prev) => prev.map((u) => (u.id === payload.new.id ? payload.new : u)));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pipelines' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          setPipelinesList((prev) => prev.some((p) => p.id === payload.new.id) ? prev : [...prev, payload.new]);
+        } else if (payload.eventType === 'DELETE') {
+          setPipelinesList((prev) => prev.filter((p) => p.id !== payload.old.id));
+        } else if (payload.eventType === 'UPDATE') {
+          setPipelinesList((prev) => prev.map((p) => (p.id === payload.new.id ? payload.new : p)));
         }
       })
       .subscribe();
@@ -375,6 +432,17 @@ export default function DashboardView({ currentUser, onLogout }) {
       return assigned && (assigned === userName || assigned === userEmail || (userId && assigned === userId));
     });
   }, [deals, isDashboardGlobal, user]);
+
+  // Analytics leads & deals based on analytics permission scope
+  const analyticsLeads = useMemo(() => {
+    if (isAnalyticsGlobal) return leads;
+    return scopedLeads;
+  }, [leads, scopedLeads, isAnalyticsGlobal]);
+
+  const analyticsDeals = useMemo(() => {
+    if (isAnalyticsGlobal) return deals;
+    return scopedDeals;
+  }, [deals, scopedDeals, isAnalyticsGlobal]);
 
   // Pipeline metrics computed dynamically from scoped deals
   const pipelineMetrics = useMemo(() => {
@@ -668,6 +736,7 @@ export default function DashboardView({ currentUser, onLogout }) {
               <ul className="nav-list">
                 {[
                   canViewDashboard && { name: 'Dashboard', label: 'Dashboard', icon: LayoutDashboard },
+                  canViewAnalytics && { name: 'Analytics', label: 'Analytics', icon: BarChart3 },
                   canViewLeads && { name: 'Leads', label: 'Leads', icon: UserCheck },
                   canViewMessages && { name: 'Messages', label: 'Messages', icon: MessageSquare },
                   { name: 'Todos', label: "To-Do's", icon: StickyNote }
@@ -710,12 +779,12 @@ export default function DashboardView({ currentUser, onLogout }) {
 
         {/* Center Main Section */}
         <main
-          className={`dashboard-main-section ${activeTab !== 'Dashboard' ? 'full-width' : ''}`}
+          className={`dashboard-main-section ${activeTab !== 'Dashboard' && activeTab !== 'Analytics' ? 'full-width' : ''}`}
           aria-label="Dashboard Content Area"
         >
           <div key={activeTab} className="tab-pane-animated">
             {activeTab === 'Dashboard' && (
-            <div className="dashboard-columns-container">
+              <div className="dashboard-columns-container">
               {/* Left Column (Pipeline Overview, Recent Deals, Tasks Overview) */}
               <div className="dashboard-column">
                 {/* Card 1: Pipeline Overview (Dynamic) */}
@@ -975,7 +1044,19 @@ export default function DashboardView({ currentUser, onLogout }) {
                 </section>
               </div>
             </div>
-          )}
+            )}
+
+            {activeTab === 'Analytics' && (
+              <AnalyticsView
+                leads={analyticsLeads}
+                deals={analyticsDeals}
+                users={usersList}
+                pipelines={pipelinesList}
+                isLoading={isLoadingData}
+                isGlobal={isAnalyticsGlobal}
+                currentUser={user}
+              />
+            )}
 
           {activeTab === 'Leads' && <LeadsView currentUser={user} onNavigate={navigateTo} />}
           {activeTab === 'Messages' && (
@@ -1045,7 +1126,7 @@ export default function DashboardView({ currentUser, onLogout }) {
             </div>
           )}
 
-          {activeTab !== 'Dashboard' && activeTab !== 'Leads' && activeTab !== 'Messages' && activeTab !== 'Todos' && activeTab !== 'Admin' && (
+          {activeTab !== 'Dashboard' && activeTab !== 'Analytics' && activeTab !== 'Leads' && activeTab !== 'Messages' && activeTab !== 'Todos' && activeTab !== 'Admin' && (
             <div className="tab-placeholder-view">
               <h2 className="placeholder-title">{activeTab}</h2>
               <p className="placeholder-desc">This section is currently under development.</p>

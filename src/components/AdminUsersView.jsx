@@ -429,6 +429,7 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                 p.leads.view && `Leads (${p.leads.scope === 'all' ? 'All' : 'Assigned'})`,
                 p.pipeline.view && 'Pipeline',
                 p.dashboard.view && `Dashboard (${p.dashboard.scope === 'all' ? 'All' : 'Assigned'})`,
+                p.analytics?.view !== false && `Analytics (${p.analytics?.scope === 'all' ? 'All' : 'Assigned'})`,
                 (p.admin.manage_users || p.admin.manage_routing || p.admin.manage_meta) && 'Admin'
               ].filter(Boolean);
 
