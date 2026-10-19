@@ -114,3 +114,150 @@
   margin-top: 2px;
 }
 
+/* ==========================================================================
+   Admin Section Skeletons
+   ========================================================================== */
+
+/* 1. Pipeline Card Skeleton */
+.pipeline-skeleton-card {
+  padding: 18px 20px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background-color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.pipeline-skeleton-card-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+}
+
+.pipeline-skeleton-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pipeline-skeleton-card-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pipeline-skeleton-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 2. Meta Integration Skeletons */
+.meta-skeleton-hero {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.meta-skeleton-hero-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.meta-skeleton-hero-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meta-skeleton-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meta-skeleton-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.meta-skeleton-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.meta-skeleton-panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.meta-skeleton-panel-row:last-child {
+  border-bottom: none;
+}
+
+/* 3. Automations Hub Card Skeleton */
+.automations-skeleton-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 240px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.automations-skeleton-card-top {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.automations-skeleton-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.automations-skeleton-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid #f1f5f9;
+}
+
+.automations-skeleton-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 14px;
+  border-top: 1px solid #f1f5f9;
+  margin-top: 16px;
+}
+

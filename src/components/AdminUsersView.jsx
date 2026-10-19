@@ -11,7 +11,8 @@ import {
   Eye,
   EyeOff,
   UserCheck,
-  Edit2
+  Edit2,
+  Sliders
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import PermissionsEditor from './PermissionsEditor';
@@ -21,7 +22,14 @@ import {
   DEFAULT_ADMIN_PERMISSIONS
 } from '../lib/permissions';
 import Skeleton from './common/Skeleton';
+import CustomSelect from './common/CustomSelect';
 import '../styles/admin.css';
+import '../styles/pipeline.css';
+
+const ROLE_OPTIONS = [
+  { value: 'member', label: 'Team Member' },
+  { value: 'admin', label: 'Administrator' }
+];
 
 export default function AdminUsersView({ currentUser, onLogout }) {
   const [users, setUsers] = useState(() => {
@@ -34,16 +42,7 @@ export default function AdminUsersView({ currentUser, onLogout }) {
     } catch (e) {}
     return [];
   });
-  const [isLoading, setIsLoading] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_users');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return false;
-      }
-    } catch (e) {}
-    return true;
-  });
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showPins, setShowPins] = useState({}); // { [userId]: boolean }
 
@@ -51,6 +50,8 @@ export default function AdminUsersView({ currentUser, onLogout }) {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
 
   // Add User Form state
@@ -65,15 +66,17 @@ export default function AdminUsersView({ currentUser, onLogout }) {
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Delete User Confirmation state
+  const [deletePin, setDeletePin] = useState('');
+  const [deletePinError, setDeletePinError] = useState('');
+
   // Fetch users & setup realtime
   useEffect(() => {
     let isMounted = true;
 
     const fetchUsers = async () => {
       try {
-        if (!users || users.length === 0) {
-          setIsLoading(true);
-        }
+        setIsLoading(true);
         const { data, error } = await supabase
           .from('crm_users')
           .select('*')
@@ -281,15 +284,55 @@ export default function AdminUsersView({ currentUser, onLogout }) {
     }
   };
 
-  // Handle Delete User
-  const handleDeleteUser = async (userId) => {
+  // Trigger Delete Confirmation Modal
+  const handlePromptDelete = (user) => {
     if (users.length <= 1) {
       alert('Cannot delete the last remaining user.');
       return;
     }
+    setUserToDelete(user);
+    setDeletePin('');
+    setDeletePinError('');
+    setIsDeleteModalOpen(true);
+  };
 
-    const userToDelete = users.find((u) => u.id === userId);
+  const handleCloseDeleteModal = () => {
+    if (isSubmitting) return;
+    setIsDeleteModalOpen(false);
+    setUserToDelete(null);
+    setDeletePin('');
+    setDeletePinError('');
+  };
+
+  // Perform Delete after user confirmation
+  const handleConfirmDelete = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!userToDelete) return;
+    setDeletePinError('');
+
+    // Active logged-in administrator PIN check
+    const activeAdmin = users.find(
+      (u) =>
+        (currentUser?.id && u.id === currentUser.id) ||
+        (currentUser?.email && u.email?.toLowerCase() === currentUser.email?.toLowerCase())
+    ) || currentUser;
+
+    const currentAdminPin = (activeAdmin?.pin || currentUser?.pin || '').trim();
+
+    if (!deletePin || deletePin.trim() !== currentAdminPin) {
+      setDeletePinError('Incorrect PIN. Please re-enter your admin PIN.');
+      return;
+    }
+
+    const userId = userToDelete.id;
+    const targetUser = userToDelete;
+
+    setIsSubmitting(true);
     setUsers((prev) => prev.filter((u) => u.id !== userId));
+    setIsDeleteModalOpen(false);
+    setUserToDelete(null);
+    setDeletePin('');
+    setDeletePinError('');
 
     try {
       const { error } = await supabase.from('crm_users').delete().eq('id', userId);
@@ -298,14 +341,16 @@ export default function AdminUsersView({ currentUser, onLogout }) {
       }
     } catch (err) {
       console.warn('Error deleting user:', err);
+    } finally {
+      setIsSubmitting(false);
     }
 
     // If the deleted user is the currently logged in user, logout immediately
     if (
       currentUser &&
       (currentUser.id === userId ||
-        (userToDelete &&
-          currentUser.email?.toLowerCase() === userToDelete.email?.toLowerCase()))
+        (targetUser &&
+          currentUser.email?.toLowerCase() === targetUser.email?.toLowerCase()))
     ) {
       if (typeof onLogout === 'function') {
         onLogout();
@@ -315,322 +360,292 @@ export default function AdminUsersView({ currentUser, onLogout }) {
 
   return (
     <div className="admin-view-container">
-      {/* Header Toolbar */}
-      <div className="admin-toolbar">
-        <div className="admin-header-titles">
-          <h1 className="admin-main-title">User & Permission Management</h1>
-        </div>
-
-        <div className="admin-actions-group">
-          <div className="admin-search-wrapper">
-            <Search size={15} strokeWidth={1.75} className="admin-search-icon" />
-            <input
-              type="text"
-              className="admin-search-input"
-              placeholder="Search users..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+      <div className="admin-view-inner">
+        {/* Master Header matching pipeline-master-header */}
+        <div className="admin-master-header">
+          <div className="admin-master-title-group">
+            <h1 className="admin-master-title">Users</h1>
+            <span className="admin-master-count" style={{ minWidth: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              {isLoading ? <Skeleton width="18px" height="14px" borderRadius="4px" /> : users.length}
+            </span>
           </div>
 
-          <button
-            type="button"
-            className="admin-add-user-btn"
-            onClick={() => {
-              setFormError('');
-              setIsAddModalOpen(true);
-            }}
-          >
-            <Plus size={15} strokeWidth={2} />
-            <span>Add User</span>
-          </button>
+          <div className="admin-actions-group">
+            <div className="admin-search-wrapper">
+              <Search size={15} strokeWidth={1.75} className="admin-search-icon" />
+              <input
+                type="text"
+                className="admin-search-input"
+                placeholder="Search users..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            <button
+              type="button"
+              className="admin-add-user-btn"
+              onClick={() => {
+                setFormError('');
+                setIsAddModalOpen(true);
+              }}
+            >
+              <Plus size={15} strokeWidth={2} />
+              <span>Add User</span>
+            </button>
+          </div>
         </div>
-      </div>
 
-      {/* Users Table */}
-      <div className="admin-table-container">
-        <table className="admin-users-table">
-          <thead>
-            <tr>
-              <th>Team Member</th>
-              <th>Role</th>
-              <th>4-Digit PIN</th>
-              <th>Permissions</th>
-              <th style={{ textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              [1, 2, 3].map((i) => (
-                <tr key={i} className="table-row-skeleton">
-                  <td>
-                    <div className="admin-user-cell">
-                      <Skeleton width="34px" height="34px" circle />
-                      <div className="admin-user-info" style={{ gap: '6px' }}>
-                        <Skeleton width="120px" height="14px" />
-                        <Skeleton width="160px" height="11px" />
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <Skeleton width="60px" height="20px" borderRadius="12px" />
-                  </td>
-                  <td>
-                    <Skeleton width="48px" height="14px" />
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <Skeleton width="55px" height="18px" borderRadius="4px" />
-                      <Skeleton width="45px" height="18px" borderRadius="4px" />
-                      <Skeleton width="45px" height="18px" borderRadius="4px" />
-                    </div>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                      <Skeleton width="26px" height="26px" borderRadius="4px" />
-                      <Skeleton width="26px" height="26px" borderRadius="4px" />
-                    </div>
-                  </td>
-                </tr>
-              ))
-            ) : filteredUsers.length > 0 ? (
-              filteredUsers.map((user) => {
-                const isMasked = !showPins[user.id];
-                const perms = user.permissions || {};
-                const initials = (user.name || 'U')
-                  .split(' ')
-                  .map((n) => n[0])
-                  .join('')
-                  .substring(0, 2)
-                  .toUpperCase();
+        {/* Users Numbered List */}
+        <div className="admin-users-numbered-list">
+          {isLoading ? (
+            [1, 2, 3, 4].map((i) => (
+              <div key={i} className="admin-user-numbered-item" style={{ pointerEvents: 'none' }}>
+                <span className="pipeline-number-index" style={{ opacity: 0.35 }}>{i}</span>
+                <div className="admin-user-details-col">
+                  <Skeleton width={i === 1 ? '140px' : i === 2 ? '175px' : i === 3 ? '125px' : '155px'} height="17px" borderRadius="4px" />
+                  <Skeleton width={i === 1 ? '165px' : i === 2 ? '195px' : i === 3 ? '145px' : '175px'} height="12px" borderRadius="3px" style={{ marginTop: 4 }} />
+                </div>
+                <div className="admin-col-role">
+                  <Skeleton width="58px" height="22px" borderRadius="999px" />
+                </div>
+                <div className="admin-col-pin">
+                  <Skeleton width="82px" height="26px" borderRadius="6px" />
+                </div>
+                <div className="admin-col-perm">
+                  <Skeleton width="110px" height="24px" borderRadius="6px" />
+                </div>
+                <div className="admin-col-actions" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Skeleton width="28px" height="28px" borderRadius="6px" />
+                  <Skeleton width="28px" height="28px" borderRadius="6px" />
+                </div>
+              </div>
+            ))
+          ) : filteredUsers.length > 0 ? (
+            filteredUsers.map((user, idx) => {
+              const isMasked = !showPins[user.id];
+              const p = normalizePermissions(user);
+              const activeModules = [
+                p.leads.view && `Leads (${p.leads.scope === 'all' ? 'All' : 'Assigned'})`,
+                p.pipeline.view && 'Pipeline',
+                p.dashboard.view && `Dashboard (${p.dashboard.scope === 'all' ? 'All' : 'Assigned'})`,
+                (p.admin.manage_users || p.admin.manage_routing || p.admin.manage_meta) && 'Admin'
+              ].filter(Boolean);
 
-                return (
-                  <tr key={user.id} className="fade-in-row">
-                    <td>
-                      <div className="admin-user-cell">
-                        <div className="admin-avatar">{initials}</div>
-                        <div className="admin-user-info">
-                          <span className="admin-user-name">{user.name}</span>
-                          <span className="admin-user-email">{user.email}</span>
-                        </div>
-                      </div>
-                    </td>
+              return (
+                <div key={user.id} className="admin-user-numbered-item">
+                  {/* Col 1: Index Number */}
+                  <span className="pipeline-number-index">{idx + 1}</span>
 
-                    <td>
-                      <span className={`admin-role-badge ${user.role || 'member'}`}>
-                        {user.role === 'admin' ? 'Admin' : 'Member'}
-                      </span>
-                    </td>
+                  {/* Col 2: Member Info (Name & Email) */}
+                  <div className="admin-user-details-col">
+                    <span className="admin-user-title">{user.name}</span>
+                    <span className="admin-user-subtext">{user.email}</span>
+                  </div>
 
-                    <td>
-                      <div className="admin-pin-cell">
-                        <span
-                          className="admin-pin-code"
-                          title="Click to change PIN"
-                          onClick={() => {
-                            setSelectedUser(user);
-                            setNewPin('');
-                            setFormError('');
-                            setIsPinModalOpen(true);
-                          }}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          {isMasked ? '••••' : user.pin}
-                        </span>
-                        <button
-                          type="button"
-                          className="admin-icon-btn"
-                          title={isMasked ? 'Reveal PIN' : 'Hide PIN'}
-                          onClick={() => toggleShowPin(user.id)}
-                        >
-                          {isMasked ? (
-                            <Eye size={13} strokeWidth={1.75} />
-                          ) : (
-                            <EyeOff size={13} strokeWidth={1.75} />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className="admin-icon-btn"
-                          title="Change PIN"
-                          onClick={() => {
-                            setSelectedUser(user);
-                            setNewPin('');
-                            setFormError('');
-                            setIsPinModalOpen(true);
-                          }}
-                        >
-                          <Key size={13} strokeWidth={1.75} />
-                        </button>
-                      </div>
-                    </td>
+                  {/* Col 3: Role Pill */}
+                  <div className="admin-col-role">
+                    <span className={`admin-role-pill ${user.role || 'member'}`}>
+                      {user.role === 'admin' ? 'Admin' : 'Member'}
+                    </span>
+                  </div>
 
-                    <td>
-                      <div className="admin-perms-summary-cell">
-                        {user.role === 'admin' ? (
-                          <span className="admin-perm-badge admin">Full Access</span>
-                        ) : (() => {
-                          const p = normalizePermissions(user);
-                          const activeModules = [
-                            p.leads.view && `Leads (${p.leads.scope === 'all' ? 'All' : 'Assigned'})`,
-                            p.pipeline.view && 'Pipeline',
-                            p.dashboard.view && `Dashboard (${p.dashboard.scope === 'all' ? 'All' : 'Assigned'})`,
-                            (p.admin.manage_users || p.admin.manage_routing || p.admin.manage_meta) && 'Admin'
-                          ].filter(Boolean);
-
-                          return (
-                            <div
-                              className="admin-perms-summary"
-                              onClick={() => {
-                                setSelectedUser({
-                                  ...user,
-                                  permissions: p
-                                });
-                                setIsEditModalOpen(true);
-                              }}
-                              title="Click to edit permissions"
-                            >
-                              <span className="admin-perm-badge member">Custom Access</span>
-                              <span className="admin-perm-summary-text" title={activeModules.join(' • ')}>
-                                {activeModules.length > 0 ? activeModules.join(' · ') : 'Restricted'}
-                              </span>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </td>
-
-                    <td style={{ textAlign: 'right' }}>
-                      <div
-                        className="admin-row-actions"
-                        style={{ justifyContent: 'flex-end' }}
+                  {/* Col 4: PIN Pill with Reveal Toggle */}
+                  <div className="admin-col-pin">
+                    <div className="admin-pin-pill" title="4-digit Login PIN">
+                      <span
+                        className="admin-pin-text"
+                        onClick={() => {
+                          setSelectedUser(user);
+                          setNewPin('');
+                          setFormError('');
+                          setIsPinModalOpen(true);
+                        }}
+                        title="Click to change PIN"
                       >
+                        {isMasked ? '••••' : user.pin}
+                      </span>
+                      <button
+                        type="button"
+                        className="admin-pin-toggle-btn"
+                        onClick={() => toggleShowPin(user.id)}
+                        data-tooltip={isMasked ? 'Reveal PIN' : 'Hide PIN'}
+                        aria-label={isMasked ? 'Reveal PIN' : 'Hide PIN'}
+                      >
+                        {isMasked ? (
+                          <Eye size={13} strokeWidth={1.75} />
+                        ) : (
+                          <EyeOff size={13} strokeWidth={1.75} />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Col 5: Permissions Badge */}
+                  <div className="admin-col-perm">
+                    {user.role === 'admin' ? (
+                      <span className="admin-perm-pill admin">Full Access</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="admin-perm-pill member"
+                        onClick={() => {
+                          setSelectedUser({
+                            ...user,
+                            permissions: p
+                          });
+                          setIsEditModalOpen(true);
+                        }}
+                        data-tooltip={activeModules.length > 0 ? activeModules.join(' · ') : 'Restricted'}
+                      >
+                        Custom Access
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Col 6: Actions: Change PIN, Edit Permissions, Delete User */}
+                  <div className="admin-col-actions">
+                    <div className="admin-action-icons-cluster">
+                      <button
+                        type="button"
+                        className="btn-admin-action"
+                        data-tooltip="Change PIN"
+                        onClick={() => {
+                          setSelectedUser(user);
+                          setNewPin('');
+                          setFormError('');
+                          setIsPinModalOpen(true);
+                        }}
+                        aria-label="Change PIN"
+                      >
+                        <Key size={15} strokeWidth={1.75} />
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn-admin-action"
+                        data-tooltip="Edit Permissions"
+                        onClick={() => {
+                          setSelectedUser({
+                            ...user,
+                            permissions: p
+                          });
+                          setIsEditModalOpen(true);
+                        }}
+                        aria-label="Edit Permissions"
+                      >
+                        <Sliders size={15} strokeWidth={1.75} />
+                      </button>
+
+                      {users.length > 1 && (
                         <button
                           type="button"
-                          className="admin-icon-btn"
-                          title="Edit Permissions"
-                          onClick={() => {
-                            setSelectedUser({
-                              ...user,
-                              permissions: normalizePermissions(user)
-                            });
-                            setIsEditModalOpen(true);
-                          }}
+                          className="btn-admin-action danger"
+                          data-tooltip="Delete User"
+                          onClick={() => handlePromptDelete(user)}
+                          aria-label="Delete User"
                         >
-                          <Edit2 size={13} strokeWidth={1.75} />
+                          <Trash2 size={15} strokeWidth={1.75} />
                         </button>
-                        <button
-                          type="button"
-                          className="admin-icon-btn danger"
-                          title="Delete User"
-                          onClick={() => handleDeleteUser(user.id)}
-                        >
-                          <Trash2 size={13} strokeWidth={1.75} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan="5" className="admin-empty-state">
-                  No users found matching your search.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="admin-empty-wrap">
+              <span className="admin-empty-text">No users found matching "{searchQuery}"</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 1. Modal: Add User */}
       {isAddModalOpen && (
-        <div className="lead-modal-backdrop" onClick={() => setIsAddModalOpen(false)}>
+        <div className="admin-modal-backdrop" onClick={() => setIsAddModalOpen(false)}>
           <div
-            className="lead-modal-container admin-permissions-modal"
+            className="admin-modal-card admin-modal-perms"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
           >
-            <div className="lead-modal-header">
-              <h2 className="lead-modal-title">Add Team Member</h2>
+            <div className="admin-modal-header">
+              <div className="admin-modal-title-group">
+                <h2 className="admin-modal-title">Add Team Member</h2>
+                <span className="admin-modal-subtitle">Invite a new user with specific role and module access</span>
+              </div>
               <button
                 type="button"
-                className="lead-modal-close-btn"
+                className="admin-modal-close-btn"
                 onClick={() => setIsAddModalOpen(false)}
+                aria-label="Close"
               >
-                <X size={18} strokeWidth={1.5} />
+                <X size={16} strokeWidth={1.8} />
               </button>
             </div>
 
             <form onSubmit={handleAddUser}>
-              <div className="lead-modal-body">
+              <div className="admin-modal-body">
                 {formError && (
-                  <div
-                    style={{
-                      padding: '8px 12px',
-                      backgroundColor: '#fef2f2',
-                      color: '#ef4444',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      marginBottom: '12px'
-                    }}
-                  >
+                  <div className="admin-modal-error-banner">
                     {formError}
                   </div>
                 )}
 
-                <div className="lead-field-group">
-                  <label className="lead-field-label">Full Name</label>
-                  <input
-                    type="text"
-                    className="lead-field-input"
-                    placeholder="e.g. Ramesh Patel"
-                    value={addName}
-                    onChange={(e) => setAddName(e.target.value)}
-                    autoFocus
-                    required
-                  />
+                <div className="admin-form-grid">
+                  <div className="admin-field-group">
+                    <label className="admin-field-label">Full Name</label>
+                    <input
+                      type="text"
+                      className="admin-field-input"
+                      placeholder="e.g. Ramesh Patel"
+                      value={addName}
+                      onChange={(e) => setAddName(e.target.value)}
+                      autoFocus
+                      required
+                    />
+                  </div>
+
+                  <div className="admin-field-group">
+                    <label className="admin-field-label">Email Address</label>
+                    <input
+                      type="email"
+                      className="admin-field-input"
+                      placeholder="e.g. ramesh@company.com"
+                      value={addEmail}
+                      onChange={(e) => setAddEmail(e.target.value)}
+                      required
+                    />
+                  </div>
                 </div>
 
-                <div className="lead-field-group">
-                  <label className="lead-field-label">Email Address</label>
-                  <input
-                    type="email"
-                    className="lead-field-input"
-                    placeholder="e.g. ramesh@company.com"
-                    value={addEmail}
-                    onChange={(e) => setAddEmail(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="lead-field-group">
-                  <label className="lead-field-label">4-Digit Access PIN</label>
+                <div className="admin-field-group" style={{ marginTop: '12px' }}>
+                  <label className="admin-field-label">4-Digit Access PIN</label>
                   <input
                     type="text"
                     inputMode="numeric"
                     maxLength={4}
-                    className="lead-field-input"
+                    className="admin-field-input"
                     placeholder="e.g. 5678"
                     value={addPin}
                     onChange={(e) =>
                       setAddPin(e.target.value.replace(/\D/g, '').slice(0, 4))
                     }
+                    style={{ maxWidth: '160px', fontFamily: 'monospace', letterSpacing: '0.15em', fontWeight: 600 }}
                     required
                   />
-                  <span className="pin-input-helper">
-                    User uses this 4-digit PIN to sign in instantly.
+                  <span className="admin-field-helper">
+                    Numeric 4-digit code used to sign in instantly.
                   </span>
                 </div>
 
-                <div className="lead-field-group">
-                  <label className="lead-field-label">Role</label>
-                  <select
-                    className="lead-field-input"
+                {/* Role Dropdown */}
+                <div className="admin-modal-role-row">
+                  <span className="admin-modal-role-label">Role</span>
+                  <CustomSelect
                     value={addRole}
-                    onChange={(e) => {
-                      const role = e.target.value;
+                    onChange={(role) => {
                       setAddRole(role);
                       if (role === 'admin') {
                         setAddPerms(DEFAULT_ADMIN_PERMISSIONS);
@@ -638,14 +653,13 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                         setAddPerms(DEFAULT_MEMBER_PERMISSIONS);
                       }
                     }}
-                  >
-                    <option value="member">Team Member</option>
-                    <option value="admin">Administrator</option>
-                  </select>
+                    options={ROLE_OPTIONS}
+                    className="admin-role-select"
+                  />
                 </div>
 
-                <div className="lead-field-group">
-                  <label className="lead-field-label">Permissions</label>
+                <div style={{ marginTop: '12px' }}>
+                  <label className="admin-field-label" style={{ marginBottom: '8px', display: 'block' }}>Permissions</label>
                   <PermissionsEditor
                     permissions={addPerms}
                     onChange={setAddPerms}
@@ -654,10 +668,10 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                 </div>
               </div>
 
-              <div className="lead-modal-footer">
+              <div className="admin-modal-footer">
                 <button
                   type="button"
-                  className="lead-modal-cancel-btn"
+                  className="btn-minimal"
                   onClick={() => setIsAddModalOpen(false)}
                   disabled={isSubmitting}
                 >
@@ -665,10 +679,10 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                 </button>
                 <button
                   type="submit"
-                  className="lead-modal-submit-btn"
+                  className="btn-minimal-save"
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? 'Adding...' : 'Add User'}
+                  {isSubmitting ? 'Adding...' : 'Add Team Member'}
                 </button>
               </div>
             </form>
@@ -678,53 +692,48 @@ export default function AdminUsersView({ currentUser, onLogout }) {
 
       {/* 2. Modal: Change PIN */}
       {isPinModalOpen && selectedUser && (
-        <div className="lead-modal-backdrop" onClick={() => setIsPinModalOpen(false)}>
+        <div className="admin-modal-backdrop" onClick={() => setIsPinModalOpen(false)}>
           <div
-            className="lead-modal-container"
+            className="admin-modal-card admin-modal-pin"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
           >
-            <div className="lead-modal-header">
-              <h2 className="lead-modal-title">Change 4-Digit PIN</h2>
+            <div className="admin-modal-header">
+              <div className="admin-modal-title-group">
+                <h2 className="admin-modal-title">Change PIN</h2>
+                <div className="admin-modal-user-pill">
+                  <span className="admin-modal-user-name">{selectedUser.name}</span>
+                  <span className="admin-modal-user-dot">·</span>
+                  <span className="admin-modal-user-email">{selectedUser.email}</span>
+                </div>
+              </div>
               <button
                 type="button"
-                className="lead-modal-close-btn"
+                className="admin-modal-close-btn"
                 onClick={() => setIsPinModalOpen(false)}
+                aria-label="Close"
               >
-                <X size={18} strokeWidth={1.5} />
+                <X size={16} strokeWidth={1.8} />
               </button>
             </div>
 
             <form onSubmit={handleChangePin}>
-              <div className="lead-modal-body">
-                <p style={{ fontSize: '13px', color: '#475569', marginBottom: '14px' }}>
-                  Setting new access PIN for <strong>{selectedUser.name}</strong> ({selectedUser.email}).
-                </p>
-
+              <div className="admin-modal-body">
                 {formError && (
-                  <div
-                    style={{
-                      padding: '8px 12px',
-                      backgroundColor: '#fef2f2',
-                      color: '#ef4444',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      marginBottom: '12px'
-                    }}
-                  >
+                  <div className="admin-modal-error-banner">
                     {formError}
                   </div>
                 )}
 
-                <div className="lead-field-group">
-                  <label className="lead-field-label">New 4-Digit PIN</label>
+                <div className="admin-pin-display-wrapper">
+                  <label className="admin-pin-large-label">New 4-Digit Access PIN</label>
                   <input
-                    type="text"
+                    type="password"
                     inputMode="numeric"
                     maxLength={4}
-                    className="lead-field-input"
-                    placeholder="Enter 4 digits (e.g. 9876)"
+                    className="admin-pin-large-input"
+                    placeholder="••••"
                     value={newPin}
                     onChange={(e) =>
                       setNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))
@@ -732,16 +741,16 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                     autoFocus
                     required
                   />
-                  <span className="pin-input-helper">
-                    This PIN will be immediately active for logging in.
+                  <span className="admin-pin-large-helper">
+                    Numeric code immediately active for login
                   </span>
                 </div>
               </div>
 
-              <div className="lead-modal-footer">
+              <div className="admin-modal-footer">
                 <button
                   type="button"
-                  className="lead-modal-cancel-btn"
+                  className="btn-minimal"
                   onClick={() => setIsPinModalOpen(false)}
                   disabled={isSubmitting}
                 >
@@ -749,8 +758,8 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                 </button>
                 <button
                   type="submit"
-                  className="lead-modal-submit-btn"
-                  disabled={isSubmitting}
+                  className="btn-minimal-save"
+                  disabled={isSubmitting || newPin.length !== 4}
                 >
                   {isSubmitting ? 'Saving...' : 'Update PIN'}
                 </button>
@@ -762,37 +771,41 @@ export default function AdminUsersView({ currentUser, onLogout }) {
 
       {/* 3. Modal: Edit Permissions */}
       {isEditModalOpen && selectedUser && (
-        <div className="lead-modal-backdrop" onClick={() => setIsEditModalOpen(false)}>
+        <div className="admin-modal-backdrop" onClick={() => setIsEditModalOpen(false)}>
           <div
-            className="lead-modal-container admin-permissions-modal"
+            className="admin-modal-card admin-modal-perms"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
           >
-            <div className="lead-modal-header">
-              <h2 className="lead-modal-title">Edit Permissions</h2>
+            <div className="admin-modal-header">
+              <div className="admin-modal-title-group">
+                <h2 className="admin-modal-title">Edit Permissions</h2>
+                <div className="admin-modal-user-pill">
+                  <span className="admin-modal-user-name">{selectedUser.name}</span>
+                  <span className={`admin-role-pill ${selectedUser.role || 'member'}`}>
+                    {selectedUser.role === 'admin' ? 'Admin' : 'Member'}
+                  </span>
+                </div>
+              </div>
               <button
                 type="button"
-                className="lead-modal-close-btn"
+                className="admin-modal-close-btn"
                 onClick={() => setIsEditModalOpen(false)}
+                aria-label="Close"
               >
-                <X size={18} strokeWidth={1.5} />
+                <X size={16} strokeWidth={1.8} />
               </button>
             </div>
 
             <form onSubmit={handleUpdatePermissions}>
-              <div className="lead-modal-body">
-                <p style={{ fontSize: '13px', color: '#475569', marginBottom: '14px' }}>
-                  Managing access rights for <strong>{selectedUser.name}</strong>
-                </p>
-
-                <div className="lead-field-group">
-                  <label className="lead-field-label">Role</label>
-                  <select
-                    className="lead-field-input"
+              <div className="admin-modal-body">
+                {/* Role Dropdown */}
+                <div className="admin-modal-role-row">
+                  <span className="admin-modal-role-label">Member Role</span>
+                  <CustomSelect
                     value={selectedUser.role || 'member'}
-                    onChange={(e) => {
-                      const newRole = e.target.value;
+                    onChange={(newRole) => {
                       setSelectedUser({
                         ...selectedUser,
                         role: newRole,
@@ -802,28 +815,24 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                             : selectedUser.permissions
                       });
                     }}
-                  >
-                    <option value="member">Team Member</option>
-                    <option value="admin">Administrator</option>
-                  </select>
-                </div>
-
-                <div className="lead-field-group">
-                  <label className="lead-field-label">Permissions</label>
-                  <PermissionsEditor
-                    permissions={selectedUser.permissions}
-                    onChange={(updated) =>
-                      setSelectedUser({ ...selectedUser, permissions: updated })
-                    }
-                    role={selectedUser.role || 'member'}
+                    options={ROLE_OPTIONS}
+                    className="admin-role-select"
                   />
                 </div>
+
+                <PermissionsEditor
+                  permissions={selectedUser.permissions}
+                  onChange={(updated) =>
+                    setSelectedUser({ ...selectedUser, permissions: updated })
+                  }
+                  role={selectedUser.role || 'member'}
+                />
               </div>
 
-              <div className="lead-modal-footer">
+              <div className="admin-modal-footer">
                 <button
                   type="button"
-                  className="lead-modal-cancel-btn"
+                  className="btn-minimal"
                   onClick={() => setIsEditModalOpen(false)}
                   disabled={isSubmitting}
                 >
@@ -831,10 +840,119 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                 </button>
                 <button
                   type="submit"
-                  className="lead-modal-submit-btn"
+                  className="btn-minimal-save"
                   disabled={isSubmitting}
                 >
                   {isSubmitting ? 'Saving...' : 'Save Permissions'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Modal: Delete User Confirmation */}
+      {isDeleteModalOpen && userToDelete && (
+        <div
+          className="admin-modal-backdrop"
+          onClick={handleCloseDeleteModal}
+        >
+          <div
+            className="admin-modal-card admin-modal-delete"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <form onSubmit={handleConfirmDelete} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+              <div className="admin-modal-header">
+                <div className="admin-modal-title-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '10px' }}>
+                  <div className="admin-delete-icon-badge">
+                    <Trash2 size={16} strokeWidth={2} />
+                  </div>
+                  <div>
+                    <h2 className="admin-modal-title">Delete Team Member</h2>
+                    <span className="admin-modal-subtitle">Confirm permanent removal</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="admin-modal-close-btn"
+                  onClick={handleCloseDeleteModal}
+                  aria-label="Close"
+                  disabled={isSubmitting}
+                >
+                  <X size={16} strokeWidth={1.8} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p className="admin-delete-prompt">
+                  Are you sure you want to remove this user from your team?
+                </p>
+
+                <div className="admin-delete-user-card">
+                  <div className="admin-user-details-col">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span className="admin-user-title" style={{ fontSize: '15px' }}>{userToDelete.name}</span>
+                      <span className={`admin-role-pill ${userToDelete.role || 'member'}`}>
+                        {userToDelete.role === 'admin' ? 'Admin' : 'Member'}
+                      </span>
+                    </div>
+                    <span className="admin-user-subtext">{userToDelete.email}</span>
+                  </div>
+                </div>
+
+                <div className="admin-delete-warning-banner">
+                  <span>This action cannot be undone. The user will immediately lose sign-in access to the CRM.</span>
+                </div>
+
+                <div className="admin-delete-pin-group">
+                  <label htmlFor="delete-pin-input" className="admin-delete-pin-label">
+                    Re-enter your PIN to confirm
+                  </label>
+                  <div className="admin-delete-pin-wrapper">
+                    <input
+                      id="delete-pin-input"
+                      type="password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={4}
+                      autoFocus
+                      placeholder="••••"
+                      value={deletePin}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                        setDeletePin(val);
+                        if (deletePinError) setDeletePinError('');
+                      }}
+                      className={`admin-delete-pin-input ${deletePinError ? 'has-error' : ''}`}
+                      disabled={isSubmitting}
+                      autoComplete="off"
+                    />
+                  </div>
+                  {deletePinError ? (
+                    <span className="admin-delete-pin-error">{deletePinError}</span>
+                  ) : (
+                    <span className="admin-delete-pin-hint">Enter your 4-digit admin PIN to authorize permanent deletion</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="btn-minimal"
+                  onClick={handleCloseDeleteModal}
+                  disabled={isSubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-danger-confirm"
+                  disabled={isSubmitting || deletePin.length !== 4}
+                >
+                  {isSubmitting ? 'Deleting...' : 'Delete Member'}
                 </button>
               </div>
             </form>

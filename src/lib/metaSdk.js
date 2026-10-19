@@ -192,3 +192,130 @@ export const exchangeForLongLivedUserToken = async (shortUserToken, appId = DEFA
   return shortUserToken;
 };
 
+/**
+ * Trigger Facebook / Meta Login requesting WhatsApp Business Management permissions
+ * (WhatsApp Embedded Signup / Onboarding flow)
+ */
+export const loginWithWhatsApp = async (appId = DEFAULT_APP_ID) => {
+  const FB = await loadMetaSdk(appId);
+
+  return new Promise((resolve, reject) => {
+    let embeddedSignupData = null;
+
+    // Listen for Meta Embedded Signup message events (if using embedded signup popup)
+    const messageListener = (event) => {
+      if (
+        event.origin !== 'https://www.facebook.com' &&
+        event.origin !== 'https://web.facebook.com'
+      ) {
+        return;
+      }
+      try {
+        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (data && (data.type === 'WA_EMBEDDED_SIGNUP' || data.event === 'WA_EMBEDDED_SIGNUP')) {
+          embeddedSignupData = data.data || data;
+        }
+      } catch (e) { }
+    };
+
+    window.addEventListener('message', messageListener);
+
+    FB.login(
+      (response) => {
+        window.removeEventListener('message', messageListener);
+
+        if (response.authResponse) {
+          resolve({
+            authResponse: response.authResponse,
+            accessToken: response.authResponse.accessToken,
+            embeddedData: embeddedSignupData
+          });
+        } else {
+          const msg =
+            response.status === 'not_authorized'
+              ? 'WhatsApp access was not authorized by Meta.'
+              : 'WhatsApp connection was cancelled.';
+          reject(new Error(msg));
+        }
+      },
+      {
+        scope: 'whatsapp_business_management,whatsapp_business_messaging',
+        return_scopes: true
+      }
+    );
+  });
+};
+
+/**
+ * Fetch WhatsApp Business Accounts (WABAs) and phone numbers accessible by the authenticated user
+ */
+export const fetchUserWhatsAppAccounts = async (userAccessToken) => {
+  const accounts = [];
+
+  // Query businesses with owned WhatsApp Business Accounts & phone numbers
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/${API_VERSION}/me/businesses?fields=id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name,code_verification_status,quality_rating}}&limit=50&access_token=${userAccessToken}`
+    );
+    const data = await res.json();
+
+    if (data.data && Array.isArray(data.data)) {
+      data.data.forEach((biz) => {
+        const wabas = biz.owned_whatsapp_business_accounts?.data || [];
+        wabas.forEach((waba) => {
+          const phones = waba.phone_numbers?.data || [];
+          phones.forEach((phone) => {
+            accounts.push({
+              businessId: biz.id,
+              businessName: biz.name,
+              wabaId: waba.id,
+              wabaName: waba.name || biz.name,
+              phoneId: phone.id,
+              displayNumber: phone.display_phone_number || phone.id,
+              verifiedName: phone.verified_name || waba.name || biz.name,
+              status: phone.code_verification_status || 'VERIFIED',
+              qualityRating: phone.quality_rating || 'UNKNOWN'
+            });
+          });
+        });
+      });
+    }
+  } catch (err) {
+    console.warn('Error querying businesses for WhatsApp accounts:', err);
+  }
+
+  // Also query client / shared WhatsApp Business Accounts
+  if (accounts.length === 0) {
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/${API_VERSION}/me/client_whatsapp_business_accounts?fields=id,name,phone_numbers{id,display_phone_number,verified_name,code_verification_status,quality_rating}&limit=50&access_token=${userAccessToken}`
+      );
+      const data = await res.json();
+
+      if (data.data && Array.isArray(data.data)) {
+        data.data.forEach((waba) => {
+          const phones = waba.phone_numbers?.data || [];
+          phones.forEach((phone) => {
+            accounts.push({
+              businessId: waba.id,
+              businessName: waba.name,
+              wabaId: waba.id,
+              wabaName: waba.name,
+              phoneId: phone.id,
+              displayNumber: phone.display_phone_number || phone.id,
+              verifiedName: phone.verified_name || waba.name,
+              status: phone.code_verification_status || 'VERIFIED',
+              qualityRating: phone.quality_rating || 'UNKNOWN'
+            });
+          });
+        });
+      }
+    } catch (err) {
+      console.warn('Error querying client WhatsApp accounts:', err);
+    }
+  }
+
+  return accounts;
+};
+
+

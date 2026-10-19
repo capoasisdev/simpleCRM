@@ -18,35 +18,36 @@
    Hub Screen (Entry Selection between WhatsApp & Lead Routing)
    -------------------------------------------------------------------------- */
 .automations-hub-container {
-  max-width: 1040px;
+  max-width: 840px;
   width: 100%;
   height: 100%;
   overflow-y: auto;
   margin: 0 auto;
-  padding: 40px 36px 80px 36px;
+  padding: 36px 32px 64px 32px;
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 24px;
+  box-sizing: border-box;
 }
 
-.hub-header {
+.hub-master-header {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 2px;
+  border-bottom: none;
 }
 
-.hub-title {
-  font-size: 22px;
-  font-weight: var(--font-weight-semibold, 600);
-  color: var(--text-primary, #111827);
-  letter-spacing: -0.015em;
+.hub-master-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: -0.025em;
   margin: 0;
-}
-
-.hub-subtitle {
-  font-size: 13.5px;
-  color: var(--text-secondary, #6b7280);
-  margin: 0;
+  line-height: 1.2;
+  background: #f5f5dc;
+  padding: 4px 8px;
+  width: fit-content;
 }
 
 .hub-cards-grid {

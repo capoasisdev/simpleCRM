@@ -15,10 +15,10 @@
 }
 
 .pipeline-view-inner {
-  max-width: 1100px;
+  max-width: 840px;
   width: 100%;
   margin: 0 auto;
-  padding: 28px 40px 60px 40px;
+  padding: 28px 32px 60px 32px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -46,6 +46,9 @@
   letter-spacing: -0.025em;
   margin: 0;
   line-height: 1.2;
+  background: #f5f5dc;
+  padding: 4px 8px;
+  width: fit-content;
 }
 
 .pipeline-master-count {
@@ -373,6 +376,30 @@
   overflow: visible;
 }
 
+.pipeline-autosave-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 6px;
+  user-select: none;
+  transition: opacity 0.2s ease;
+}
+
+.pipeline-autosave-indicator.saving {
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.pipeline-autosave-indicator.saved {
+  color: #059669;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+}
+
 .pipeline-content-header {
   display: flex;
   align-items: center;
@@ -393,6 +420,9 @@
   color: #0f172a;
   margin: 0;
   letter-spacing: -0.02em;
+  background: #f5f5dc;
+  padding: 4px 8px;
+  width: fit-content;
 }
 
 .pipeline-content-subtitle {
@@ -496,9 +526,12 @@
 }
 
 .pipeline-general-label {
-  font-size: 14px;
+  font-size: 20px;
   font-weight: 600;
   color: #0f172a;
+  background: #f5f5dc;
+  padding: 4px 8px;
+  width: fit-content;
 }
 
 .pipeline-general-desc {
@@ -597,6 +630,36 @@
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+}
+
+.pipeline-source-custom-select {
+  min-width: 280px;
+  width: auto;
+  max-width: 440px;
+}
+
+.pipeline-source-custom-select .pipeline-custom-select-trigger {
+  min-height: 36px;
+  height: 36px;
+  font-size: 15px;
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.pipeline-source-custom-select .pipeline-custom-select-label,
+.pipeline-source-custom-select .pipeline-custom-select-placeholder {
+  font-size: 15px;
+}
+
+.pipeline-source-custom-select .pipeline-custom-select-menu {
+  min-width: 100%;
+  right: 0;
+  left: auto;
+  width: max-content;
+  max-width: 440px;
 }
 
 .pipeline-source-select-clean {
@@ -971,3 +1034,775 @@
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
   z-index: 150;
 }
+
+/* ----------------- Custom Neat Clean Dropdowns ----------------- */
+.pipeline-custom-select-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+}
+
+.pipeline-custom-select-trigger {
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 16px;
+  color: #0f172a;
+  font-weight: 500;
+  text-align: left;
+  outline: none;
+  transition: background-color 0.15s ease;
+  user-select: none;
+}
+
+.pipeline-custom-select-trigger:hover {
+  background-color: #f1f5f9;
+}
+
+.pipeline-custom-select-trigger.active {
+  background-color: #f1f5f9;
+  border: none;
+  box-shadow: none;
+}
+
+.pipeline-custom-select-trigger.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: transparent;
+}
+
+.pipeline-custom-select-trigger-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pipeline-custom-select-selected {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pipeline-custom-select-label {
+  font-size: 16px;
+  font-weight: 500;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+}
+
+.pipeline-custom-select-sublabel {
+  font-size: 12.5px;
+  color: #64748b;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.pipeline-custom-select-placeholder {
+  color: #94a3b8;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.pipeline-custom-select-chevron {
+  color: #64748b;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+}
+
+.pipeline-custom-select-chevron.open {
+  transform: rotate(180deg);
+  color: #0f172a;
+}
+
+.pipeline-custom-select-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 14px 34px -4px rgba(15, 23, 42, 0.12), 0 4px 10px -2px rgba(15, 23, 42, 0.04);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+  animation: pipeSelectFadeIn 0.12s ease-out;
+}
+
+@keyframes pipeSelectFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pipeline-custom-select-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+.pipeline-custom-select-option {
+  padding: 10px 14px;
+  border-radius: 7px;
+  font-size: 15px;
+  color: #334155;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  user-select: none;
+}
+
+.pipeline-custom-select-option:hover {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+.pipeline-custom-select-option.selected {
+  background-color: #f0fdf4;
+  font-weight: 600;
+  color: #15803d;
+}
+
+.pipeline-custom-select-option.selected .pipeline-custom-select-option-label {
+  color: #15803d;
+  font-weight: 600;
+}
+
+.pipeline-custom-select-option.selected .pipeline-custom-select-option-sublabel {
+  color: #166534;
+}
+
+.pipeline-custom-select-option-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pipeline-custom-select-option-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.pipeline-custom-select-option-sublabel {
+  font-size: 12.5px;
+  color: #64748b;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.pipeline-custom-select-check {
+  color: #16a34a;
+  flex-shrink: 0;
+}
+
+/* ----------------- Tab 3: Distribution Pane (Minimalist Style Matching General) ----------------- */
+.pipeline-dist-mode-select {
+  width: 100%;
+  max-width: 440px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #0f172a;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pipeline-dist-mode-select:focus {
+  border-color: #0f172a;
+  box-shadow: 0 0 0 1px #0f172a;
+}
+
+.pipeline-general-header-between {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.btn-dist-minimal-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-dist-minimal-action:hover {
+  color: #0f172a;
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+/* ----------------- Tab 3: Distribution Numbered List (Stages Aesthetic) ----------------- */
+.pipeline-dist-numbered-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 10px 0;
+}
+
+.pipeline-dist-numbered-item {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.pipeline-dist-numbered-item:hover {
+  background: #f8fafc;
+}
+
+.pipeline-dist-numbered-item.is-disabled {
+  opacity: 0.45;
+}
+
+.pipeline-dist-numbered-item.is-disabled:hover {
+  opacity: 0.75;
+}
+
+.pipeline-dist-numbered-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 14px;
+}
+
+.pipeline-dist-user-details {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pipeline-dist-user-name {
+  font-size: 17px;
+  font-weight: 500;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+}
+
+.pipeline-dist-user-role {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.pipeline-dist-numbered-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+/* Distinct Weight Allocation Dock */
+.pipeline-dist-weight-dock {
+  display: flex;
+  align-items: center;
+  height: 80%;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pipeline-dist-weight-dock:focus-within {
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+.pipeline-dist-weight-dock.static {
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Matching the exact green square button from Stages tab with standalone border-radius */
+.btn-dist-entry-toggle {
+  aspect-ratio: 1 / 1;
+  height: 100%;
+  min-width: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-dist-entry-toggle:hover:not(.active) {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.btn-dist-entry-toggle.active {
+  color: #15803d;
+  background: #dcfce7;
+}
+
+.btn-dist-entry-toggle.active:hover {
+  background: #bbf7d0;
+  color: #166534;
+}
+
+/* Full-Height Distribution Actions Strip inside Weight Dock */
+.btn-dist-step-action {
+  aspect-ratio: 1 / 1;
+  height: 100%;
+  min-width: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: #64748b;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  padding: 0;
+}
+
+.btn-dist-step-action:hover:not(:disabled) {
+  background-color: #e2e8f0;
+  color: #0f172a;
+}
+
+.btn-dist-step-action:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.pipeline-dist-pct-slot {
+  height: 100%;
+  min-width: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  background: #ffffff;
+  border-left: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
+  transition: background-color 0.15s ease;
+}
+
+.pipeline-dist-pct-bare-input {
+  width: 28px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  text-align: right;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  outline: none;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+  font-family: inherit;
+}
+
+.pipeline-dist-pct-bare-suffix {
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  margin-left: 1px;
+  user-select: none;
+}
+
+/* Top Full-Width Thick Segmented Distribution Track */
+.pipeline-dist-top-allocation {
+  margin-top: 14px;
+  margin-bottom: 10px;
+  width: 100%;
+}
+
+.pipeline-dist-multi-bar {
+  width: 100%;
+  height: 38px;
+  background-color: transparent;
+  border-radius: 8px;
+  display: flex;
+  overflow: hidden;
+  gap: 2px;
+}
+
+.pipeline-dist-bar-segment {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  transition: width 0.25s ease, filter 0.15s ease;
+  position: relative;
+  overflow: hidden;
+  cursor: default;
+}
+
+.pipeline-dist-bar-segment:first-child {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
+.pipeline-dist-bar-segment:last-child {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.pipeline-dist-bar-segment:hover {
+  filter: brightness(1.12);
+}
+
+.pipeline-dist-segment-name {
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+.pipeline-dist-segment-pct {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.pipeline-dist-rr-share {
+  display: flex;
+  align-items: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #64748b;
+  padding: 0 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pipeline-dist-count-badge {
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+/* --------------------------------------------------------------------------
+   Pipeline Stage Automations Sub-Tab (Borderless Stages Style)
+   -------------------------------------------------------------------------- */
+.pipeline-auto-numbered-item {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  transition: background-color 0.15s ease;
+  position: relative;
+  min-height: 48px;
+}
+
+.pipeline-auto-numbered-item:hover {
+  background: #f8fafc;
+}
+
+.pipeline-auto-numbered-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 14px;
+}
+
+.pipeline-auto-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pipeline-auto-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pipeline-auto-stage-name {
+  font-size: 17px;
+  font-weight: 500;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipeline-auto-preview-subtext {
+  font-size: 12.5px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 440px;
+}
+
+.pipeline-auto-preview-subtext.is-active {
+  color: #166534;
+}
+
+.pipeline-auto-actions {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 4px 6px;
+}
+
+.pipeline-auto-select-container {
+  min-width: 220px;
+  max-width: 300px;
+  display: flex;
+  align-items: center;
+}
+
+.pipeline-auto-select-container .pipeline-custom-select-trigger {
+  min-height: 40px;
+  height: 100%;
+  font-size: 14px;
+  padding: 4px 10px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.pipeline-auto-select-container .pipeline-custom-select-trigger:hover {
+  background-color: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.pipeline-auto-select-container .pipeline-custom-select-label {
+  font-size: 14px;
+}
+
+/* Full-Height Rectangular Toggle Button (matching .btn-dist-entry-toggle from Stages/Distribution) */
+.btn-auto-rectangular-toggle {
+  aspect-ratio: 1 / 1;
+  height: 100%;
+  min-width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-auto-rectangular-toggle:hover:not(.active) {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.btn-auto-rectangular-toggle.active {
+  color: #15803d;
+  background: #dcfce7;
+}
+
+.btn-auto-rectangular-toggle.active:hover {
+  background: #bbf7d0;
+  color: #166534;
+}
+
+.btn-auto-rectangular-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.stage-auto-no-templates-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #fefce8;
+  border: 1px solid #fef08a;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #854d0e;
+  white-space: nowrap;
+}
+
+/* Multi-Channel Stage Automations (WhatsApp + Email) */
+.pipeline-auto-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  transition: all 0.15s ease;
+}
+
+.pipeline-auto-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.pipeline-auto-card.is-active {
+  border-color: #cbd5e1;
+  background: #fafafa;
+}
+
+.pipeline-auto-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pipeline-auto-badge-pill {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pipeline-auto-channel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border: 1px solid #f1f5f9;
+  border-radius: 8px;
+  min-height: 44px;
+}
+
+.pipeline-auto-channel-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 140px;
+}
+
+.pipeline-auto-channel-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pipeline-auto-channel-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.pipeline-auto-channel-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.btn-auto-rectangular-toggle.email-active {
+  color: #0369a1;
+  background: #e0f2fe;
+}
+
+.btn-auto-rectangular-toggle.email-active:hover {
+  color: #075985;
+  background: #bae6fd;
+}
+
+

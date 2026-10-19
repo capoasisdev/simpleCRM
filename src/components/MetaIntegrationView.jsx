@@ -17,8 +17,14 @@ import {
   AlertTriangle,
   Key,
   ShieldCheck,
-  Unlink
+  Unlink,
+  MessageCircle,
+  Send,
+  Phone,
+  Zap,
+  Mail
 } from 'lucide-react';
+import EmailIntegrationView from './EmailIntegrationView';
 import { supabase } from '../lib/supabase';
 import {
   loginWithMeta,
@@ -27,8 +33,15 @@ import {
   subscribePageWebhook,
   fetchPageLeadForms,
   validateMetaToken,
-  exchangeForLongLivedUserToken
+  exchangeForLongLivedUserToken,
+  loginWithWhatsApp,
+  fetchUserWhatsAppAccounts
 } from '../lib/metaSdk';
+import {
+  testWhatsAppCredentials,
+  fetchWhatsAppTemplates,
+  sendWhatsAppMessage
+} from '../lib/whatsapp';
 import Skeleton from './common/Skeleton';
 import '../styles/meta.css';
 
@@ -80,7 +93,7 @@ function CustomDropdown({
                 {selectedOption.label}
               </span>
               {selectedOption.sublabel && (
-                <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                <span className="meta-custom-select-sublabel">
                   {selectedOption.sublabel}
                 </span>
               )}
@@ -129,7 +142,7 @@ function CustomDropdown({
                       {opt.label}
                     </span>
                     {opt.sublabel && (
-                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                      <span className="meta-custom-select-sublabel">
                         {opt.sublabel}
                       </span>
                     )}
@@ -168,13 +181,7 @@ export default function MetaIntegrationView({ currentUser }) {
   });
 
   const [rowId, setRowId] = useState(null);
-  const [isLoading, setIsLoading] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_meta_config');
-      if (cached) return false;
-    } catch (e) { }
-    return true;
-  });
+  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
   const [saveError, setSaveError] = useState('');
@@ -250,6 +257,37 @@ export default function MetaIntegrationView({ currentUser }) {
 
   const [testFeedback, setTestFeedback] = useState(null);
   const feedbackTimerRef = useRef(null);
+
+  // Channel Tab State ('facebook' | 'whatsapp')
+  const [activeChannel, setActiveChannel] = useState('facebook');
+
+  // WhatsApp Cloud API States
+  const [waIsConnected, setWaIsConnected] = useState(false);
+  const [waAccountName, setWaAccountName] = useState('');
+  const [waPhoneId, setWaPhoneId] = useState('');
+  const [waWabaId, setWaWabaId] = useState('');
+  const [waToken, setWaToken] = useState('');
+  const [waTemplates, setWaTemplates] = useState([]);
+  const [isSavingWa, setIsSavingWa] = useState(false);
+  const [isTestingWa, setIsTestingWa] = useState(false);
+  const [isSyncingWa, setIsSyncingWa] = useState(false);
+  const [isConnectingWa, setIsConnectingWa] = useState(false);
+  const [waFeedback, setWaFeedback] = useState(null);
+  const [waVerifiedInfo, setWaVerifiedInfo] = useState(null);
+
+  // WhatsApp Multi-Account Asset Selection Modal
+  const [isWaAssetModalOpen, setIsWaAssetModalOpen] = useState(false);
+  const [discoveredWaAccounts, setDiscoveredWaAccounts] = useState([]);
+  const [selectedWaAccountKey, setSelectedWaAccountKey] = useState('');
+  const [tempWaToken, setTempWaToken] = useState('');
+
+  // WhatsApp Test Message Modal
+  const [isTestModalOpen, setIsTestModalOpen] = useState(false);
+  const [testRecipientPhone, setTestRecipientPhone] = useState('');
+  const [testLeadName, setTestLeadName] = useState(() => currentUser?.name || currentUser?.full_name || 'Admin');
+  const [testTemplateName, setTestTemplateName] = useState('');
+  const [isSendingTest, setIsSendingTest] = useState(false);
+  const [testModalFeedback, setTestModalFeedback] = useState(null);
 
   const checkTokenHealth = async (tokenOverride, isManualTest = false) => {
     const targetToken = tokenOverride !== undefined ? tokenOverride : config.access_token;
@@ -330,6 +368,16 @@ export default function MetaIntegrationView({ currentUser }) {
           try {
             localStorage.setItem('crm_cached_meta_config', JSON.stringify(newConf));
           } catch (e) { }
+
+          // Populate WhatsApp Cloud API state
+          setWaIsConnected(Boolean(data.whatsapp_is_connected || (data.whatsapp_phone_number_id && data.whatsapp_access_token)));
+          setWaAccountName(data.whatsapp_account_name || '');
+          setWaPhoneId(data.whatsapp_phone_number_id || '');
+          setWaWabaId(data.whatsapp_business_account_id || '');
+          setWaToken(data.whatsapp_access_token || '');
+          if (Array.isArray(data.whatsapp_templates)) {
+            setWaTemplates(data.whatsapp_templates);
+          }
 
           if (newConf.access_token) {
             checkTokenHealth(newConf.access_token);
@@ -831,11 +879,395 @@ export default function MetaIntegrationView({ currentUser }) {
     }
   };
 
+  // =========================================================================
+  // WhatsApp Cloud API Handlers
+  // =========================================================================
+
+  const handleConnectWithWhatsApp = async () => {
+    setIsConnectingWa(true);
+    setWaFeedback(null);
+
+    try {
+      const targetAppId = config.app_id?.trim() || import.meta.env.VITE_META_APP_ID || '977193864751819';
+      const authResult = await loginWithWhatsApp(targetAppId);
+      const userToken = authResult.accessToken;
+
+      // Exchange for long-lived token
+      const effectiveToken = await exchangeForLongLivedUserToken(userToken, targetAppId, config.app_secret);
+      setTempWaToken(effectiveToken);
+
+      // Check if Meta's Embedded Signup returned the WABA ID & Phone Number ID directly
+      if (authResult.embeddedData?.waba_id && authResult.embeddedData?.phone_number_id) {
+        await finalizeWhatsAppConnection({
+          wabaId: authResult.embeddedData.waba_id,
+          phoneId: authResult.embeddedData.phone_number_id,
+          verifiedName: 'WhatsApp Business'
+        }, effectiveToken);
+        return;
+      }
+
+      // Otherwise discover WhatsApp Business accounts & phone numbers via Meta Graph API
+      const accounts = await fetchUserWhatsAppAccounts(effectiveToken);
+
+      if (accounts.length === 0) {
+        // Fallback check against known App WABA/Phone ID
+        const targetPhoneId = waPhoneId || config.whatsapp_phone_number_id || '1299473363256876';
+        const targetWabaId = waWabaId || config.whatsapp_business_account_id || '1641109674374831';
+        try {
+          const testRes = await testWhatsAppCredentials({ phoneId: targetPhoneId, token: effectiveToken });
+          await finalizeWhatsAppConnection({
+            phoneId: targetPhoneId,
+            wabaId: targetWabaId,
+            verifiedName: testRes.displayName || 'WhatsApp Business',
+            displayNumber: testRes.phoneNumber
+          }, effectiveToken);
+          return;
+        } catch (testErr) {
+          setWaFeedback({
+            type: 'error',
+            text: 'Connected with Meta, but no WhatsApp Business accounts were found on this Meta account.'
+          });
+          return;
+        }
+      }
+
+      if (accounts.length === 1) {
+        await finalizeWhatsAppConnection(accounts[0], effectiveToken);
+      } else {
+        setDiscoveredWaAccounts(accounts);
+        setSelectedWaAccountKey(`${accounts[0].wabaId}:::${accounts[0].phoneId}`);
+        setIsWaAssetModalOpen(true);
+      }
+    } catch (err) {
+      console.error('WhatsApp connect error:', err);
+      setWaFeedback({
+        type: 'error',
+        text: err.message || 'Failed to connect with WhatsApp.'
+      });
+    } finally {
+      setIsConnectingWa(false);
+    }
+  };
+
+  const finalizeWhatsAppConnection = async (account, token) => {
+    try {
+      const name = account.verifiedName || account.wabaName || 'WhatsApp Business';
+      setWaIsConnected(true);
+      setWaAccountName(name);
+      setWaPhoneId(account.phoneId);
+      setWaWabaId(account.wabaId);
+      setWaToken(token);
+
+      const dbPayload = {
+        whatsapp_is_connected: true,
+        whatsapp_account_name: name,
+        whatsapp_phone_number_id: account.phoneId,
+        whatsapp_business_account_id: account.wabaId,
+        whatsapp_access_token: token,
+        updated_at: new Date().toISOString()
+      };
+
+      if (rowId) {
+        await supabase.from('meta_config').update(dbPayload).eq('id', rowId);
+      } else {
+        const { data: newRow } = await supabase.from('meta_config').insert([dbPayload]).select().single();
+        if (newRow) setRowId(newRow.id);
+      }
+
+      // Auto-sync templates immediately
+      try {
+        const templates = await fetchWhatsAppTemplates({ wabaId: account.wabaId, token });
+        setWaTemplates(templates);
+        if (rowId) {
+          await supabase.from('meta_config').update({ whatsapp_templates: templates }).eq('id', rowId);
+        }
+      } catch (syncErr) {
+        console.warn('Initial template sync error:', syncErr);
+      }
+
+      setIsWaAssetModalOpen(false);
+      setWaFeedback({
+        type: 'success',
+        text: `Connected successfully to "${name}" (${account.displayNumber || account.phoneId})!`
+      });
+      setTimeout(() => setWaFeedback(null), 5000);
+    } catch (err) {
+      setWaFeedback({ type: 'error', text: err.message || 'Failed to finalize WhatsApp connection.' });
+    }
+  };
+
+  const handleDisconnectWhatsApp = async () => {
+    if (!window.confirm('Are you sure you want to disconnect WhatsApp Cloud API? Automated pipeline messages will be paused.')) {
+      return;
+    }
+
+    setWaIsConnected(false);
+    setWaAccountName('');
+    setWaPhoneId('');
+    setWaWabaId('');
+    setWaToken('');
+    setWaTemplates([]);
+    setWaVerifiedInfo(null);
+
+    try {
+      if (rowId) {
+        await supabase.from('meta_config').update({
+          whatsapp_is_connected: false,
+          whatsapp_account_name: '',
+          whatsapp_phone_number_id: '',
+          whatsapp_business_account_id: '',
+          whatsapp_access_token: '',
+          whatsapp_templates: [],
+          updated_at: new Date().toISOString()
+        }).eq('id', rowId);
+      }
+      setWaFeedback({ type: 'success', text: 'WhatsApp disconnected successfully.' });
+      setTimeout(() => setWaFeedback(null), 4000);
+    } catch (err) {
+      console.error('Error disconnecting WhatsApp:', err);
+    }
+  };
+
+  const handleSaveWhatsAppCredentials = async () => {
+    setIsSavingWa(true);
+    setWaFeedback(null);
+
+    try {
+      const isConnected = Boolean(waPhoneId.trim() && waToken.trim());
+      const accountName = waVerifiedInfo?.displayName || waAccountName || 'WhatsApp Business';
+      const dbPayload = {
+        whatsapp_is_connected: isConnected,
+        whatsapp_account_name: accountName,
+        whatsapp_phone_number_id: waPhoneId.trim(),
+        whatsapp_business_account_id: waWabaId.trim(),
+        whatsapp_access_token: waToken.trim(),
+        updated_at: new Date().toISOString()
+      };
+
+      if (rowId) {
+        const { error } = await supabase.from('meta_config').update(dbPayload).eq('id', rowId);
+        if (error) throw error;
+      } else {
+        const { data: newRow, error } = await supabase.from('meta_config').insert([dbPayload]).select().single();
+        if (error) throw error;
+        if (newRow) setRowId(newRow.id);
+      }
+
+      setWaIsConnected(isConnected);
+      setWaAccountName(accountName);
+
+      // If WABA ID is provided, auto-sync templates
+      if (waWabaId.trim() && waToken.trim()) {
+        try {
+          const templates = await fetchWhatsAppTemplates({ wabaId: waWabaId.trim(), token: waToken.trim() });
+          setWaTemplates(templates);
+          if (rowId) {
+            await supabase.from('meta_config').update({ whatsapp_templates: templates }).eq('id', rowId);
+          }
+        } catch (syncErr) {
+          console.warn('Auto template sync error:', syncErr);
+        }
+      }
+
+      setWaFeedback({ type: 'success', text: `WhatsApp Cloud API credentials saved successfully for "${accountName}"!` });
+      setTimeout(() => setWaFeedback(null), 4000);
+    } catch (err) {
+      setWaFeedback({ type: 'error', text: err.message || 'Failed to save WhatsApp credentials.' });
+    } finally {
+      setIsSavingWa(false);
+    }
+  };
+
+  const handleTestWhatsAppConnection = async () => {
+    setIsTestingWa(true);
+    setWaFeedback(null);
+    setWaVerifiedInfo(null);
+
+    try {
+      const result = await testWhatsAppCredentials({ phoneId: waPhoneId, token: waToken });
+      setWaVerifiedInfo(result);
+      setWaFeedback({
+        type: 'success',
+        text: `Connection verified! Name: ${result.displayName} • Phone: ${result.phoneNumber} • Status: ${result.status}`
+      });
+    } catch (err) {
+      setWaFeedback({
+        type: 'error',
+        text: `Verification failed: ${err.message}`
+      });
+    } finally {
+      setIsTestingWa(false);
+    }
+  };
+
+  const handleSyncTemplates = async () => {
+    setIsSyncingWa(true);
+    setWaFeedback(null);
+
+    try {
+      const templates = await fetchWhatsAppTemplates({ wabaId: waWabaId, token: waToken });
+      setWaTemplates(templates);
+
+      // Persist templates to database
+      if (rowId) {
+        await supabase.from('meta_config').update({
+          whatsapp_templates: templates,
+          updated_at: new Date().toISOString()
+        }).eq('id', rowId);
+      } else {
+        const { data: newRow } = await supabase.from('meta_config').insert([{
+          whatsapp_phone_number_id: waPhoneId.trim(),
+          whatsapp_business_account_id: waWabaId.trim(),
+          whatsapp_access_token: waToken.trim(),
+          whatsapp_templates: templates,
+          updated_at: new Date().toISOString()
+        }]).select().single();
+        if (newRow) setRowId(newRow.id);
+      }
+
+      setWaFeedback({
+        type: 'success',
+        text: `Successfully synced ${templates.length} message template${templates.length === 1 ? '' : 's'} from Meta!`
+      });
+      setTimeout(() => setWaFeedback(null), 5000);
+    } catch (err) {
+      setWaFeedback({
+        type: 'error',
+        text: `Template sync failed: ${err.message}`
+      });
+    } finally {
+      setIsSyncingWa(false);
+    }
+  };
+
+  const handleOpenTestModal = () => {
+    setTestModalFeedback(null);
+    setTestRecipientPhone('');
+    setTestLeadName(currentUser?.name || currentUser?.full_name || 'Admin');
+    if (waTemplates.length > 0) {
+      setTestTemplateName(waTemplates[0].name);
+    } else {
+      setTestTemplateName('salado_lead_welcome');
+    }
+    setIsTestModalOpen(true);
+  };
+
+  const handleSendTestMessage = async () => {
+    setIsSendingTest(true);
+    setTestModalFeedback(null);
+
+    try {
+      await sendWhatsAppMessage({
+        to: testRecipientPhone,
+        leadName: testLeadName,
+        templateName: testTemplateName,
+        overrideConfig: {
+          whatsapp_phone_number_id: waPhoneId,
+          whatsapp_access_token: waToken
+        }
+      });
+
+      setTestModalFeedback({
+        type: 'success',
+        text: `Test message dispatched successfully to ${testRecipientPhone}!`
+      });
+      setTimeout(() => {
+        setTestModalFeedback(null);
+        setIsTestModalOpen(false);
+      }, 2500);
+    } catch (err) {
+      setTestModalFeedback({
+        type: 'error',
+        text: err.message || 'Failed to send WhatsApp message.'
+      });
+    } finally {
+      setIsSendingTest(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="meta-container">
-        <Skeleton variant="text" width="200px" height="28px" style={{ marginBottom: '16px' }} />
-        <Skeleton variant="card" height="180px" />
+        <div className="meta-inner">
+          <div className="meta-master-header">
+            <h1 className="meta-master-title">Integrations Hub</h1>
+          </div>
+
+          <div className="meta-subnav-bar">
+            <button
+              type="button"
+              className={`meta-subnav-btn ${activeChannel === 'facebook' ? 'active' : ''}`}
+              onClick={() => setActiveChannel('facebook')}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1877F2' }}>
+                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+              </svg>
+              Facebook Lead Ads
+            </button>
+            <button
+              type="button"
+              className={`meta-subnav-btn ${activeChannel === 'whatsapp' ? 'active' : ''}`}
+              onClick={() => setActiveChannel('whatsapp')}
+            >
+              <MessageCircle size={20} style={{ color: '#25D366' }} />
+              WhatsApp Cloud API
+            </button>
+            <button
+              type="button"
+              className={`meta-subnav-btn ${activeChannel === 'email' ? 'active' : ''}`}
+              onClick={() => setActiveChannel('email')}
+            >
+              <Mail size={20} style={{ color: '#0284c7' }} />
+              Email (Resend)
+            </button>
+          </div>
+
+          {/* Section 1: Hero Card Skeleton */}
+          <div className="meta-hero-card-container">
+            <div className="meta-panel-card" style={{ padding: '20px 24px' }}>
+              <div className="meta-skeleton-hero">
+                <div className="meta-skeleton-hero-left">
+                  <Skeleton width="44px" height="44px" borderRadius="10px" />
+                  <div className="meta-skeleton-hero-details">
+                    <Skeleton width="180px" height="18px" borderRadius="4px" />
+                    <Skeleton width="130px" height="12px" borderRadius="3px" style={{ marginTop: 2 }} />
+                  </div>
+                </div>
+                <div className="meta-skeleton-hero-actions">
+                  <Skeleton width="34px" height="34px" borderRadius="6px" />
+                  <Skeleton width="34px" height="34px" borderRadius="6px" />
+                  <Skeleton width="34px" height="34px" borderRadius="6px" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Connected Forms Panel Skeleton */}
+          <div className="meta-panel-card" style={{ padding: '20px 24px' }}>
+            <div className="meta-skeleton-panel-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="meta-panel-title">Connected Lead Forms</span>
+                <Skeleton width="75px" height="22px" borderRadius="6px" />
+              </div>
+              <Skeleton width="92px" height="32px" borderRadius="6px" />
+            </div>
+
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {[1, 2].map((i) => (
+                <div key={i} className="meta-skeleton-panel-row">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <Skeleton width="36px" height="36px" borderRadius="6px" />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      <Skeleton width={i === 1 ? '170px' : '210px'} height="15px" borderRadius="4px" />
+                      <Skeleton width="95px" height="12px" borderRadius="3px" />
+                    </div>
+                  </div>
+                  <Skeleton width="76px" height="28px" borderRadius="6px" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -844,8 +1276,41 @@ export default function MetaIntegrationView({ currentUser }) {
     <div className="meta-container">
       <div className="meta-inner">
         <div className="meta-master-header">
-          <h1 className="meta-master-title">Meta Integration</h1>
+          <h1 className="meta-master-title">Integrations Hub</h1>
         </div>
+
+        {/* Subnav Pill Toggle */}
+        <div className="meta-subnav-bar">
+          <button
+            type="button"
+            className={`meta-subnav-btn ${activeChannel === 'facebook' ? 'active' : ''}`}
+            onClick={() => setActiveChannel('facebook')}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1877F2' }}>
+              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+            </svg>
+            Facebook Lead Ads
+          </button>
+          <button
+            type="button"
+            className={`meta-subnav-btn ${activeChannel === 'whatsapp' ? 'active' : ''}`}
+            onClick={() => setActiveChannel('whatsapp')}
+          >
+            <MessageCircle size={20} style={{ color: '#25D366' }} />
+            WhatsApp Cloud API
+          </button>
+          <button
+            type="button"
+            className={`meta-subnav-btn ${activeChannel === 'email' ? 'active' : ''}`}
+            onClick={() => setActiveChannel('email')}
+          >
+            <Mail size={20} style={{ color: '#0284c7' }} />
+            Email (Resend)
+          </button>
+        </div>
+
+        {activeChannel === 'facebook' && (
+          <>
 
         {/* Success / Error Banners */}
         {fbSuccessBanner && (
@@ -1071,6 +1536,212 @@ export default function MetaIntegrationView({ currentUser }) {
             )}
           </div>
         )}
+        </>
+        )}
+
+        {/* =========================================================================
+            WhatsApp Cloud API Channel Content
+            ========================================================================= */}
+        {activeChannel === 'whatsapp' && (
+          <>
+            {/* Feedback Banners */}
+            {waFeedback && (
+              <div className={`meta-sync-banner ${waFeedback.type === 'error' ? 'error' : 'success'}`}>
+                {waFeedback.type === 'error' ? (
+                  <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                ) : (
+                  <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+                )}
+                <div style={{ flex: 1 }}>{waFeedback.text}</div>
+                <button
+                  type="button"
+                  onClick={() => setWaFeedback(null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+                >
+                  <XCircle size={15} />
+                </button>
+              </div>
+            )}
+
+            {/* Section 1: Connected WhatsApp Account Hero Card */}
+            <div className={`meta-hero-card-container ${waIsConnected ? 'is-healthy' : ''}`}>
+              {waIsConnected && (waPhoneId || waWabaId) && (
+                <div className="meta-card-attached-pill">
+                  <span className="meta-id-pill">
+                    {waPhoneId ? `Phone ID: ${waPhoneId}` : `WABA ID: ${waWabaId}`}
+                  </span>
+                </div>
+              )}
+              <div className="meta-panel-card">
+                {waIsConnected ? (
+                  <div className="meta-account-row">
+                    <div className="meta-account-identity">
+                      <div className="meta-brand-tile" style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                        <MessageCircle size={24} color="#16a34a" />
+                      </div>
+                      <div className="meta-account-details">
+                        <div className="meta-account-title-line">
+                          <span className="meta-account-name">{waAccountName || 'WhatsApp Business'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="meta-account-actions">
+                      <button
+                        type="button"
+                        className="btn-meta-clean btn-meta-icon-only"
+                        onClick={handleTestWhatsAppConnection}
+                        disabled={isTestingWa}
+                        data-tooltip="Test Connection"
+                        aria-label="Test Connection"
+                      >
+                        <RefreshCw size={15} className={isTestingWa ? 'meta-spin' : ''} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-meta-clean btn-meta-icon-only"
+                        onClick={handleConnectWithWhatsApp}
+                        disabled={isConnectingWa}
+                        data-tooltip="Switch / Reconnect"
+                        aria-label="Switch / Reconnect"
+                      >
+                        <Layers size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-meta-clean btn-meta-icon-only btn-meta-icon-unlink"
+                        onClick={handleDisconnectWhatsApp}
+                        data-tooltip="Disconnect"
+                        aria-label="Disconnect"
+                      >
+                        <Unlink size={15} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="meta-account-row">
+                    <div className="meta-account-identity">
+                      <div className="meta-brand-tile" style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                        <MessageCircle size={24} color="#16a34a" />
+                      </div>
+                      <div className="meta-account-details">
+                        <span className="meta-account-name">Connect with WhatsApp</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-meta-facebook-connect"
+                      onClick={handleConnectWithWhatsApp}
+                      disabled={isConnectingWa}
+                      style={{ backgroundColor: '#25D366', borderColor: '#25D366' }}
+                    >
+                      <MessageCircle size={16} color="white" />
+                      {isConnectingWa ? 'Connecting...' : 'Connect WhatsApp'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+
+            {/* Approved Message Templates Section */}
+            <div className="meta-templates-container">
+              <div className="meta-panel-card">
+                <div className="meta-panel-header">
+                  <div className="meta-panel-header-left">
+                    <span className="meta-panel-title">Approved Message Templates</span>
+                    <span className="meta-count-badge">
+                      {waTemplates.length} {waTemplates.length === 1 ? 'template' : 'templates'} active
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn-meta-add-form"
+                    onClick={handleSyncTemplates}
+                    disabled={isSyncingWa || !waWabaId.trim() || !waToken.trim()}
+                  >
+                    <RefreshCw size={13} className={isSyncingWa ? 'meta-spin' : ''} />
+                    {isSyncingWa ? 'Syncing...' : 'Sync from Meta'}
+                  </button>
+                </div>
+
+                {/* Templates List or Empty State */}
+                {waTemplates.length === 0 ? (
+                  <div className="meta-forms-empty-state">
+                    <MessageCircle size={24} color="#94a3b8" />
+                    <p className="meta-empty-title">No message templates synced</p>
+                    <p style={{ fontSize: '12px', color: '#64748b', maxWidth: '400px', margin: '4px auto 12px auto' }}>
+                      Click <strong>Sync from Meta</strong> to fetch your approved WhatsApp message templates.
+                    </p>
+                    <button
+                      type="button"
+                      className="btn-meta-clean"
+                      onClick={handleSyncTemplates}
+                      disabled={isSyncingWa || !waWabaId.trim() || !waToken.trim()}
+                      style={{ marginTop: '8px' }}
+                    >
+                      <RefreshCw size={13} className={isSyncingWa ? 'meta-spin' : ''} />
+                      Sync Templates
+                    </button>
+                  </div>
+                ) : (
+                  <div className="meta-templates-table">
+                    {waTemplates.map((tmpl) => {
+                      const status = (tmpl.status || 'APPROVED').toLowerCase();
+                      return (
+                        <div key={tmpl.id || tmpl.name} className="meta-template-row-item">
+                          <div className="meta-template-identity">
+                            <div className="meta-template-icon-tile">
+                              <MessageCircle size={16} color="#16a34a" />
+                            </div>
+                            <div className="meta-template-info-col">
+                              <div className="meta-template-name-row">
+                                <span className="meta-template-name">{tmpl.name}</span>
+                              </div>
+                              {tmpl.bodyText && (
+                                <div className="meta-template-body-snippet">
+                                  {tmpl.bodyText}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="meta-template-status-col">
+                            <span className={`meta-template-status-badge ${status}`}>
+                              {status === 'approved' && <CheckCircle2 size={12} />}
+                              {status === 'rejected' && <XCircle size={12} />}
+                              {status === 'pending' && <AlertCircle size={12} />}
+                              {tmpl.status || 'APPROVED'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Attached Bottom-Right Action Button */}
+              <div className="meta-templates-attached-bottom">
+                <button
+                  type="button"
+                  className="btn-meta-attached-test"
+                  onClick={handleOpenTestModal}
+                  disabled={!waPhoneId.trim() || !waToken.trim()}
+                >
+                  <Send size={12} color="#25D366" />
+                  <span>Send Test Message</span>
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Email Integration Channel Content */}
+        {activeChannel === 'email' && (
+          <EmailIntegrationView currentUser={currentUser} />
+        )}
 
         {/* End of Main Content */}
       </div>
@@ -1217,6 +1888,218 @@ export default function MetaIntegrationView({ currentUser }) {
                   : selectedFormIds.length > 0
                   ? `Connect (${selectedFormIds.length} Form${selectedFormIds.length > 1 ? 's' : ''})`
                   : 'Select at least 1 Form'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Multi-Account Asset Selection Modal */}
+      {isWaAssetModalOpen && (
+        <div className="meta-modal-backdrop" onClick={() => setIsWaAssetModalOpen(false)}>
+          <div className="meta-modal" style={{ maxWidth: '520px' }} onClick={e => e.stopPropagation()}>
+            <div className="meta-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <MessageCircle size={18} color="#25d366" />
+                <h3 className="meta-modal-title">Select WhatsApp Number</h3>
+              </div>
+              <button
+                type="button"
+                className="meta-modal-close-btn"
+                onClick={() => setIsWaAssetModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="meta-modal-body">
+              <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px', lineHeight: 1.4 }}>
+                We discovered multiple WhatsApp Business numbers on your Meta account. Select the phone number to connect to this CRM:
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {discoveredWaAccounts.map((acc) => {
+                  const key = `${acc.wabaId}:::${acc.phoneId}`;
+                  const isSelected = selectedWaAccountKey === key;
+                  return (
+                    <label
+                      key={key}
+                      className={`meta-modal-form-item ${isSelected ? 'checked' : ''}`}
+                      onClick={() => setSelectedWaAccountKey(key)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <input
+                        type="radio"
+                        name="wa-account-choice"
+                        checked={isSelected}
+                        onChange={() => setSelectedWaAccountKey(key)}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#0f172a' }}>
+                          {acc.verifiedName || acc.wabaName || 'WhatsApp Number'}
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>Phone: {acc.displayNumber}</span>
+                          <span>•</span>
+                          <span>WABA ID: {acc.wabaId}</span>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="meta-modal-footer">
+              <button
+                type="button"
+                className="meta-modal-btn-cancel"
+                onClick={() => setIsWaAssetModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="meta-modal-btn-confirm"
+                onClick={() => {
+                  const chosen =
+                    discoveredWaAccounts.find(a => `${a.wabaId}:::${a.phoneId}` === selectedWaAccountKey) ||
+                    discoveredWaAccounts[0];
+                  if (chosen) finalizeWhatsAppConnection(chosen, tempWaToken);
+                }}
+                style={{ backgroundColor: '#25D366', borderColor: '#25D366' }}
+              >
+                Connect Selected Number
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Live Test Message Modal */}
+      {isTestModalOpen && (
+        <div className="meta-modal-backdrop" onClick={() => !isSendingTest && setIsTestModalOpen(false)}>
+          <div className="meta-modal meta-test-modal" onClick={e => e.stopPropagation()}>
+            <div className="meta-modal-header">
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <MessageCircle size={20} color="#16a34a" />
+                  <h3 className="meta-modal-title">Send WhatsApp Test Message</h3>
+                </div>
+                <p className="meta-modal-subtitle" style={{ marginTop: '4px' }}>
+                  Send a live test message to verify delivery, phone formatting, and template placeholders.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="meta-modal-close-btn"
+                onClick={() => !isSendingTest && setIsTestModalOpen(false)}
+                disabled={isSendingTest}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="meta-modal-body">
+              {testModalFeedback && (
+                <div className={`meta-sync-banner ${testModalFeedback.type === 'error' ? 'error' : 'success'}`} style={{ margin: 0 }}>
+                  {testModalFeedback.type === 'error' ? (
+                    <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                  ) : (
+                    <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+                  )}
+                  <div style={{ flex: 1, fontSize: '13px' }}>{testModalFeedback.text}</div>
+                </div>
+              )}
+
+              <div className="meta-modal-field">
+                <label className="meta-modal-label">Template</label>
+                <CustomDropdown
+                  value={testTemplateName}
+                  onChange={setTestTemplateName}
+                  searchable={true}
+                  searchPlaceholder="Search approved templates..."
+                  options={
+                    waTemplates.length > 0
+                      ? waTemplates.map(t => ({
+                          value: t.name,
+                          label: t.name
+                        }))
+                      : [{ value: 'salado_lead_welcome', label: 'salado_lead_welcome' }]
+                  }
+                />
+              </div>
+
+              <div className="meta-modal-field">
+                <label className="meta-modal-label">
+                  Lead Name <span style={{ fontWeight: 400, color: '#64748b' }}>(for <code>&#123;&#123;1&#125;&#125;</code> placeholder)</span>
+                </label>
+                <input
+                  type="text"
+                  className="meta-wa-input"
+                  placeholder={currentUser?.name || 'Enter name...'}
+                  value={testLeadName}
+                  onChange={e => setTestLeadName(e.target.value)}
+                />
+              </div>
+
+              {/* Live WhatsApp Template Preview */}
+              {(() => {
+                const currentTemplate = waTemplates.find(t => t.name === testTemplateName);
+                if (!currentTemplate || !currentTemplate.bodyText) return null;
+                const previewBody = currentTemplate.bodyText.replace(/\{\{1\}\}/g, testLeadName.trim() || currentUser?.name || 'John Doe');
+                return (
+                  <div className="meta-wa-template-preview-bubble">
+                    <div className="meta-wa-bubble-label">
+                      <MessageCircle size={13} color="#166534" />
+                      Template Preview
+                    </div>
+                    <div className="meta-wa-bubble-text">{previewBody}</div>
+                  </div>
+                );
+              })()}
+
+              <div className="meta-modal-field">
+                <label className="meta-modal-label">
+                  Recipient Phone Number <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="meta-wa-input"
+                  placeholder="e.g. 919876543210 or +91 98765 43210"
+                  value={testRecipientPhone}
+                  onChange={e => setTestRecipientPhone(e.target.value)}
+                />
+                <span className="meta-wa-hint">Include country code (e.g. 91 for India, 1 for US) with no symbols.</span>
+              </div>
+            </div>
+
+            <div className="meta-modal-footer">
+              <button
+                type="button"
+                className="meta-modal-btn-cancel"
+                onClick={() => setIsTestModalOpen(false)}
+                disabled={isSendingTest}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn-send-wa-test"
+                onClick={handleSendTestMessage}
+                disabled={isSendingTest || !testRecipientPhone.trim() || !testTemplateName.trim()}
+              >
+                {isSendingTest ? (
+                  <>
+                    <RefreshCw size={15} className="meta-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send size={15} />
+                    Send Test Message
+                  </>
+                )}
               </button>
             </div>
           </div>

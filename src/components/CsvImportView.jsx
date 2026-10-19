@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -18,7 +18,10 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import CustomSelect from './common/CustomSelect';
+import Skeleton from './common/Skeleton';
 import '../styles/csvImport.css';
+import '../styles/pipeline.css';
 
 // Normalize phone to last 10 digits for duplicate matching across countries / formats
 const normalizePhone = (raw) => {
@@ -75,6 +78,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
   const [progress, setProgress] = useState(0);
   const [importResult, setImportResult] = useState(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Load CRM users, Lead Routing Config, and Pipeline Stages
   useEffect(() => {
@@ -82,6 +86,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
 
     async function loadMetadata() {
       try {
+        setIsLoading(true);
         // 1. Fetch CRM users
         const { data: usersData } = await supabase
           .from('crm_users')
@@ -124,6 +129,8 @@ export default function CsvImportView({ currentUser, onNavigate }) {
         }
       } catch (err) {
         console.warn('Error loading metadata for CSV import:', err);
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
     }
 
@@ -467,22 +474,27 @@ export default function CsvImportView({ currentUser, onNavigate }) {
     try {
       // Prepare Routing parameters
       let activeRules = [];
-      let routingMode = 'unassigned';
-      let rIndex = 0;
-      let rConfigId = null;
-
+      let chosenPipeDist = null;
       if (applyRouting) {
-        const { data: latestConf } = await supabase
-          .from('lead_routing_config')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
+        const chosenPipe = pipelinesList.find(p => p.id === selectedPipelineId);
+        if (chosenPipe?.lead_distribution && typeof chosenPipe.lead_distribution === 'object') {
+          chosenPipeDist = chosenPipe.lead_distribution;
+          routingMode = chosenPipeDist.mode || 'round_robin';
+          rIndex = chosenPipeDist.round_robin_index || 0;
+          activeRules = (chosenPipeDist.user_rules || []).filter(r => r.enabled !== false && r.active !== false);
+        } else {
+          const { data: latestConf } = await supabase
+            .from('lead_routing_config')
+            .select('*')
+            .limit(1)
+            .maybeSingle();
 
-        if (latestConf) {
-          rConfigId = latestConf.id;
-          routingMode = latestConf.mode || 'round_robin';
-          rIndex = latestConf.round_robin_index || 0;
-          activeRules = (latestConf.user_rules || []).filter(r => r.active !== false);
+          if (latestConf) {
+            rConfigId = latestConf.id;
+            routingMode = latestConf.mode || 'round_robin';
+            rIndex = latestConf.round_robin_index || 0;
+            activeRules = (latestConf.user_rules || []).filter(r => r.enabled !== false && r.active !== false);
+          }
         }
       }
 
@@ -546,15 +558,32 @@ export default function CsvImportView({ currentUser, onNavigate }) {
         setProgress(Math.round((insertedCount / totalReady) * 100));
       }
 
-      // Update round robin index in lead_routing_config if applicable
-      if (applyRouting && rConfigId && rIndex > 0) {
-        await supabase
-          .from('lead_routing_config')
-          .update({
-            round_robin_index: rIndex,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', rConfigId);
+      // Update round robin index in pipeline or lead_routing_config if applicable
+      if (applyRouting && rIndex > 0) {
+        if (chosenPipeDist && selectedPipelineId) {
+          try {
+            await supabase
+              .from('pipelines')
+              .update({
+                lead_distribution: {
+                  ...chosenPipeDist,
+                  round_robin_index: rIndex
+                },
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', selectedPipelineId);
+          } catch (e) {
+            console.warn('Could not update pipeline round robin index:', e);
+          }
+        } else if (rConfigId) {
+          await supabase
+            .from('lead_routing_config')
+            .update({
+              round_robin_index: rIndex,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', rConfigId);
+        }
       }
 
       setImportResult({
@@ -586,30 +615,106 @@ export default function CsvImportView({ currentUser, onNavigate }) {
     setStep('upload');
   };
 
+  // Memoized select options for CustomSelect components
+  const columnOptions = useMemo(() => [
+    { value: '', label: '-- Skip Column --' },
+    ...csvHeaders.map(h => ({ value: h, label: h }))
+  ], [csvHeaders]);
+
+  const requiredNameOptions = useMemo(() => [
+    { value: '', label: '-- Select Column --' },
+    ...csvHeaders.map(h => ({ value: h, label: h }))
+  ], [csvHeaders]);
+
+  const stageOptions = useMemo(() => [
+    { value: '', label: 'Default Pipeline Entry Stage' },
+    ...csvHeaders.map(h => ({ value: h, label: h }))
+  ], [csvHeaders]);
+
+  const pipelineOptions = useMemo(() => [
+    ...pipelinesList.map(p => ({
+      value: p.id,
+      label: `${p.name} ${p.is_default ? '(Default)' : ''}`
+    }))
+  ], [pipelinesList]);
+
+  const assigneeOptions = useMemo(() => [
+    { value: 'unassigned', label: 'Unassigned' },
+    ...usersList.map(u => ({
+      value: u.name || u.email,
+      label: `${u.name} (${u.email})`
+    }))
+  ], [usersList]);
+
+  if (isLoading) {
+    return (
+      <div className="csv-import-container">
+        <div className="csv-view-inner">
+          <div className="csv-master-header">
+            <div className="csv-master-title-group">
+              <h1 className="csv-master-title">Import Leads</h1>
+            </div>
+            <Skeleton width="130px" height="32px" borderRadius="6px" />
+          </div>
+
+          {/* Steps Indicator Skeleton */}
+          <div className="csv-steps-bar" style={{ pointerEvents: 'none' }}>
+            <div className="csv-step-item active">
+              <div className="csv-step-num">1</div>
+              <Skeleton width="46px" height="13px" borderRadius="3px" />
+            </div>
+            <div className="csv-step-divider" />
+            <div className="csv-step-item">
+              <div className="csv-step-num">2</div>
+              <Skeleton width="52px" height="13px" borderRadius="3px" />
+            </div>
+            <div className="csv-step-divider" />
+            <div className="csv-step-item">
+              <div className="csv-step-num">3</div>
+              <Skeleton width="38px" height="13px" borderRadius="3px" />
+            </div>
+            <div className="csv-step-divider" />
+            <div className="csv-step-item">
+              <div className="csv-step-num">4</div>
+              <Skeleton width="42px" height="13px" borderRadius="3px" />
+            </div>
+          </div>
+
+          {/* Dropzone Skeleton */}
+          <div className="csv-step-container">
+            <div className="csv-dropzone" style={{ pointerEvents: 'none', borderColor: '#e2e8f0' }}>
+              <div className="csv-dropzone-icon" style={{ background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Skeleton width="24px" height="24px" circle />
+              </div>
+              <Skeleton width="220px" height="17px" borderRadius="4px" style={{ marginTop: 8 }} />
+              <Skeleton width="280px" height="13px" borderRadius="3px" style={{ marginTop: 4 }} />
+              <Skeleton width="105px" height="32px" borderRadius="6px" style={{ marginTop: 12 }} />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="csv-import-container">
-      {/* Header */}
-      <div className="csv-import-header">
-        <div className="csv-header-titles">
-          <h1 className="csv-main-title">
-            <FileSpreadsheet size={22} strokeWidth={1.8} />
-            Lead Import (CSV)
-          </h1>
-          <p className="csv-main-subtitle">
-            Upload CSV spreadsheets to add leads in bulk with automatic column mapping, zero duplicate guarantee, and optional round-robin routing.
-          </p>
-        </div>
+      <div className="csv-view-inner">
+        {/* Master Header */}
+        <div className="csv-master-header">
+          <div className="csv-master-title-group">
+            <h1 className="csv-master-title">Import Leads</h1>
+          </div>
 
-        <button
-          type="button"
-          className="csv-template-btn"
-          onClick={handleDownloadSample}
-          title="Download Sample CSV Template"
-        >
-          <Download size={14} />
-          <span>Download Sample CSV</span>
-        </button>
-      </div>
+          <button
+            type="button"
+            className="csv-template-btn"
+            onClick={handleDownloadSample}
+            title="Download Sample CSV Template"
+          >
+            <Download size={14} strokeWidth={2} />
+            <span>Download Sample CSV</span>
+          </button>
+        </div>
 
       {/* Progress Steps Header */}
       <div className="csv-steps-bar">
@@ -636,54 +741,54 @@ export default function CsvImportView({ currentUser, onNavigate }) {
 
       {/* STEP 1: Upload */}
       {step === 'upload' && (
-        <div
-          className={`csv-dropzone ${isDragOver ? 'drag-over' : ''}`}
-          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setIsDragOver(false);
-            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-              handleFileChange(e.dataTransfer.files[0]);
-            }
-          }}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <input
-            type="file"
-            ref={fileInputRef}
-            style={{ display: 'none' }}
-            accept=".csv"
-            onChange={(e) => {
-              if (e.target.files && e.target.files[0]) {
-                handleFileChange(e.target.files[0]);
+        <div className="csv-step-container">
+          <div
+            className={`csv-dropzone ${isDragOver ? 'drag-over' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                handleFileChange(e.dataTransfer.files[0]);
               }
             }}
-          />
-          <div className="csv-dropzone-icon">
-            <UploadCloud size={24} />
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              accept=".csv"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleFileChange(e.target.files[0]);
+                }
+              }}
+            />
+            <div className="csv-dropzone-icon">
+              <UploadCloud size={24} strokeWidth={1.8} />
+            </div>
+            <div className="csv-dropzone-title">Drag & drop your CSV file here</div>
+            <div className="csv-dropzone-desc">Supports UTF-8 encoded .csv files up to 10MB</div>
+            <button type="button" className="csv-browse-btn">
+              Browse File
+            </button>
           </div>
-          <div className="csv-dropzone-title">Drag & drop your CSV file here</div>
-          <div className="csv-dropzone-desc">Supports UTF-8 encoded .csv files up to 10MB</div>
-          <button type="button" className="csv-browse-btn">
-            Browse File
-          </button>
         </div>
       )}
 
       {/* STEP 2: Map Columns & Settings */}
       {step === 'map' && (
-        <div>
+        <div className="csv-step-container">
           {/* File Selected Banner */}
           <div className="csv-file-banner">
             <div className="csv-file-details">
-              <FileSpreadsheet size={18} color="#0f172a" />
-              <div>
-                <span className="csv-file-name">{file?.name}</span>
-                <span className="csv-file-meta" style={{ marginLeft: '12px' }}>
-                  {csvRows.length} rows found • {(file?.size ? (file.size / 1024).toFixed(1) : 0)} KB
-                </span>
-              </div>
+              <FileSpreadsheet size={16} strokeWidth={2} className="csv-file-icon" />
+              <span className="csv-file-name">{file?.name}</span>
+              <span className="csv-file-meta">
+                {csvRows.length} rows found • {(file?.size ? (file.size / 1024).toFixed(1) : 0)} KB
+              </span>
             </div>
             <button
               type="button"
@@ -691,150 +796,121 @@ export default function CsvImportView({ currentUser, onNavigate }) {
               onClick={handleReset}
               title="Change File"
             >
-              <RotateCcw size={14} />
+              <RotateCcw size={13} strokeWidth={2} />
+              <span>Change File</span>
             </button>
           </div>
 
-          {/* Column Mapping Card */}
-          <div className="csv-card">
-            <h2 className="csv-card-title">Column Mapping</h2>
-            <p className="csv-card-desc">
-              Match your CSV headers to SimpleCRM lead fields. Auto-matched fields are pre-selected.
-            </p>
+          {/* Column Mapping Section */}
+          <div className="csv-section-block">
+            <div className="csv-section-header">
+              <h2 className="csv-section-title">Column Mapping</h2>
+              <p className="csv-section-desc">
+                Match your CSV headers to SimpleCRM lead fields. Auto-matched fields are pre-selected.
+              </p>
+            </div>
 
             <div className="csv-mapping-grid">
               <div className="csv-mapping-item">
                 <label className="csv-mapping-label">
                   Lead Name <span className="csv-mapping-required">*Required</span>
                 </label>
-                <select
-                  className="csv-select"
+                <CustomSelect
                   value={mapping.name}
-                  onChange={(e) => setMapping({ ...mapping, name: e.target.value })}
-                >
-                  <option value="">-- Select Column --</option>
-                  {csvHeaders.map(h => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setMapping({ ...mapping, name: val })}
+                  options={requiredNameOptions}
+                  placeholder="-- Select Column --"
+                />
               </div>
 
               <div className="csv-mapping-item">
                 <label className="csv-mapping-label">
-                  Phone Number <span style={{ fontSize: '11px', color: '#64748b' }}>(Recommended for dedup)</span>
+                  Phone Number <span className="csv-mapping-hint">(For dedup)</span>
                 </label>
-                <select
-                  className="csv-select"
+                <CustomSelect
                   value={mapping.phone}
-                  onChange={(e) => setMapping({ ...mapping, phone: e.target.value })}
-                >
-                  <option value="">-- Skip Column --</option>
-                  {csvHeaders.map(h => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setMapping({ ...mapping, phone: val })}
+                  options={columnOptions}
+                  placeholder="-- Skip Column --"
+                />
               </div>
 
               <div className="csv-mapping-item">
                 <label className="csv-mapping-label">
-                  Email Address <span style={{ fontSize: '11px', color: '#64748b' }}>(Recommended for dedup)</span>
+                  Email Address <span className="csv-mapping-hint">(For dedup)</span>
                 </label>
-                <select
-                  className="csv-select"
+                <CustomSelect
                   value={mapping.email}
-                  onChange={(e) => setMapping({ ...mapping, email: e.target.value })}
-                >
-                  <option value="">-- Skip Column --</option>
-                  {csvHeaders.map(h => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setMapping({ ...mapping, email: val })}
+                  options={columnOptions}
+                  placeholder="-- Skip Column --"
+                />
               </div>
 
               <div className="csv-mapping-item">
                 <label className="csv-mapping-label">City / Location</label>
-                <select
-                  className="csv-select"
+                <CustomSelect
                   value={mapping.city}
-                  onChange={(e) => setMapping({ ...mapping, city: e.target.value })}
-                >
-                  <option value="">-- Skip Column --</option>
-                  {csvHeaders.map(h => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setMapping({ ...mapping, city: val })}
+                  options={columnOptions}
+                  placeholder="-- Skip Column --"
+                />
               </div>
 
               <div className="csv-mapping-item">
                 <label className="csv-mapping-label">Notes / Remarks</label>
-                <select
-                  className="csv-select"
+                <CustomSelect
                   value={mapping.notes}
-                  onChange={(e) => setMapping({ ...mapping, notes: e.target.value })}
-                >
-                  <option value="">-- Skip Column --</option>
-                  {csvHeaders.map(h => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setMapping({ ...mapping, notes: val })}
+                  options={columnOptions}
+                  placeholder="-- Skip Column --"
+                />
               </div>
 
               <div className="csv-mapping-item">
                 <label className="csv-mapping-label">
-                  Stage
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>
-                    (Defaults to entry stage)
-                  </span>
+                  Stage <span className="csv-mapping-hint">(Defaults to entry stage)</span>
                 </label>
-                <select
-                  className="csv-select"
+                <CustomSelect
                   value={mapping.stage}
-                  onChange={(e) => setMapping({ ...mapping, stage: e.target.value })}
-                >
-                  <option value="">Default Pipeline Entry Stage</option>
-                  {csvHeaders.map(h => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setMapping({ ...mapping, stage: val })}
+                  options={stageOptions}
+                  placeholder="Default Pipeline Entry Stage"
+                />
               </div>
 
               {pipelinesList.length > 0 && (
                 <div className="csv-mapping-item">
-                  <label className="csv-mapping-label">
-                    Target Pipeline
-                  </label>
-                  <select
-                    className="csv-select"
+                  <label className="csv-mapping-label">Target Pipeline</label>
+                  <CustomSelect
                     value={selectedPipelineId}
-                    onChange={(e) => handlePipelineChange(e.target.value)}
-                  >
-                    {pipelinesList.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} {p.is_default ? '(Default)' : ''}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => handlePipelineChange(val)}
+                    options={pipelineOptions}
+                    placeholder="Select Pipeline"
+                  />
                 </div>
               )}
             </div>
           </div>
 
-          {/* Lead Routing & Distribution Options */}
-          <div className="csv-card">
-            <h2 className="csv-card-title">
-              <GitBranch size={16} />
-              Lead Distribution & Routing
-            </h2>
-            <p className="csv-card-desc">
-              Choose whether to apply your automated Lead Routing rules or assign all imported leads to a specific team member.
-            </p>
+          {/* Lead Distribution & Routing Options */}
+          <div className="csv-section-block">
+            <div className="csv-section-header">
+              <h2 className="csv-section-title">
+                <GitBranch size={16} strokeWidth={2} />
+                <span>Lead Distribution & Routing</span>
+              </h2>
+              <p className="csv-section-desc">
+                Choose whether to apply automated routing rules or assign imported leads to a specific representative.
+              </p>
+            </div>
 
             <div className="csv-settings-box">
               <div className="csv-toggle-row">
                 <label className="csv-toggle-label" htmlFor="routing-toggle">
                   <span className="csv-toggle-title">Apply Automatic Lead Routing Rules</span>
                   <span className="csv-toggle-desc">
-                    Distributes imported leads according to your current lead routing rules (Round Robin or Weighted) and advances distribution counters.
+                    Distributes imported leads according to current pipeline routing rules (Round-Robin or Weighted Ratio).
                   </span>
                 </label>
                 <label className="csv-switch">
@@ -850,32 +926,27 @@ export default function CsvImportView({ currentUser, onNavigate }) {
 
               {!applyRouting && (
                 <div className="csv-assignee-row">
-                  <label className="csv-mapping-label" style={{ minWidth: '160px' }}>
+                  <label className="csv-mapping-label" style={{ minWidth: '150px' }}>
                     Assign All Leads To:
                   </label>
-                  <select
-                    className="csv-select"
-                    style={{ flex: 1, maxWidth: '320px' }}
-                    value={defaultAssignee}
-                    onChange={(e) => setDefaultAssignee(e.target.value)}
-                  >
-                    <option value="unassigned">Unassigned</option>
-                    {usersList.map(u => (
-                      <option key={u.id} value={u.name || u.email}>
-                        {u.name} ({u.email})
-                      </option>
-                    ))}
-                  </select>
+                  <div style={{ flex: 1, maxWidth: '320px' }}>
+                    <CustomSelect
+                      value={defaultAssignee}
+                      onChange={(val) => setDefaultAssignee(val)}
+                      options={assigneeOptions}
+                      placeholder="Select Assignee"
+                    />
+                  </div>
                 </div>
               )}
             </div>
           </div>
 
           {/* Deduplication Guarantee Notice */}
-          <div className="csv-dedup-badge" style={{ marginBottom: '20px' }}>
-            <ShieldCheck size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+          <div className="csv-dedup-badge">
+            <ShieldCheck size={16} strokeWidth={2} className="csv-dedup-icon" />
             <div>
-              <strong>Duplicate Prevention Active:</strong> In the next step, every row will be automatically checked against existing CRM leads by normalized phone number and email. Any duplicate will be safely skipped.
+              <strong>Duplicate Prevention Active:</strong> Every row will be checked against existing leads by normalized phone and email. Duplicates will be safely skipped.
             </div>
           </div>
 
@@ -896,13 +967,13 @@ export default function CsvImportView({ currentUser, onNavigate }) {
             >
               {isAnalyzing ? (
                 <>
-                  <RefreshCw size={14} className="meta-spin" />
-                  Checking Duplicates...
+                  <RefreshCw size={14} className="spin-animate" />
+                  <span>Checking Duplicates...</span>
                 </>
               ) : (
                 <>
                   <span>Proceed to Preview</span>
-                  <ArrowRight size={14} />
+                  <ArrowRight size={14} strokeWidth={2} />
                 </>
               )}
             </button>
@@ -912,42 +983,50 @@ export default function CsvImportView({ currentUser, onNavigate }) {
 
       {/* STEP 3: Preview & Duplicate Audit */}
       {step === 'preview' && (
-        <div>
+        <div className="csv-step-container">
           {/* Summary Stats Row */}
           <div className="csv-stats-row">
             <div className="csv-stat-box">
-              <span className="csv-stat-val">{stats.total}</span>
+              <span className="csv-stat-val">
+                {isAnalyzing ? <Skeleton width="42px" height="20px" borderRadius="4px" /> : stats.total}
+              </span>
               <span className="csv-stat-lbl">Total in CSV</span>
             </div>
 
             <div className="csv-stat-box success">
-              <span className="csv-stat-val">{stats.valid}</span>
+              <span className="csv-stat-val">
+                {isAnalyzing ? <Skeleton width="42px" height="20px" borderRadius="4px" /> : stats.valid}
+              </span>
               <span className="csv-stat-lbl">Ready to Import</span>
             </div>
 
             <div className="csv-stat-box warning">
-              <span className="csv-stat-val">{stats.duplicates}</span>
+              <span className="csv-stat-val">
+                {isAnalyzing ? <Skeleton width="42px" height="20px" borderRadius="4px" /> : stats.duplicates}
+              </span>
               <span className="csv-stat-lbl">Duplicates Skipped</span>
             </div>
 
-            {stats.invalid > 0 && (
+            {(stats.invalid > 0 || isAnalyzing) && (
               <div className="csv-stat-box danger">
-                <span className="csv-stat-val">{stats.invalid}</span>
+                <span className="csv-stat-val">
+                  {isAnalyzing ? <Skeleton width="42px" height="20px" borderRadius="4px" /> : stats.invalid}
+                </span>
                 <span className="csv-stat-lbl">Invalid Rows</span>
               </div>
             )}
           </div>
 
-          {/* Preview Table Card */}
-          <div className="csv-card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          {/* Preview Table Section */}
+          <div className="csv-section-block">
+            <div className="csv-preview-header">
               <div>
-                <h2 className="csv-card-title">Preview & Duplicate Audit</h2>
-                <p className="csv-card-desc" style={{ margin: 0 }}>
+                <h2 className="csv-section-title">Preview & Duplicate Audit</h2>
+                <p className="csv-section-desc">
                   Showing preview of first 15 leads from your file and their validation status.
                 </p>
               </div>
-              <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>
+              <span className="csv-preview-subinfo">
                 {applyRouting ? 'Distribution: Lead Routing Active' : `Assignee: ${defaultAssignee}`}
               </span>
             </div>
@@ -967,55 +1046,86 @@ export default function CsvImportView({ currentUser, onNavigate }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {analyzedRows.slice(0, 15).map((row) => (
-                    <tr
-                      key={row.rowNum}
-                      className={
-                        row.status === 'duplicate'
-                          ? 'row-duplicate'
-                          : row.status === 'invalid'
-                          ? 'row-invalid'
-                          : ''
-                      }
-                    >
-                      <td style={{ color: '#94a3b8' }}>#{row.rowNum}</td>
-                      <td>
-                        {row.status === 'ready' && (
-                          <span className="csv-badge ready">
-                            <Check size={11} /> Ready
+                  {isAnalyzing ? (
+                    [1, 2, 3, 4, 5].map((i) => (
+                      <tr key={i}>
+                        <td style={{ color: '#94a3b8' }}>
+                          <Skeleton width="28px" height="13px" borderRadius="3px" />
+                        </td>
+                        <td>
+                          <Skeleton width="65px" height="20px" borderRadius="4px" />
+                        </td>
+                        <td>
+                          <Skeleton width={i % 2 === 0 ? '125px' : '155px'} height="14px" borderRadius="4px" />
+                        </td>
+                        <td>
+                          <Skeleton width="95px" height="13px" borderRadius="3px" />
+                        </td>
+                        <td>
+                          <Skeleton width="130px" height="13px" borderRadius="3px" />
+                        </td>
+                        <td>
+                          <Skeleton width="65px" height="13px" borderRadius="3px" />
+                        </td>
+                        <td>
+                          <Skeleton width="55px" height="13px" borderRadius="3px" />
+                        </td>
+                        <td>
+                          <Skeleton width="115px" height="13px" borderRadius="3px" />
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    analyzedRows.slice(0, 15).map((row) => (
+                      <tr
+                        key={row.rowNum}
+                        className={
+                          row.status === 'duplicate'
+                            ? 'row-duplicate'
+                            : row.status === 'invalid'
+                            ? 'row-invalid'
+                            : ''
+                        }
+                      >
+                        <td style={{ color: '#94a3b8' }}>#{row.rowNum}</td>
+                        <td>
+                          {row.status === 'ready' && (
+                            <span className="csv-badge ready">
+                              <Check size={11} /> Ready
+                            </span>
+                          )}
+                          {row.status === 'duplicate' && (
+                            <span className="csv-badge duplicate">
+                              <AlertTriangle size={11} /> Duplicate
+                            </span>
+                          )}
+                          {row.status === 'invalid' && (
+                            <span className="csv-badge invalid">
+                              <XCircle size={11} /> Invalid
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ fontWeight: 500, color: '#0f172a' }}>{row.name}</td>
+                        <td>{row.phone || '—'}</td>
+                        <td>{row.email || '—'}</td>
+                        <td>{row.city || '—'}</td>
+                        <td>
+                          <span style={{ fontSize: '11px', textTransform: 'capitalize' }}>
+                            {row.stage}
                           </span>
-                        )}
-                        {row.status === 'duplicate' && (
-                          <span className="csv-badge duplicate">
-                            <AlertTriangle size={11} /> Duplicate
-                          </span>
-                        )}
-                        {row.status === 'invalid' && (
-                          <span className="csv-badge invalid">
-                            <XCircle size={11} /> Invalid
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ fontWeight: 500 }}>{row.name}</td>
-                      <td>{row.phone || '—'}</td>
-                      <td>{row.email || '—'}</td>
-                      <td>{row.city || '—'}</td>
-                      <td>
-                        <span style={{ fontSize: '11px', textTransform: 'capitalize' }}>
-                          {row.stage}
-                        </span>
-                      </td>
-                      <td style={{ color: row.status === 'ready' ? '#059669' : '#b45309' }}>
-                        {row.reason}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td style={{ color: row.status === 'ready' ? '#166534' : '#b45309' }}>
+                          {row.reason}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
 
             {analyzedRows.length > 15 && (
-              <div style={{ textAlign: 'center', fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+              <div style={{ textAlign: 'center', fontSize: '12px', color: '#64748b', marginTop: '10px' }}>
                 + {analyzedRows.length - 15} more rows evaluated
               </div>
             )}
@@ -1037,7 +1147,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
               onClick={handleExecuteImport}
               disabled={stats.valid === 0 || isImporting}
             >
-              <UploadCloud size={14} />
+              <UploadCloud size={14} strokeWidth={2} />
               <span>Import {stats.valid} Leads</span>
             </button>
           </div>
@@ -1046,16 +1156,14 @@ export default function CsvImportView({ currentUser, onNavigate }) {
 
       {/* STEP 4: Importing Execution */}
       {step === 'importing' && (
-        <div className="csv-card" style={{ padding: '48px 24px', textAlign: 'center' }}>
-          <RefreshCw size={32} className="meta-spin" style={{ margin: '0 auto 16px', color: '#0f172a' }} />
-          <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#0f172a', margin: '0 0 8px 0' }}>
-            Importing Leads...
-          </h2>
-          <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 20px 0' }}>
+        <div className="csv-loading-card">
+          <RefreshCw size={28} className="spin-animate" style={{ color: '#0f172a', margin: '0 auto 14px' }} />
+          <h2 className="csv-loading-title">Importing Leads...</h2>
+          <p className="csv-loading-desc">
             Inserting unique leads and applying routing rules. Please do not close this window.
           </p>
 
-          <div className="csv-progress-wrapper" style={{ maxWidth: '420px', margin: '0 auto' }}>
+          <div className="csv-progress-wrapper">
             <div className="csv-progress-bar">
               <div className="csv-progress-fill" style={{ width: `${progress}%` }} />
             </div>
@@ -1066,7 +1174,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
 
       {/* STEP 5: Results */}
       {step === 'result' && importResult && (
-        <div className="csv-card">
+        <div className="csv-result-card">
           <div className="csv-result-box">
             <div className="csv-result-icon">
               <CheckCircle2 size={32} />
@@ -1076,7 +1184,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
               Your leads have been imported and are now visible across your pipeline board and leads table.
             </p>
 
-            <div className="csv-stats-row" style={{ width: '100%', maxWidth: '580px', marginBottom: '24px' }}>
+            <div className="csv-stats-row" style={{ width: '100%', maxWidth: '580px', marginBottom: '20px' }}>
               <div className="csv-stat-box success">
                 <span className="csv-stat-val">{importResult.imported}</span>
                 <span className="csv-stat-lbl">Leads Imported</span>
@@ -1101,8 +1209,8 @@ export default function CsvImportView({ currentUser, onNavigate }) {
                 </summary>
                 <div className="csv-duplicates-list">
                   {importResult.duplicatesList.map((d, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #f1f5f9' }}>
-                      <span style={{ fontWeight: 500 }}>{d.name} ({d.phone || d.email})</span>
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f1f5f9' }}>
+                      <span style={{ fontWeight: 500, color: '#0f172a' }}>{d.name} ({d.phone || d.email})</span>
                       <span style={{ color: '#b45309' }}>{d.reason}</span>
                     </div>
                   ))}
@@ -1110,7 +1218,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
               </details>
             )}
 
-            <div style={{ display: 'flex', gap: '12px' }}>
+            <div className="csv-result-actions">
               <button
                 type="button"
                 className="csv-btn-secondary"
@@ -1125,13 +1233,14 @@ export default function CsvImportView({ currentUser, onNavigate }) {
                   onClick={() => onNavigate('Leads')}
                 >
                   <span>View Leads in Pipeline</span>
-                  <ArrowRight size={14} />
+                  <ArrowRight size={14} strokeWidth={2} />
                 </button>
               )}
             </div>
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

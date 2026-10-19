@@ -49,12 +49,15 @@
 }
 
 .meta-master-title {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 600;
   color: #0f172a;
   letter-spacing: -0.02em;
   margin: 0;
   line-height: 1.2;
+  background: #f5f5dc;
+  padding: 4px 8px;
+  width: fit-content;
 }
 
 /* ----------------- Modern Structured Panels System ----------------- */
@@ -191,8 +194,7 @@
 }
 
 .meta-card-attached-pill .meta-id-pill strong {
-  color: #0f172a;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 /* Dynamic Hero Card Health Tints */
@@ -380,9 +382,12 @@
 }
 
 .meta-panel-title {
-  font-size: 14px;
+  font-size: 20px;
   font-weight: 600;
   color: #0f172a;
+  background: #f5f5dc;
+  padding: 4px 8px;
+  width: fit-content;
   letter-spacing: -0.01em;
 }
 
@@ -468,10 +473,9 @@
 }
 
 .meta-form-title {
-  font-size: 14.5px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
   color: #0f172a;
-  letter-spacing: -0.01em;
 }
 
 .meta-form-meta-row {
@@ -1103,6 +1107,7 @@
   background-color: #f0fdf4;
   border: 1px solid #bbf7d0;
   color: #166534;
+  margin-bottom: 12px;
 }
 
 .meta-sync-banner.info {
@@ -1666,14 +1671,189 @@
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  box-shadow: 0 12px 28px -6px rgba(15, 23, 42, 0.12), 0 4px 10px -2px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 16px 36px -4px rgba(15, 23, 42, 0.16), 0 4px 12px -2px rgba(15, 23, 42, 0.06);
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 230px;
+  max-height: 280px;
   overflow-y: auto;
   animation: metaFadeIn 0.12s ease-out;
+}
+
+.meta-custom-select-sublabel {
+  font-size: 11px;
+  color: #64748b;
+  background-color: #f1f5f9;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* WhatsApp Dedicated Test Modal */
+.meta-modal.meta-test-modal {
+  max-width: 620px;
+  width: 100%;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #ffffff;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.meta-test-modal .meta-modal-header {
+  padding: 20px 26px 14px;
+  flex-shrink: 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.meta-test-modal .meta-modal-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.meta-test-modal .meta-modal-subtitle {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.meta-test-modal .meta-modal-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  padding: 20px 26px;
+  gap: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.meta-test-modal .meta-modal-field {
+  gap: 8px;
+}
+
+.meta-test-modal .meta-modal-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.meta-test-modal .meta-custom-select-trigger {
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 13.5px;
+  border-radius: 8px;
+  border-color: #cbd5e1;
+}
+
+.meta-test-modal .meta-custom-select-trigger:hover {
+  border-color: #94a3b8;
+}
+
+.meta-test-modal .meta-custom-select-trigger.active {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.12);
+}
+
+.meta-test-modal .meta-wa-input {
+  height: 44px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 400;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}
+
+.meta-test-modal .meta-wa-input:focus {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.12);
+}
+
+.meta-test-modal .meta-wa-hint {
+  font-size: 12.5px;
+  color: #64748b;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+/* Template Live WhatsApp Preview Bubble */
+.meta-wa-template-preview-bubble {
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meta-wa-bubble-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #166534;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.meta-wa-bubble-text {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #0f172a;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background-color: #ffffff;
+  border: 1px solid #dcfce7;
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.meta-test-modal .meta-modal-footer {
+  padding: 16px 26px 18px;
+  border-top: 1px solid #f1f5f9;
+  background-color: #ffffff;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.meta-test-modal .btn-send-wa-test {
+  background-color: #16a34a;
+  border: 1px solid #16a34a;
+  color: #ffffff;
+  padding: 10px 22px;
+  font-size: 13.5px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.2);
+}
+
+.meta-test-modal .btn-send-wa-test:hover:not(:disabled) {
+  background-color: #15803d;
+  border-color: #15803d;
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.28);
+}
+
+.meta-test-modal .btn-send-wa-test:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .meta-custom-select-search {
@@ -1878,6 +2058,364 @@
     opacity: 1;
     transform: scale(1) translateY(0);
   }
+}
+
+/* ==========================================================================
+/* ==========================================================================
+   Integrations Hub: Sub-Navigation Big Tabs (Full Width)
+   ========================================================================== */
+.meta-subnav-bar {
+  display: flex;
+  align-items: center;
+  background-color: #f1f5f9;
+  padding: 7px;
+  border-radius: 14px;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 24px;
+  border: 1px solid #e2e8f0;
+}
+
+.meta-subnav-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 56px;
+  padding: 0 24px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 16.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.meta-subnav-btn:hover:not(.active) {
+  color: #0f172a;
+  background-color: rgba(255, 255, 255, 0.7);
+}
+
+.meta-subnav-btn.active {
+  background-color: #ffffff;
+  color: #0f172a;
+  font-weight: 600;
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+/* ==========================================================================
+   WhatsApp Cloud API Management Styles
+   ========================================================================== */
+.meta-wa-card {
+  padding: 24px;
+}
+
+.meta-wa-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.meta-wa-brand-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.meta-wa-brand-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background-color: #25d366;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(37, 211, 102, 0.25);
+}
+
+.meta-wa-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta-wa-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.meta-wa-status-text {
+  font-size: 12.5px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.meta-wa-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #94a3b8;
+}
+
+.meta-wa-status-dot.active {
+  background-color: #16a34a;
+  box-shadow: 0 0 0 2px #dcfce7;
+}
+
+.meta-wa-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.meta-wa-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meta-wa-field.full-width {
+  grid-column: span 2;
+}
+
+.meta-wa-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.meta-wa-input {
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background-color: #ffffff;
+  font-size: 13.5px;
+  color: #0f172a;
+  outline: none;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.meta-wa-input:focus {
+  border-color: #0f172a;
+  box-shadow: 0 0 0 1px #0f172a;
+}
+
+.meta-wa-input-with-action {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.meta-wa-input-with-action .meta-wa-input {
+  width: 100%;
+  padding-right: 40px;
+}
+
+.meta-wa-input-action-btn {
+  position: absolute;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.meta-wa-input-action-btn:hover {
+  color: #0f172a;
+}
+
+.meta-wa-hint {
+  font-size: 11.5px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.meta-wa-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid #f1f5f9;
+}
+
+/* Templates Section */
+.meta-templates-container {
+  position: relative;
+  margin-top: 20px;
+  margin-bottom: 36px;
+}
+
+.meta-templates-attached-bottom {
+  position: absolute;
+  top: 100%;
+  right: 1px;
+  z-index: 2;
+  margin-top: -1px;
+}
+
+.btn-meta-attached-test {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-top: 1px solid #ffffff;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.btn-meta-attached-test:hover:not(:disabled) {
+  background: #f8fafc;
+  color: #16a34a;
+  border-color: #cbd5e1;
+  border-top-color: #ffffff;
+  box-shadow: 0 4px 10px -1px rgba(15, 23, 42, 0.08);
+}
+
+.btn-meta-attached-test:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  color: #94a3b8;
+}
+
+.meta-templates-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.meta-template-row-item {
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background-color 0.15s ease;
+  gap: 16px;
+}
+
+.meta-template-row-item:last-child {
+  border-bottom: none;
+}
+
+.meta-template-row-item:hover {
+  background-color: #f8fafc;
+}
+
+.meta-template-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.meta-template-icon-tile {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.meta-template-info-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.meta-template-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.meta-template-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.meta-template-body-snippet {
+  font-size: 12.5px;
+  color: #64748b;
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 540px;
+}
+
+.meta-template-status-col {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.meta-template-status-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.meta-template-status-badge.approved {
+  background-color: #dcfce7;
+  color: #15803d;
+}
+
+.meta-template-status-badge.pending {
+  background-color: #fef08a;
+  color: #854d0e;
+}
+
+.meta-template-status-badge.rejected {
+  background-color: #fee2e2;
+  color: #b91c1c;
 }
 
 

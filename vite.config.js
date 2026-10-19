@@ -7,6 +7,14 @@ export default defineConfig({
   plugins: [react(), basicSsl()],
   server: {
     https: true,
-    port: 5173
+    port: 5173,
+    proxy: {
+      '/api/resend': {
+        target: 'https://api.resend.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/resend/, ''),
+        secure: false
+      }
+    }
   }
 })

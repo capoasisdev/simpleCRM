@@ -96,7 +96,10 @@ create table if not exists public.meta_config (
   whatsapp_business_account_id text,
   whatsapp_access_token text,
   whatsapp_template text default 'salado_lead_welcome',
-  whatsapp_auto_welcome boolean default false
+  whatsapp_auto_welcome boolean default false,
+  whatsapp_templates jsonb default '[]'::jsonb,
+  whatsapp_is_connected boolean default false,
+  whatsapp_account_name text default ''
 );
 
 alter table public.meta_config enable row level security;

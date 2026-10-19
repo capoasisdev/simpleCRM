@@ -9,6 +9,10 @@ export const DEFAULT_MEMBER_PERMISSIONS = {
     edit: true,
     delete: false
   },
+  messages: {
+    scope: 'assigned', // 'assigned' | 'all'
+    view: true
+  },
   pipeline: {
     view: false,
     edit: false,
@@ -38,6 +42,10 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
     view: true,
     edit: true,
     delete: true
+  },
+  messages: {
+    scope: 'all',
+    view: true
   },
   pipeline: {
     view: true,
@@ -77,18 +85,23 @@ export function normalizePermissions(user) {
 
   // Check if raw already has the granular nested structure
   const hasGranularLeads = raw.leads && typeof raw.leads === 'object';
+  const hasGranularMessages = raw.messages && typeof raw.messages === 'object';
   const hasGranularPipeline = raw.pipeline && typeof raw.pipeline === 'object';
   const hasGranularDashboard = raw.dashboard && typeof raw.dashboard === 'object';
   const hasGranularFollowups = raw.followups && typeof raw.followups === 'object';
   const hasGranularAdmin = raw.admin && typeof raw.admin === 'object';
 
-  if (hasGranularLeads || hasGranularPipeline || hasGranularDashboard || hasGranularFollowups || hasGranularAdmin) {
+  if (hasGranularLeads || hasGranularMessages || hasGranularPipeline || hasGranularDashboard || hasGranularFollowups || hasGranularAdmin) {
     return {
       leads: {
         scope: raw.leads?.scope === 'all' ? 'all' : 'assigned',
         view: raw.leads?.view !== false,
         edit: raw.leads?.edit !== false,
         delete: raw.leads?.delete === true
+      },
+      messages: {
+        scope: raw.messages?.scope === 'all' ? 'all' : (raw.leads?.scope === 'all' ? 'all' : 'assigned'),
+        view: raw.messages?.view !== false
       },
       pipeline: {
         view: raw.pipeline?.view === true,
@@ -123,6 +136,10 @@ export function normalizePermissions(user) {
       view: raw.manage_leads !== false,
       edit: raw.manage_leads !== false,
       delete: false
+    },
+    messages: {
+      scope: 'assigned',
+      view: raw.manage_leads !== false
     },
     pipeline: {
       view: false,
@@ -165,6 +182,11 @@ export function hasPermission(user, section, action) {
     return perms.leads?.[action] === true;
   }
 
+  if (section === 'messages') {
+    if (action === 'all_messages' || action === 'all') return perms.messages?.scope === 'all';
+    return perms.messages?.[action] !== false;
+  }
+
   if (section === 'pipeline') {
     return perms.pipeline?.[action] === true;
   }
@@ -195,6 +217,16 @@ export function getLeadScope(user) {
   if (user.role === 'admin') return 'all';
   const perms = normalizePermissions(user);
   return perms.leads?.scope || 'assigned';
+}
+
+/**
+ * Get messages visibility scope: 'assigned' or 'all'
+ */
+export function getMessagesScope(user) {
+  if (!user) return 'assigned';
+  if (user.role === 'admin') return 'all';
+  const perms = normalizePermissions(user);
+  return perms.messages?.scope || 'assigned';
 }
 
 /**

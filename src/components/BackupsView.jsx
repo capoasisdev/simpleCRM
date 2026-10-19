@@ -193,53 +193,52 @@ export default function BackupsView({ currentUser }) {
 
   return (
     <div className="backups-view-container">
-      {/* Header */}
-      <div className="backups-header">
-        <div>
-          <h1 className="backups-title">Backups & Disaster Recovery</h1>
-          <p className="backups-subtitle">
-            Automated 7-day rolling disk snapshots protect your leads, users, follow-ups, and pipeline records.
-          </p>
-        </div>
+      <div className="backups-view-inner">
+        {/* Master Header */}
+        <div className="backups-master-header">
+          <div className="backups-master-title-group">
+            <h1 className="backups-master-title">Backups</h1>
+            <span className="backups-master-count">{backups.length}</span>
+          </div>
 
-        <div className="backups-header-actions">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleUploadFile}
-            accept=".json"
-            style={{ display: 'none' }}
-          />
-          <button
-            type="button"
-            className="backups-secondary-btn"
-            onClick={() => fileInputRef.current?.click()}
-            title="Restore from an external .json backup file"
-          >
-            <Upload size={14} strokeWidth={2} />
-            <span>Upload & Restore</span>
-          </button>
+          <div className="backups-header-actions">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleUploadFile}
+              accept=".json"
+              style={{ display: 'none' }}
+            />
+            <button
+              type="button"
+              className="backups-secondary-btn"
+              onClick={() => fileInputRef.current?.click()}
+              title="Restore from an external .json backup file"
+            >
+              <Upload size={14} strokeWidth={2} />
+              <span>Upload & Restore</span>
+            </button>
 
-          <button
-            type="button"
-            className="backups-primary-btn"
-            onClick={handleCreateBackup}
-            disabled={isCreating}
-          >
-            {isCreating ? (
-              <>
-                <Loader2 size={15} className="spin-animate" />
-                <span>Creating Snapshot...</span>
-              </>
-            ) : (
-              <>
-                <Plus size={15} strokeWidth={2} />
-                <span>Create Backup Now</span>
-              </>
-            )}
-          </button>
+            <button
+              type="button"
+              className="backups-primary-btn"
+              onClick={handleCreateBackup}
+              disabled={isCreating}
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 size={15} className="spin-animate" />
+                  <span>Creating Snapshot...</span>
+                </>
+              ) : (
+                <>
+                  <Plus size={15} strokeWidth={2} />
+                  <span>Create Backup Now</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
-      </div>
 
       {/* Success / Error Messages */}
       {restoreSuccess && (
@@ -273,56 +272,95 @@ export default function BackupsView({ currentUser }) {
         </div>
       )}
 
-      {/* Stat Cards */}
-      <div className="backups-stats-grid">
-        <div className="backup-stat-card">
-          <div className="backup-stat-icon-wrap green">
-            <ShieldCheck size={20} />
+      {/* Metric Strip */}
+      <div className="backups-metric-strip">
+        <div className="backups-metric-item">
+          <div className="backups-metric-top">
+            <ShieldCheck size={16} strokeWidth={2} className="backups-metric-icon" />
+            <span className="backups-metric-label">Retention Policy</span>
           </div>
-          <div className="backup-stat-content">
-            <span className="backup-stat-label">Retention Policy</span>
-            <span className="backup-stat-value">Past 7 Days Rolling</span>
-            <span className="backup-stat-hint">Older snapshots automatically pruned</span>
+          <div className="backups-metric-value">7-Day Rolling</div>
+          <div className="backups-metric-hint">Older snapshots automatically pruned</div>
+        </div>
+
+        <div className="backups-metric-divider" />
+
+        <div className="backups-metric-item">
+          <div className="backups-metric-top">
+            <Clock size={16} strokeWidth={2} className="backups-metric-icon" />
+            <span className="backups-metric-label">Latest Snapshot</span>
+          </div>
+          <div className="backups-metric-value">
+            {latestBackup ? new Date(latestBackup.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'No Snapshots Yet'}
+          </div>
+          <div className="backups-metric-hint">
+            {latestBackup ? `${formatFileSize(latestBackup.file_size_bytes)} total size` : 'Take your first backup today'}
           </div>
         </div>
 
-        <div className="backup-stat-card">
-          <div className="backup-stat-icon-wrap blue">
-            <Clock size={20} />
-          </div>
-          <div className="backup-stat-content">
-            <span className="backup-stat-label">Last Backup Taken</span>
-            <span className="backup-stat-value">
-              {latestBackup ? new Date(latestBackup.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'No Backups Yet'}
-            </span>
-            <span className="backup-stat-hint">
-              {latestBackup ? `${formatFileSize(latestBackup.file_size_bytes)} total size` : 'Take your first backup today'}
-            </span>
-          </div>
-        </div>
+        <div className="backups-metric-divider" />
 
-        <div className="backup-stat-card">
-          <div className="backup-stat-icon-wrap purple">
-            <HardDrive size={20} />
+        <div className="backups-metric-item">
+          <div className="backups-metric-top">
+            <HardDrive size={16} strokeWidth={2} className="backups-metric-icon" />
+            <span className="backups-metric-label">Snapshots Stored</span>
           </div>
-          <div className="backup-stat-content">
-            <span className="backup-stat-label">Snapshots Stored</span>
-            <span className="backup-stat-value">{backups.length} / 7 Days</span>
-            <span className="backup-stat-hint">Dual-layer (Supabase + Local disk ready)</span>
-          </div>
+          <div className="backups-metric-value">{backups.length} / 7 Days</div>
+          <div className="backups-metric-hint">Dual-layer (Supabase + Local disk ready)</div>
         </div>
       </div>
 
-      {/* Backups Table Card */}
-      <div className="backups-table-card">
-        <div className="backups-table-header">
-          <h2>Available Rolling Snapshots</h2>
-          <span className="backups-count-badge">{backups.length} Available</span>
+      {/* Snapshots Table Section */}
+      <div className="backups-table-section">
+        <div className="backups-table-toolbar">
+          <div className="backups-table-title-group">
+            <h2 className="backups-table-title">Available Snapshots</h2>
+            <span className="backups-count-badge">
+              {isLoading ? (
+                <Skeleton width="55px" height="12px" borderRadius="999px" />
+              ) : (
+                `${backups.length} available`
+              )}
+            </span>
+          </div>
         </div>
 
         {isLoading ? (
-          <div className="backups-loading-state">
-            <Skeleton height={44} count={4} />
+          <div className="backups-table-wrapper">
+            <table className="backups-table">
+              <thead>
+                <tr>
+                  <th>Snapshot / Date</th>
+                  <th>Records Protected</th>
+                  <th>Size</th>
+                  <th style={{ textAlign: 'right', width: '60px' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[1, 2, 3, 4].map((i) => (
+                  <tr key={i}>
+                    <td>
+                      <div className="backup-col-name" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <Skeleton width={i % 2 === 0 ? '160px' : '190px'} height="15px" borderRadius="4px" />
+                        <Skeleton width="120px" height="11px" borderRadius="3px" />
+                      </div>
+                    </td>
+                    <td>
+                      <Skeleton width="130px" height="20px" borderRadius="4px" />
+                    </td>
+                    <td>
+                      <Skeleton width="48px" height="13px" borderRadius="3px" />
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div className="backup-row-actions" style={{ justifyContent: 'flex-end', gap: 6 }}>
+                        <Skeleton width="26px" height="26px" borderRadius="6px" />
+                        <Skeleton width="26px" height="26px" borderRadius="6px" />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : backups.length === 0 ? (
           <div className="backups-empty-state">
@@ -392,6 +430,7 @@ export default function BackupsView({ currentUser }) {
             </table>
           </div>
         )}
+      </div>
       </div>
 
       {/* Snapshot Details Modal */}

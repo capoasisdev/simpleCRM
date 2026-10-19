@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
 import {
   ChevronUp,
   ChevronDown,
@@ -8,6 +8,7 @@ import {
   RefreshCw,
   ShieldAlert,
   Plus,
+  Minus,
   ArrowLeft,
   ArrowRight,
   Edit2,
@@ -17,12 +18,44 @@ import {
   CheckCircle2,
   ArrowDownLeft,
   Unlink,
-  Sliders
+  Sliders,
+  Users,
+  Zap,
+  MessageCircle,
+  Mail
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission } from '../lib/permissions';
+import { fetchEmailTemplates } from '../lib/email';
 import Skeleton from './common/Skeleton';
+import CustomSelect from './common/CustomSelect';
 import '../styles/pipeline.css';
+
+const DIST_MODE_OPTIONS = [
+  { value: 'round_robin', label: 'Round-Robin', sublabel: '(Sequential Rotation)' },
+  { value: 'weighted', label: 'Weighted Ratio', sublabel: '(Proportional by Weight)' },
+  { value: 'single', label: 'Single Representative', sublabel: '(100% to One Rep)' },
+  { value: 'unassigned', label: 'Unassigned Backlog', sublabel: '(Manual Claim)' }
+];
+
+const MONO_SHADES = ['#0f172a', '#64748b', '#94a3b8', '#334155', '#cbd5e1'];
+
+const getInitials = (name) => {
+  if (!name) return 'U';
+  return name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+};
+
+const formatFormName = (f) => {
+  if (!f) return 'Lead Form';
+  let name = (f.form_name || '').trim();
+  if (name.toLowerCase().startsWith('id:')) {
+    name = name.replace(/^id:\s*/i, '').trim();
+  }
+  if (!name || /^\d{6,}$/.test(name)) {
+    return 'Lead Form';
+  }
+  return name;
+};
 
 export default function PipelineSettingsView({ currentUser, onConfigureStateChange }) {
   const canView = hasPermission(currentUser, 'pipeline', 'view');
@@ -43,16 +76,39 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   // State A: null = viewing Master Pipelines List; string id = viewing Detail Stage Editor
   const [editingPipelineId, setEditingPipelineId] = useState(null);
 
-  // Sub-tabs inside Pipeline Configure sidebar: 'source' | 'stages'
+  // Sub-tabs inside Pipeline Configure sidebar: 'general' | 'stages' | 'distribution'
   const [configureSubTab, setConfigureSubTab] = useState('stages');
 
   const [stages, setStages] = useState([]);
   const [initialStages, setInitialStages] = useState([]);
   const [allLeads, setAllLeads] = useState([]);
   const [connectedForms, setConnectedForms] = useState([]);
+  const [usersList, setUsersList] = useState([]);
+  const [globalRoutingConfig, setGlobalRoutingConfig] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState(null);
+
+  // Distribution tab states
+  const [distMode, setDistMode] = useState('round_robin'); // 'round_robin' | 'weighted' | 'single' | 'unassigned'
+  const [distAssignee, setDistAssignee] = useState('');
+  const [distRules, setDistRules] = useState([]);
+  const [initialDist, setInitialDist] = useState(null);
+  const [isSavingDist, setIsSavingDist] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(null);
+  const weightDebounceTimer = useRef(null);
+  const saveStatusTimer = useRef(null);
+
+  // Stage Automations states
+  const [stageAutomations, setStageAutomations] = useState([]);
+  const [waTemplates, setWaTemplates] = useState([]);
+  const [emailTemplates, setEmailTemplates] = useState([]);
+
+  const triggerSavedFeedback = () => {
+    setSaveStatus('saved');
+    if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
+    saveStatusTimer.current = setTimeout(() => setSaveStatus(null), 2000);
+  };
 
   // Detail view state
   const [newStageName, setNewStageName] = useState('');
@@ -81,17 +137,20 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     onConfigureStateChange?.(editingPipelineId !== null);
   }, [editingPipelineId, onConfigureStateChange]);
 
-  // Fetch initial pipelines, leads, and forms
+  // Fetch initial pipelines, leads, forms, users, routing config, and whatsapp templates
   useEffect(() => {
     let isMounted = true;
 
     async function loadData() {
       setIsLoading(true);
       try {
-        const [pipeRes, leadsRes, formsRes] = await Promise.all([
+        const [pipeRes, leadsRes, formsRes, usersRes, routeRes, metaRes] = await Promise.all([
           supabase.from('pipelines').select('*').order('is_default', { ascending: false }),
           supabase.from('leads').select('id, stage, pipeline_id'),
-          supabase.from('connected_forms').select('*')
+          supabase.from('connected_forms').select('*'),
+          supabase.from('crm_users').select('id, name, email, role').order('name', { ascending: true }),
+          supabase.from('lead_routing_config').select('*').limit(1).maybeSingle(),
+          supabase.from('meta_config').select('whatsapp_templates').limit(1).maybeSingle()
         ]);
 
         if (pipeRes.error) throw pipeRes.error;
@@ -110,6 +169,29 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         if (isMounted && formsRes.data) {
           setConnectedForms(formsRes.data);
         }
+
+        if (isMounted && usersRes.data) {
+          setUsersList(usersRes.data);
+        }
+
+        if (isMounted && routeRes.data) {
+          setGlobalRoutingConfig(routeRes.data);
+        }
+
+        if (isMounted && metaRes.data?.whatsapp_templates && Array.isArray(metaRes.data.whatsapp_templates)) {
+          // Include approved templates or all synced templates
+          const approved = metaRes.data.whatsapp_templates.filter(t => !t.status || t.status === 'APPROVED');
+          setWaTemplates(approved.length > 0 ? approved : metaRes.data.whatsapp_templates);
+        }
+
+        try {
+          const emailTmpls = await fetchEmailTemplates();
+          if (isMounted && Array.isArray(emailTmpls)) {
+            setEmailTemplates(emailTmpls);
+          }
+        } catch (e) {
+          console.warn('Could not load email templates:', e);
+        }
       } catch (err) {
         console.error('Error loading pipeline data:', err);
       } finally {
@@ -122,6 +204,34 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   }, []);
 
   const isDirty = JSON.stringify(stages) !== JSON.stringify(initialStages);
+
+  // Distribution dirty state
+  const isDistDirty = useMemo(() => {
+    if (!initialDist) return false;
+    if (distMode !== initialDist.mode) return true;
+    if (distAssignee !== initialDist.default_assignee) return true;
+    return JSON.stringify(distRules) !== JSON.stringify(initialDist.user_rules);
+  }, [distMode, distAssignee, distRules, initialDist]);
+
+  const activeDistMembers = useMemo(() => {
+    return distRules.filter(r => r.enabled !== false);
+  }, [distRules]);
+
+  const totalDistWeight = useMemo(() => {
+    return activeDistMembers.reduce((sum, r) => sum + (Number(r.weight) || 0), 0);
+  }, [activeDistMembers]);
+
+  const calculateMemberShare = (member) => {
+    if (!member.enabled) return 0;
+    if (distMode === 'round_robin') {
+      return activeDistMembers.length > 0 ? Math.round(100 / activeDistMembers.length) : 0;
+    }
+    if (distMode === 'weighted') {
+      if (totalDistWeight === 0) return 0;
+      return Math.round(((Number(member.weight) || 0) / totalDistWeight) * 100);
+    }
+    return 0;
+  };
 
   // Active editing pipeline object
   const activePipeline = pipelines.find(p => p.id === editingPipelineId);
@@ -138,7 +248,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     leadCounts[st] = (leadCounts[st] || 0) + 1;
   });
 
-  // Open a pipeline for stage editing
+  // Open a pipeline for stage & distribution editing
   const handleOpenConfigure = (pipe, initialTab = 'stages') => {
     setEditingPipelineId(pipe.id);
     setConfigureSubTab(initialTab);
@@ -146,18 +256,341 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     const pipeStages = pipe.stages || [];
     setStages(pipeStages);
     setInitialStages(pipeStages);
+    setStageAutomations(Array.isArray(pipe.stage_automations) ? pipe.stage_automations : []);
+
+    fetchEmailTemplates().then(tmpls => {
+      if (Array.isArray(tmpls)) setEmailTemplates(tmpls);
+    }).catch(() => {});
+
+    // Initialize pipeline-scoped distribution
+    const defaultRoster = (usersList.length > 0 ? usersList : [
+      { id: '1', name: 'Pranav Patil', email: 'pranav.p@capoasis.com', role: 'admin' },
+      { id: '2', name: 'Nikita Sonawane', email: 'nikita.s@salado.in', role: 'member' }
+    ]).map(u => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      enabled: true,
+      weight: 50
+    }));
+
+    const pipeDist = pipe.lead_distribution;
+    let finalMode = 'round_robin';
+    let finalAssignee = defaultRoster[0]?.name || 'Pranav Patil';
+    let finalRules = defaultRoster;
+
+    if (pipeDist && typeof pipeDist === 'object') {
+      finalMode = pipeDist.mode || 'round_robin';
+      finalAssignee = pipeDist.default_assignee || finalAssignee;
+      if (Array.isArray(pipeDist.user_rules) && pipeDist.user_rules.length > 0) {
+        finalRules = defaultRoster.map(u => {
+          const existing = pipeDist.user_rules.find(r => r.id === u.id || r.email === u.email || r.name === u.name);
+          return existing ? { ...u, enabled: existing.enabled !== false, weight: existing.weight ?? 50 } : u;
+        });
+      }
+    } else if (globalRoutingConfig) {
+      finalMode = globalRoutingConfig.mode || 'round_robin';
+      finalAssignee = globalRoutingConfig.default_assignee || finalAssignee;
+      if (Array.isArray(globalRoutingConfig.user_rules) && globalRoutingConfig.user_rules.length > 0) {
+        finalRules = defaultRoster.map(u => {
+          const existing = globalRoutingConfig.user_rules.find(r => r.id === u.id || r.email === u.email || r.name === u.name);
+          return existing ? { ...u, enabled: existing.enabled !== false, weight: existing.weight ?? 50 } : u;
+        });
+      }
+    }
+
+    // Normalize active weights so they cleanly sum to 100%
+    const activeR = finalRules.filter(r => r.enabled !== false);
+    const sumW = activeR.reduce((sum, r) => sum + (Number(r.weight) || 0), 0);
+    if (activeR.length > 0 && sumW !== 100) {
+      const eq = Math.floor(100 / activeR.length);
+      const rem = 100 - (eq * activeR.length);
+      finalRules = finalRules.map(r => {
+        if (r.enabled === false) return r;
+        const aIdx = activeR.findIndex(a => a.id === r.id);
+        return { ...r, weight: eq + (aIdx === 0 ? rem : 0) };
+      });
+    }
+
+    const distObj = {
+      mode: finalMode,
+      default_assignee: finalAssignee,
+      user_rules: finalRules
+    };
+
+    setDistMode(finalMode);
+    setDistAssignee(finalAssignee);
+    setDistRules(finalRules);
+    setInitialDist(distObj);
+  };
+
+  const handleMemberToggle = (id, checked) => {
+    let updated = distRules.map(r => r.id === id ? { ...r, enabled: checked } : r);
+    const active = updated.filter(r => r.enabled !== false);
+    if (active.length > 0) {
+      const equalShare = Math.floor(100 / active.length);
+      const remainder = 100 - (equalShare * active.length);
+      updated = updated.map(r => {
+        if (r.enabled === false) return r;
+        const activeIdx = active.findIndex(a => a.id === r.id);
+        const w = equalShare + (activeIdx === 0 ? remainder : 0);
+        return { ...r, weight: w };
+      });
+    }
+    setDistRules(updated);
+    saveDistributionPayload({ user_rules: updated });
+  };
+
+  const handleStepWeight = (id, delta) => {
+    const currentMember = distRules.find(r => r.id === id);
+    if (!currentMember) return;
+    const currentVal = Number(currentMember.weight) || 0;
+    const nextVal = Math.max(0, Math.min(100, currentVal + delta));
+    handleMemberWeightChange(id, nextVal);
+  };
+
+  const handleMemberWeightChange = (id, val) => {
+    const rawNum = val === '' ? 0 : Number(val);
+    const targetPct = Math.max(0, Math.min(100, isNaN(rawNum) ? 0 : rawNum));
+
+    const otherActives = distRules.filter(r => r.enabled !== false && r.id !== id);
+
+    let updated;
+    if (otherActives.length === 0) {
+      updated = distRules.map(r => r.id === id ? { ...r, weight: 100 } : r);
+    } else if (otherActives.length === 1) {
+      const otherId = otherActives[0].id;
+      const otherWeight = Math.max(0, 100 - targetPct);
+      updated = distRules.map(r => {
+        if (r.id === id) return { ...r, weight: targetPct };
+        if (r.id === otherId) return { ...r, weight: otherWeight };
+        return r;
+      });
+    } else {
+      const rem = Math.max(0, 100 - targetPct);
+      const currentOtherSum = otherActives.reduce((sum, r) => sum + (Number(r.weight) || 0), 0);
+
+      let allocated = 0;
+      const newWeightsMap = {};
+      otherActives.forEach((member, i) => {
+        if (i === otherActives.length - 1) {
+          newWeightsMap[member.id] = Math.max(0, rem - allocated);
+        } else {
+          let share;
+          if (currentOtherSum === 0) {
+            share = Math.round(rem / otherActives.length);
+          } else {
+            share = Math.round((rem * (Number(member.weight) || 0)) / currentOtherSum);
+          }
+          newWeightsMap[member.id] = Math.max(0, share);
+          allocated += newWeightsMap[member.id];
+        }
+      });
+
+      updated = distRules.map(r => {
+        if (r.id === id) return { ...r, weight: targetPct };
+        if (newWeightsMap[r.id] !== undefined) return { ...r, weight: newWeightsMap[r.id] };
+        return r;
+      });
+    }
+
+    setDistRules(updated);
+    if (weightDebounceTimer.current) clearTimeout(weightDebounceTimer.current);
+    weightDebounceTimer.current = setTimeout(() => {
+      saveDistributionPayload({ user_rules: updated });
+    }, 500);
+  };
+
+  const handleWeightBlur = () => {
+    if (weightDebounceTimer.current) clearTimeout(weightDebounceTimer.current);
+    saveDistributionPayload({ user_rules: distRules });
+  };
+
+  const saveDistributionPayload = async (overrides = {}) => {
+    if (!editingPipelineId) return;
+    setIsSavingDist(true);
+    try {
+      const payload = {
+        mode: overrides.mode ?? distMode,
+        default_assignee: overrides.default_assignee ?? distAssignee,
+        user_rules: overrides.user_rules ?? distRules,
+        round_robin_index: activePipeline?.lead_distribution?.round_robin_index || 0
+      };
+
+      const { error } = await supabase
+        .from('pipelines')
+        .update({
+          lead_distribution: payload,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingPipelineId);
+
+      if (error) {
+        console.error('Error saving distribution:', error);
+        showToast(error.message?.includes('column') ? 'Please run migration in Supabase SQL editor' : 'Error saving distribution');
+      } else {
+        const updated = pipelines.map(p => p.id === editingPipelineId ? { ...p, lead_distribution: payload } : p);
+        setPipelines(updated);
+        try {
+          localStorage.setItem('crm_cached_pipelines', JSON.stringify(updated));
+        } catch (e) { }
+        setInitialDist(payload);
+        triggerSavedFeedback();
+      }
+    } catch (err) {
+      console.error('Save distribution error:', err);
+      showToast('Failed to save distribution');
+    } finally {
+      setIsSavingDist(false);
+    }
+  };
+
+  const handleModeChange = (newMode) => {
+    setDistMode(newMode);
+    saveDistributionPayload({ mode: newMode });
+  };
+
+  const handleAssigneeChange = (newAssignee) => {
+    setDistAssignee(newAssignee);
+    saveDistributionPayload({ default_assignee: newAssignee });
+  };
+
+  // Stage Automations save & toggle handlers
+  const saveStageAutomations = async (updatedAutomations) => {
+    if (!editingPipelineId) return;
+    setIsSaving(true);
+    try {
+      const { error } = await supabase
+        .from('pipelines')
+        .update({
+          stage_automations: updatedAutomations,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingPipelineId);
+
+      if (error) {
+        console.error('Error saving stage automations:', error);
+        showToast(error.message?.includes('column') ? 'Please run migration in Supabase SQL editor' : 'Error saving automations');
+      } else {
+        const updated = pipelines.map(p => p.id === editingPipelineId ? { ...p, stage_automations: updatedAutomations } : p);
+        setPipelines(updated);
+        try {
+          localStorage.setItem('crm_cached_pipelines', JSON.stringify(updated));
+        } catch (e) { }
+        triggerSavedFeedback();
+      }
+    } catch (err) {
+      console.error('Save automations error:', err);
+      showToast('Failed to save automations');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleToggleStageAutomation = (stageId, checked) => {
+    let exists = false;
+    let updated = stageAutomations.map(a => {
+      if (a.stage_id === stageId) {
+        exists = true;
+        const defaultTmpl = a.template_name || (waTemplates[0]?.name || 'salado_lead_welcome');
+        return { ...a, is_active: checked, template_name: defaultTmpl };
+      }
+      return a;
+    });
+
+    if (!exists) {
+      const defaultTmpl = waTemplates[0]?.name || 'salado_lead_welcome';
+      updated.push({
+        stage_id: stageId,
+        is_active: checked,
+        template_name: defaultTmpl
+      });
+    }
+
+    setStageAutomations(updated);
+    saveStageAutomations(updated);
+  };
+
+  const handleSelectStageTemplate = (stageId, templateName) => {
+    let exists = false;
+    let updated = stageAutomations.map(a => {
+      if (a.stage_id === stageId) {
+        exists = true;
+        return { ...a, template_name: templateName };
+      }
+      return a;
+    });
+
+    if (!exists) {
+      updated.push({
+        stage_id: stageId,
+        is_active: true,
+        template_name: templateName
+      });
+    }
+
+    setStageAutomations(updated);
+    saveStageAutomations(updated);
+  };
+
+  const handleToggleEmailAutomation = (stageId, checked) => {
+    let exists = false;
+    let updated = stageAutomations.map(a => {
+      if (a.stage_id === stageId) {
+        exists = true;
+        const defaultTmplId = a.email_template_id || (emailTemplates[0]?.id || '');
+        return { ...a, email_active: checked, email_template_id: defaultTmplId };
+      }
+      return a;
+    });
+
+    if (!exists) {
+      const defaultTmplId = emailTemplates[0]?.id || '';
+      updated.push({
+        stage_id: stageId,
+        is_active: false,
+        template_name: '',
+        email_active: checked,
+        email_template_id: defaultTmplId
+      });
+    }
+
+    setStageAutomations(updated);
+    saveStageAutomations(updated);
+  };
+
+  const handleSelectEmailTemplate = (stageId, templateId) => {
+    let exists = false;
+    let updated = stageAutomations.map(a => {
+      if (a.stage_id === stageId) {
+        exists = true;
+        return { ...a, email_template_id: templateId };
+      }
+      return a;
+    });
+
+    if (!exists) {
+      updated.push({
+        stage_id: stageId,
+        is_active: false,
+        template_name: '',
+        email_active: true,
+        email_template_id: templateId
+      });
+    }
+
+    setStageAutomations(updated);
+    saveStageAutomations(updated);
   };
 
   // Back to master list
   const handleBackToList = () => {
-    if (isDirty) {
-      if (!window.confirm('Discard unsaved stage changes and return to pipelines list?')) {
-        return;
-      }
-    }
     setEditingPipelineId(null);
     setStages([]);
     setInitialStages([]);
+    setInitialDist(null);
+    setStageAutomations([]);
   };
 
   // Create new pipeline
@@ -315,16 +748,58 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     }
   };
 
-  // Stage Manipulation
+  // Stage Manipulation & Auto-Save
+  const saveStagesList = async (stagesList) => {
+    if (!editingPipelineId) return;
+    setIsSaving(true);
+
+    try {
+      const normalizedStages = stagesList.map((st, idx) => ({
+        id: st.id,
+        label: st.label,
+        order: idx,
+        is_entry: Boolean(st.is_entry)
+      }));
+
+      const { error } = await supabase
+        .from('pipelines')
+        .update({
+          stages: normalizedStages,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingPipelineId);
+
+      if (error) throw error;
+
+      setInitialStages(normalizedStages);
+      setPipelines(prev => prev.map(p => p.id === editingPipelineId ? { ...p, stages: normalizedStages } : p));
+
+      if (activePipeline?.is_default) {
+        try {
+          localStorage.setItem('crm_pipeline_columns', JSON.stringify(normalizedStages));
+        } catch (e) { }
+      }
+
+      triggerSavedFeedback();
+    } catch (err) {
+      console.error('Error saving stages:', err);
+      showToast('Failed to save changes.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleLabelChange = (index, newLabel) => {
     setStages(prev => prev.map((st, i) => i === index ? { ...st, label: newLabel } : st));
   };
 
   const handleSetEntryStage = (stageId) => {
-    setStages(prev => prev.map(st => ({
+    const updated = stages.map(st => ({
       ...st,
       is_entry: st.id === stageId
-    })));
+    }));
+    setStages(updated);
+    saveStagesList(updated);
   };
 
   const stageItemRefs = useRef(new Map());
@@ -368,25 +843,23 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   const handleMoveUp = (index) => {
     if (index === 0) return;
     captureStagePositions();
-    setStages(prev => {
-      const copy = [...prev];
-      const temp = copy[index - 1];
-      copy[index - 1] = copy[index];
-      copy[index] = temp;
-      return copy;
-    });
+    const copy = [...stages];
+    const temp = copy[index - 1];
+    copy[index - 1] = copy[index];
+    copy[index] = temp;
+    setStages(copy);
+    saveStagesList(copy);
   };
 
   const handleMoveDown = (index) => {
     if (index === stages.length - 1) return;
     captureStagePositions();
-    setStages(prev => {
-      const copy = [...prev];
-      const temp = copy[index + 1];
-      copy[index + 1] = copy[index];
-      copy[index] = temp;
-      return copy;
-    });
+    const copy = [...stages];
+    const temp = copy[index + 1];
+    copy[index + 1] = copy[index];
+    copy[index] = temp;
+    setStages(copy);
+    saveStagesList(copy);
   };
 
   const handleAddStage = (e) => {
@@ -402,8 +875,10 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       is_entry: stages.length === 0
     };
 
-    setStages(prev => [...prev, newStage]);
+    const nextStages = [...stages, newStage];
+    setStages(nextStages);
     setNewStageName('');
+    saveStagesList(nextStages);
   };
 
   const handleDeleteStage = async (index) => {
@@ -439,55 +914,44 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       }
     }
 
-    setStages(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleSave = async () => {
-    if (!editingPipelineId) return;
-    setIsSaving(true);
-
-    try {
-      const normalizedStages = stages.map((st, idx) => ({
-        id: st.id,
-        label: st.label,
-        order: idx,
-        is_entry: Boolean(st.is_entry)
-      }));
-
-      const { error } = await supabase
-        .from('pipelines')
-        .update({
-          stages: normalizedStages,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', editingPipelineId);
-
-      if (error) throw error;
-
-      setInitialStages(normalizedStages);
-      setPipelines(prev => prev.map(p => p.id === editingPipelineId ? { ...p, stages: normalizedStages } : p));
-
-      if (activePipeline?.is_default) {
-        try {
-          localStorage.setItem('crm_pipeline_columns', JSON.stringify(normalizedStages));
-        } catch (e) { }
-      }
-
-      showToast('Changes saved.');
-    } catch (err) {
-      console.error('Error saving stages:', err);
-      showToast('Failed to save changes.');
-    } finally {
-      setIsSaving(false);
-    }
+    const nextStages = stages.filter((_, i) => i !== index);
+    setStages(nextStages);
+    saveStagesList(nextStages);
   };
 
   if (isLoading) {
     return (
       <div className="pipeline-view-container">
         <div className="pipeline-view-inner">
-          <Skeleton width="100%" height="36px" borderRadius="6px" />
-          <Skeleton width="100%" height="280px" borderRadius="8px" />
+          <div className="pipeline-master-header">
+            <div className="pipeline-master-title-group">
+              <h1 className="pipeline-master-title">Pipelines</h1>
+              <span className="pipeline-master-count" style={{ minWidth: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Skeleton width="18px" height="14px" borderRadius="4px" />
+              </span>
+            </div>
+
+            <Skeleton width="115px" height="32px" borderRadius="6px" />
+          </div>
+
+          <div className="pipeline-cards-list">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="pipeline-card-row" style={{ cursor: 'default', pointerEvents: 'none' }}>
+                <div className="pipeline-card-main">
+                  <Skeleton width={i === 1 ? '190px' : i === 2 ? '230px' : '160px'} height="17px" borderRadius="4px" />
+                  <div className="pipeline-card-meta" style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Skeleton width="55px" height="12px" borderRadius="3px" />
+                    <span className="pipeline-card-dot" style={{ opacity: 0.4 }}>·</span>
+                    <Skeleton width="48px" height="12px" borderRadius="3px" />
+                  </div>
+                </div>
+
+                <div className="pipeline-card-actions" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Skeleton width="110px" height="28px" borderRadius="6px" />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -632,6 +1096,26 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                   <span>Stages</span>
                 </button>
               </li>
+              <li>
+                <button
+                  type="button"
+                  className={`pipeline-config-nav-btn ${configureSubTab === 'distribution' ? 'active' : ''}`}
+                  onClick={() => setConfigureSubTab('distribution')}
+                >
+                  <Users size={20} strokeWidth={1.75} />
+                  <span>Distribution</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className={`pipeline-config-nav-btn ${configureSubTab === 'automations' ? 'active' : ''}`}
+                  onClick={() => setConfigureSubTab('automations')}
+                >
+                  <Zap size={20} strokeWidth={1.75} />
+                  <span>Automations</span>
+                </button>
+              </li>
             </ul>
 
             {/* Bottom Back Button */}
@@ -650,43 +1134,20 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
           {/* Right Content Workspace Pane */}
           <div className="pipeline-config-content">
-            {/* Fixed Top-Right Actions (only applicable to Stages tab) */}
-            {configureSubTab === 'stages' && (
-              <div className="pipeline-content-actions-fixed">
-                {canEdit && isDirty && (
-                  <button
-                    type="button"
-                    className="btn-minimal"
-                    onClick={() => setStages(initialStages)}
-                    disabled={isSaving}
-                  >
-                    <RotateCcw size={12} />
-                    <span>Discard</span>
-                  </button>
-                )}
-
-                {canEdit && (
-                  <button
-                    type="button"
-                    className="btn-minimal-save"
-                    onClick={handleSave}
-                    disabled={isSaving || !isDirty}
-                  >
-                    {isSaving ? (
-                      <>
-                        <RefreshCw size={12} className="spin-icon" />
-                        <span>Saving...</span>
-                      </>
-                    ) : (
-                      <>
-                        {isDirty && <span className="unsaved-dot" />}
-                        <span>Save Changes</span>
-                      </>
-                    )}
-                  </button>
-                )}
-              </div>
-            )}
+            {/* Auto-save status indicator in header */}
+            <div className="pipeline-content-actions-fixed">
+              {(isSaving || isSavingDist) ? (
+                <div className="pipeline-autosave-indicator saving">
+                  <RefreshCw size={12} className="spin-icon" />
+                  <span>Saving...</span>
+                </div>
+              ) : saveStatus === 'saved' ? (
+                <div className="pipeline-autosave-indicator saved">
+                  <Check size={12} strokeWidth={2.5} />
+                  <span>Saved</span>
+                </div>
+              ) : null}
+            </div>
 
             {/* TAB 1: GENERAL CONTENT */}
             {configureSubTab === 'general' && (
@@ -714,12 +1175,12 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                   {attachedForm ? (
                     <div className="pipeline-source-row">
                       <div className="pipeline-source-info">
-                        <span className="pipeline-source-name">{attachedForm.form_name || `Form ${attachedForm.form_id}`}</span>
+                        <span className="pipeline-source-name">{formatFormName(attachedForm)}</span>
                         <div className="pipeline-source-subtext">
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="#1877F2" style={{ flexShrink: 0 }}>
                             <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
                           </svg>
-                          <span>ID: {attachedForm.form_id}</span>
+                          <span>Meta Instant Form</span>
                         </div>
                       </div>
 
@@ -727,31 +1188,23 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                         <div className="pipeline-source-actions">
                           {isChangingForm ? (
                             <>
-                              <select
-                                className="pipeline-source-select-clean"
+                              <CustomSelect
+                                className="pipeline-source-custom-select"
                                 value=""
-                                autoFocus
-                                onChange={(e) => {
-                                  if (e.target.value) {
-                                    handleFormChange(e.target.value);
+                                onChange={(val) => {
+                                  if (val) {
+                                    handleFormChange(val);
                                     setIsChangingForm(false);
                                   }
                                 }}
-                              >
-                                <option value="">Choose new form...</option>
-                                {connectedForms
+                                placeholder="Choose new form..."
+                                options={connectedForms
                                   .filter(f => f.form_id !== attachedForm.form_id)
-                                  .map(f => {
-                                    const otherPipe = f.pipeline_id && f.pipeline_id !== editingPipelineId
-                                      ? pipelines.find(p => p.id === f.pipeline_id)
-                                      : null;
-                                    return (
-                                      <option key={f.form_id} value={f.form_id}>
-                                        {f.form_name || `Form ${f.form_id}`} {otherPipe ? `(on: ${otherPipe.name})` : ''}
-                                      </option>
-                                    );
-                                  })}
-                              </select>
+                                  .map(f => ({
+                                    value: f.form_id,
+                                    label: formatFormName(f)
+                                  }))}
+                              />
                               <button
                                 type="button"
                                 className="btn-source-cancel"
@@ -795,23 +1248,16 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
                       {canEdit && (
                         <div className="pipeline-source-actions">
-                          <select
-                            className="pipeline-source-select-clean"
+                          <CustomSelect
+                            className="pipeline-source-custom-select"
                             value=""
-                            onChange={(e) => handleFormChange(e.target.value || null)}
-                          >
-                            <option value="">Select a form...</option>
-                            {connectedForms.map(f => {
-                              const otherPipe = f.pipeline_id && f.pipeline_id !== editingPipelineId
-                                ? pipelines.find(p => p.id === f.pipeline_id)
-                                : null;
-                              return (
-                                <option key={f.form_id} value={f.form_id}>
-                                  {f.form_name || `Form ${f.form_id}`} {otherPipe ? `(currently on: ${otherPipe.name})` : ''}
-                                </option>
-                              );
-                            })}
-                          </select>
+                            onChange={(val) => handleFormChange(val || null)}
+                            placeholder="Select a form..."
+                            options={connectedForms.map(f => ({
+                              value: f.form_id,
+                              label: formatFormName(f)
+                            }))}
+                          />
                         </div>
                       )}
                     </div>
@@ -823,6 +1269,14 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
             {/* TAB 2: STAGES CONTENT */}
             {configureSubTab === 'stages' && (
               <div className="pipeline-numbered-list-wrap">
+                <div className="pipeline-general-header-between" style={{ marginBottom: 8 }}>
+                  <label className="pipeline-general-label" style={{ marginBottom: 0 }}>
+                    Pipeline Stages
+                  </label>
+                  <span className="pipeline-dist-count-badge">
+                    {stages.length} {stages.length === 1 ? 'stage' : 'stages'}
+                  </span>
+                </div>
                 {stages.map((st, idx) => {
                   const isEntry = Boolean(st.is_entry);
 
@@ -845,6 +1299,10 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                           className="pipeline-number-input"
                           value={st.label}
                           onChange={(e) => handleLabelChange(idx, e.target.value)}
+                          onBlur={() => saveStagesList(stages)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.target.blur();
+                          }}
                           readOnly={!canEdit}
                         />
                       </div>
@@ -929,6 +1387,358 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                     )}
                   </form>
                 )}
+              </div>
+            )}
+
+            {/* TAB 3: DISTRIBUTION CONTENT (Minimalist Style Matching General) */}
+            {configureSubTab === 'distribution' && (
+              <div className="pipeline-general-wrap">
+                {/* 1. Distribution Mode Section */}
+                <div className="pipeline-general-section">
+                  <label className="pipeline-general-label">Distribution Mode</label>
+
+                  <div className="pipeline-name-row" style={{ maxWidth: 440 }}>
+                    <CustomSelect
+                      value={distMode}
+                      onChange={handleModeChange}
+                      options={DIST_MODE_OPTIONS}
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Single Representative Section */}
+                {distMode === 'single' && (
+                  <div className="pipeline-general-section">
+                    <label className="pipeline-general-label">Assigned Representative</label>
+
+                    <div className="pipeline-name-row" style={{ maxWidth: 440 }}>
+                      <CustomSelect
+                        value={distAssignee}
+                        onChange={handleAssigneeChange}
+                        placeholder="Select representative..."
+                        options={distRules.map((u) => ({
+                          value: u.name,
+                          label: u.name,
+                          sublabel: u.email || u.role || ''
+                        }))}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Team Rotation Section (for Round-Robin or Weighted) */}
+                {(distMode === 'round_robin' || distMode === 'weighted') && (
+                  <div className="pipeline-general-section">
+                    <div className="pipeline-general-header-between">
+                      <label className="pipeline-general-label" style={{ marginBottom: 0 }}>
+                        {distMode === 'weighted' ? 'Capacity & Weight Allocation' : 'Active Representatives'}
+                      </label>
+                      <span className="pipeline-dist-count-badge">
+                        {activeDistMembers.length} of {distRules.length} active
+                      </span>
+                    </div>
+
+                    {/* Top Full-Width Thick Multi-Segment Track (Round-Robin & Weighted modes) */}
+                    {(distMode === 'round_robin' || distMode === 'weighted') && activeDistMembers.length > 0 && (
+                      <div className="pipeline-dist-top-allocation">
+                        <div className="pipeline-dist-multi-bar">
+                          {activeDistMembers.map((member, aIdx) => {
+                            const pct = calculateMemberShare(member);
+                            if (pct <= 0) return null;
+                            const color = MONO_SHADES[aIdx % MONO_SHADES.length];
+                            return (
+                              <div
+                                key={member.id}
+                                className="pipeline-dist-bar-segment"
+                                style={{
+                                  width: `${pct}%`,
+                                  backgroundColor: color
+                                }}
+                                title={`${member.name}: ${pct}%`}
+                              >
+                                <span className="pipeline-dist-segment-name">{member.name}</span>
+                                <span className="pipeline-dist-segment-pct">{pct}%</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Stages-Style Numbered Team Roster */}
+                    <div className="pipeline-dist-numbered-wrap">
+                      {distRules.map((member, idx) => {
+                        const percent = calculateMemberShare(member);
+                        const isEnabled = member.enabled !== false;
+
+                        return (
+                          <div
+                            key={member.id}
+                            className={`pipeline-dist-numbered-item ${!isEnabled ? 'is-disabled' : ''}`}
+                          >
+                            <div className="pipeline-dist-numbered-left">
+                              <span className="pipeline-number-index">{idx + 1}</span>
+                              <div className="pipeline-dist-user-details">
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span className="pipeline-dist-user-name">{member.name}</span>
+                                  {member.role === 'admin' && (
+                                    <span className="pipeline-dist-user-role">ADMIN</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="pipeline-dist-numbered-actions">
+                              {distMode === 'weighted' && isEnabled && (
+                                <div className="pipeline-dist-weight-dock">
+                                  <button
+                                    type="button"
+                                    className="btn-dist-step-action minus"
+                                    onClick={() => handleStepWeight(member.id, -5)}
+                                    disabled={percent <= 0}
+                                    title="Decrease share (-5%)"
+                                    aria-label={`Decrease share for ${member.name}`}
+                                  >
+                                    <Minus size={14} strokeWidth={2.25} />
+                                  </button>
+
+                                  <div className="pipeline-dist-pct-slot">
+                                    <input
+                                      type="text"
+                                      inputMode="numeric"
+                                      pattern="[0-9]*"
+                                      className="pipeline-dist-pct-bare-input"
+                                      value={percent}
+                                      onChange={(e) => handleMemberWeightChange(member.id, e.target.value)}
+                                      onBlur={handleWeightBlur}
+                                      title="Percentage share"
+                                    />
+                                    <span className="pipeline-dist-pct-bare-suffix">%</span>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    className="btn-dist-step-action plus"
+                                    onClick={() => handleStepWeight(member.id, 5)}
+                                    disabled={percent >= 100}
+                                    title="Increase share (+5%)"
+                                    aria-label={`Increase share for ${member.name}`}
+                                  >
+                                    <Plus size={14} strokeWidth={2.25} />
+                                  </button>
+                                </div>
+                              )}
+
+                              {distMode === 'round_robin' && isEnabled && (
+                                <div className="pipeline-dist-weight-dock static">
+                                  <span className="pipeline-dist-rr-share">
+                                    {percent}%
+                                  </span>
+                                </div>
+                              )}
+
+                              <button
+                                type="button"
+                                className={`btn-dist-entry-toggle ${isEnabled ? 'active' : ''}`}
+                                onClick={() => handleMemberToggle(member.id, !isEnabled)}
+                                data-tooltip={isEnabled ? 'Active in rotation (click to pause)' : 'Paused (click to activate)'}
+                                data-tooltip-pos="right-edge"
+                                aria-label={isEnabled ? `Pause ${member.name}` : `Activate ${member.name}`}
+                              >
+                                <Check size={18} strokeWidth={2.5} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Fallback Assignee */}
+                {(distMode === 'round_robin' || distMode === 'weighted') && (
+                  <div className="pipeline-general-section">
+                    <label className="pipeline-general-label">Fallback Assignee</label>
+
+                    <div className="pipeline-name-row" style={{ maxWidth: 440 }}>
+                      <CustomSelect
+                        value={distAssignee}
+                        onChange={handleAssigneeChange}
+                        placeholder="Select fallback representative..."
+                        options={distRules.map((u) => ({
+                          value: u.name,
+                          label: u.name,
+                          sublabel: u.email || u.role || ''
+                        }))}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. Unassigned Note */}
+                {distMode === 'unassigned' && (
+                  <div className="pipeline-general-section">
+                    <div className="pipeline-source-row" style={{ background: '#f8fafc' }}>
+                      <div className="pipeline-source-info">
+                        <span className="pipeline-source-name" style={{ color: '#334155' }}>Unassigned Backlog</span>
+                        <div className="pipeline-source-subtext">
+                          Incoming leads will enter this pipeline without an assigned representative. Any team member can view and manually claim them.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 4: AUTOMATIONS CONTENT (Multi-Channel Style) */}
+            {configureSubTab === 'automations' && (
+              <div className="pipeline-numbered-list-wrap">
+                <div className="pipeline-general-header-between" style={{ marginBottom: 12 }}>
+                  <label className="pipeline-general-label" style={{ marginBottom: 0 }}>
+                    Stage Automations
+                  </label>
+                  <span className="pipeline-dist-count-badge">
+                    {stageAutomations.filter(a => a.is_active || a.email_active).length} of {stages.length} stages active
+                  </span>
+                </div>
+
+                <div className="pipeline-dist-numbered-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {stages.map((st, idx) => {
+                    const auto = stageAutomations.find(a => a.stage_id === st.id) || {
+                      stage_id: st.id,
+                      is_active: false,
+                      template_name: '',
+                      email_active: false,
+                      email_template_id: ''
+                    };
+                    const isWaActive = !!auto.is_active;
+                    const isEmailActive = !!auto.email_active;
+                    const isAnyActive = isWaActive || isEmailActive;
+
+                    return (
+                      <div
+                        key={st.id}
+                        className={`pipeline-auto-card ${isAnyActive ? 'is-active' : ''}`}
+                      >
+                        {/* Header: Index, Stage name, active channel badges */}
+                        <div className="pipeline-auto-card-header">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span className="pipeline-number-index">{idx + 1}</span>
+                            <span className="pipeline-auto-stage-name">{st.label}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {isWaActive && (
+                              <span className="pipeline-auto-badge-pill" style={{ background: '#dcfce7', color: '#166534' }}>
+                                <MessageCircle size={11} /> WhatsApp
+                              </span>
+                            )}
+                            {isEmailActive && (
+                              <span className="pipeline-auto-badge-pill" style={{ background: '#e0f2fe', color: '#0369a1' }}>
+                                <Mail size={11} /> Email
+                              </span>
+                            )}
+                            {!isAnyActive && (
+                              <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>No automations</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* WhatsApp Channel Row */}
+                        <div className="pipeline-auto-channel-row">
+                          <div className="pipeline-auto-channel-info">
+                            <div className="pipeline-auto-channel-icon" style={{ background: '#dcfce7' }}>
+                              <MessageCircle size={14} color="#166534" />
+                            </div>
+                            <span className="pipeline-auto-channel-name">WhatsApp</span>
+                          </div>
+
+                          <div className="pipeline-auto-channel-controls">
+                            {isWaActive ? (
+                              <div className="pipeline-auto-select-container">
+                                {waTemplates.length === 0 ? (
+                                  <span className="stage-auto-no-templates-pill" title="Connect WABA in Settings → Integrations">
+                                    No templates synced
+                                  </span>
+                                ) : (
+                                  <CustomSelect
+                                    value={auto.template_name || ''}
+                                    onChange={(val) => handleSelectStageTemplate(st.id, val)}
+                                    placeholder="Select WhatsApp template..."
+                                    options={waTemplates.map(t => ({
+                                      value: t.name,
+                                      label: t.name
+                                    }))}
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '12.5px', color: '#94a3b8' }}>Disabled</span>
+                            )}
+
+                            <button
+                              type="button"
+                              className={`btn-auto-rectangular-toggle ${isWaActive ? 'active' : ''}`}
+                              onClick={() => handleToggleStageAutomation(st.id, !isWaActive)}
+                              disabled={!canEdit}
+                              data-tooltip={isWaActive ? 'WhatsApp Active (click to pause)' : 'WhatsApp Paused (click to activate)'}
+                              data-tooltip-pos="right-edge"
+                              aria-label={isWaActive ? `Pause WhatsApp for ${st.label}` : `Activate WhatsApp for ${st.label}`}
+                            >
+                              <Check size={18} strokeWidth={2.5} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Email Channel Row */}
+                        <div className="pipeline-auto-channel-row">
+                          <div className="pipeline-auto-channel-info">
+                            <div className="pipeline-auto-channel-icon" style={{ background: '#e0f2fe' }}>
+                              <Mail size={14} color="#0369a1" />
+                            </div>
+                            <span className="pipeline-auto-channel-name">Email (Resend)</span>
+                          </div>
+
+                          <div className="pipeline-auto-channel-controls">
+                            {isEmailActive ? (
+                              <div className="pipeline-auto-select-container">
+                                {emailTemplates.length === 0 ? (
+                                  <span className="stage-auto-no-templates-pill" style={{ background: '#f0f9ff', borderColor: '#bae6fd', color: '#0369a1' }} title="Create templates in Settings → Integrations → Email">
+                                    No email templates
+                                  </span>
+                                ) : (
+                                  <CustomSelect
+                                    value={auto.email_template_id || ''}
+                                    onChange={(val) => handleSelectEmailTemplate(st.id, val)}
+                                    placeholder="Select email template..."
+                                    options={emailTemplates.map(t => ({
+                                      value: t.id,
+                                      label: t.name
+                                    }))}
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '12.5px', color: '#94a3b8' }}>Disabled</span>
+                            )}
+
+                            <button
+                              type="button"
+                              className={`btn-auto-rectangular-toggle ${isEmailActive ? 'email-active' : ''}`}
+                              onClick={() => handleToggleEmailAutomation(st.id, !isEmailActive)}
+                              disabled={!canEdit}
+                              data-tooltip={isEmailActive ? 'Email Active (click to pause)' : 'Email Paused (click to activate)'}
+                              data-tooltip-pos="right-edge"
+                              aria-label={isEmailActive ? `Pause Email for ${st.label}` : `Activate Email for ${st.label}`}
+                            >
+                              <Check size={18} strokeWidth={2.5} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

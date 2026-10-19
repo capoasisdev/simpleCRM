@@ -1,358 +1,231 @@
-/**
- * todos.js - Full To-Do Lists & Custom Pipeline Engine for SimpleCRM
- * Supports dual Supabase + LocalStorage caching and offline fallback.
- */
 import { supabase } from './supabase';
 
-const LOCAL_LISTS_KEY = 'crm_todo_lists_cache';
-const LOCAL_TODOS_KEY = 'crm_todos_cache';
+const STORAGE_KEY = 'crm_sticky_notes_v2';
 
-export const DEFAULT_STAGES = [
-  { id: 'todo', name: 'To Do' },
-  { id: 'in_progress', name: 'In Progress' },
-  { id: 'done', name: 'Done' }
+export const STICKY_COLORS = [
+  { id: 'yellow', name: 'Yellow', bg: '#fef9c3', border: '#fef08a', accent: '#ca8a04', text: '#713f12', tagBg: '#fef08a' },
+  { id: 'green', name: 'Green', bg: '#dcfce7', border: '#bbf7d0', accent: '#16a34a', text: '#14532d', tagBg: '#bbf7d0' },
+  { id: 'blue', name: 'Blue', bg: '#e0f2fe', border: '#bae6fd', accent: '#0284c7', text: '#0c4a6e', tagBg: '#bae6fd' }
 ];
 
-export const DEFAULT_LIST = {
-  id: '5f6d1cf0-8da9-4c97-83a1-7e7101dca13b',
-  name: 'General Work',
-  stages: DEFAULT_STAGES,
-  created_at: new Date().toISOString(),
-  created_by: 'System'
-};
+export const DEFAULT_COLOR = 'yellow';
 
-// ----------------- LOCAL CACHE HELPERS -----------------
-export function getCachedLists() {
+/**
+ * Synchronous local cache reader for instant UI render
+ */
+export function getCachedNotes() {
   try {
-    const raw = localStorage.getItem(LOCAL_LISTS_KEY);
-    if (!raw) return [DEFAULT_LIST];
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) return [DEFAULT_LIST];
-    // Clean up any legacy non-UUID entries
-    return parsed.map((l) =>
-      l.id === 'default-list-general' ? { ...l, id: DEFAULT_LIST.id } : l
-    );
-  } catch {
-    return [DEFAULT_LIST];
-  }
-}
-
-export function setCachedLists(lists) {
-  try {
-    localStorage.setItem(LOCAL_LISTS_KEY, JSON.stringify(lists));
-  } catch (e) {
-    console.warn('Could not cache todo lists:', e);
-  }
-}
-
-export function getCachedTodos(listId = null) {
-  try {
-    const raw = localStorage.getItem(LOCAL_TODOS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (listId && Array.isArray(parsed)) {
-      const matchId = listId === 'default-list-general' ? DEFAULT_LIST.id : listId;
-      return parsed.filter((t) => t.list_id === matchId || t.list_id === listId);
-    }
     return Array.isArray(parsed) ? parsed : [];
-  } catch {
+  } catch (err) {
+    console.warn('Error reading cached sticky notes:', err);
     return [];
   }
 }
 
-export function setCachedTodos(todos) {
-  try {
-    localStorage.setItem(LOCAL_TODOS_KEY, JSON.stringify(todos));
-  } catch (e) {
-    console.warn('Could not cache todos:', e);
-  }
-}
-
-// ----------------- TODO LISTS CRUD -----------------
-
 /**
- * Fetch all To-Do lists
+ * Synchronous local cache writer
  */
-export async function fetchTodoLists() {
-  let lists = [];
-
+export function setCachedNotes(notes) {
   try {
-    const { data, error } = await supabase
-      .from('crm_todo_lists')
-      .select('*')
-      .order('created_at', { ascending: true });
-
-    if (!error && Array.isArray(data)) {
-      if (data.length > 0) {
-        lists = data;
-        setCachedLists(lists);
-        return lists;
-      } else {
-        // Table is empty, auto-create initial list in Supabase
-        const { data: created, error: createErr } = await supabase
-          .from('crm_todo_lists')
-          .insert([
-            {
-              name: 'General Work',
-              stages: DEFAULT_STAGES,
-              created_by: 'System'
-            }
-          ])
-          .select()
-          .single();
-
-        if (!createErr && created) {
-          lists = [created];
-          setCachedLists(lists);
-          return lists;
-        }
-      }
-    } else if (error) {
-      console.warn('Supabase crm_todo_lists query error:', error);
-    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
   } catch (err) {
-    console.warn('Supabase crm_todo_lists note:', err.message);
+    console.warn('Error writing sticky notes cache:', err);
   }
-
-  // Fallback to cache
-  lists = getCachedLists();
-  if (!lists || lists.length === 0) {
-    lists = [DEFAULT_LIST];
-    setCachedLists(lists);
-  }
-  return lists;
 }
 
 /**
- * Create a new To-Do list with custom stages
+ * Normalizes a raw Supabase crm_todos record into a sticky note object
  */
-export async function createTodoList({ name, description = '', stages = DEFAULT_STAGES, createdBy = 'User' }) {
-  const newList = {
-    id: `list_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    name,
-    description,
-    stages: Array.isArray(stages) && stages.length > 0 ? stages : DEFAULT_STAGES,
-    created_at: new Date().toISOString(),
-    created_by: createdBy
+function normalizeNote(row) {
+  let isChecklist = row.stage_id === 'checklist';
+  let checklist = [];
+  let content = row.description || '';
+
+  if (isChecklist) {
+    try {
+      checklist = JSON.parse(content);
+      if (!Array.isArray(checklist)) checklist = [];
+    } catch {
+      checklist = [];
+      isChecklist = false;
+    }
+  }
+
+  const validColorIds = STICKY_COLORS.map(c => c.id);
+  const color = validColorIds.includes(row.priority) ? row.priority : 'yellow';
+
+  return {
+    id: String(row.id),
+    title: row.title || '',
+    content: isChecklist ? '' : content,
+    isChecklist,
+    checklist,
+    color,
+    isPinned: Boolean(row.is_completed),
+    createdAt: row.created_at || new Date().toISOString(),
+    createdBy: row.created_by || 'Me',
+    assignedTo: row.assigned_to || null
   };
-
-  try {
-    const { data, error } = await supabase
-      .from('crm_todo_lists')
-      .insert([
-        {
-          name: newList.name,
-          description: newList.description,
-          stages: newList.stages,
-          created_by: newList.created_by
-        }
-      ])
-      .select()
-      .single();
-
-    if (!error && data) {
-      newList.id = data.id;
-    }
-  } catch (e) {
-    console.warn('Note creating list in Supabase:', e.message);
-  }
-
-  const currentLists = getCachedLists();
-  const updatedLists = [...currentLists, newList];
-  setCachedLists(updatedLists);
-
-  return newList;
 }
 
 /**
- * Update a To-Do list (name, description, or custom stages)
+ * Fetch all sticky notes from Supabase with local cache sync
  */
-export async function updateTodoList(listId, updates) {
-  try {
-    await supabase.from('crm_todo_lists').update(updates).eq('id', listId);
-  } catch (e) {
-    console.warn('Note updating list in Supabase:', e.message);
-  }
-
-  const currentLists = getCachedLists();
-  const updatedLists = currentLists.map((l) => (l.id === listId ? { ...l, ...updates } : l));
-  setCachedLists(updatedLists);
-
-  return updatedLists.find((l) => l.id === listId);
-}
-
-/**
- * Delete a To-Do list and its associated tasks
- */
-export async function deleteTodoList(listId) {
-  try {
-    await supabase.from('crm_todo_lists').delete().eq('id', listId);
-  } catch (e) {
-    console.warn('Note deleting list in Supabase:', e.message);
-  }
-
-  const currentLists = getCachedLists().filter((l) => l.id !== listId);
-  setCachedLists(currentLists);
-
-  const currentTodos = getCachedTodos().filter((t) => t.list_id !== listId);
-  setCachedTodos(currentTodos);
-
-  return currentLists;
-}
-
-// ----------------- TODOS (TASKS) CRUD -----------------
-
-/**
- * Fetch todos for a specific list
- */
-export async function fetchTodos(listId) {
-  let todos = [];
-  const targetListId = (!listId || listId === 'default-list-general') ? DEFAULT_LIST.id : listId;
-
-  try {
-    let query = supabase.from('crm_todos').select('*');
-    if (targetListId) {
-      query = query.eq('list_id', targetListId);
-    }
-    const { data, error } = await query.order('created_at', { ascending: false });
-
-    if (!error && Array.isArray(data)) {
-      todos = data;
-      // Update local cache for this list
-      const allCached = getCachedTodos().filter((t) => (targetListId ? t.list_id !== targetListId : false));
-      setCachedTodos([...allCached, ...todos]);
-      return todos;
-    } else if (error) {
-      console.warn('Supabase crm_todos query error:', error);
-    }
-  } catch (err) {
-    console.warn('Supabase crm_todos note:', err.message);
-  }
-
-  // Fallback to cache
-  const allLocal = getCachedTodos();
-  return targetListId ? allLocal.filter((t) => t.list_id === targetListId) : allLocal;
-}
-
-/**
- * Create a new task in a list
- */
-export async function createTodo({
-  listId,
-  title,
-  description = '',
-  stageId,
-  stage_id,
-  priority = 'medium',
-  dueDate = null,
-  assignedTo = '',
-  leadId = null,
-  leadName = '',
-  createdBy = 'User'
-}) {
-  const resolvedStage = stageId || stage_id || 'todo';
-  let resolvedListId = listId;
-  if (!resolvedListId || resolvedListId === 'default-list-general') {
-    const cached = getCachedLists();
-    const found = cached.find((l) => l.id && l.id !== 'default-list-general');
-    resolvedListId = found ? found.id : DEFAULT_LIST.id;
-  }
-
-  const newTodo = {
-    id: `todo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    list_id: resolvedListId,
-    title,
-    description: description || '',
-    stage_id: resolvedStage,
-    priority: priority || 'medium',
-    due_date: dueDate || null,
-    is_completed: resolvedStage === 'done',
-    completed_at: resolvedStage === 'done' ? new Date().toISOString() : null,
-    assigned_to: assignedTo || '',
-    lead_id: leadId || null,
-    lead_name: leadName || '',
-    sort_order: 0,
-    created_at: new Date().toISOString(),
-    created_by: createdBy || 'User'
-  };
-
+export async function fetchStickyNotes() {
   try {
     const { data, error } = await supabase
       .from('crm_todos')
-      .insert([
-        {
-          list_id: newTodo.list_id,
-          title: newTodo.title,
-          description: newTodo.description || null,
-          stage_id: newTodo.stage_id,
-          priority: newTodo.priority,
-          due_date: newTodo.due_date,
-          is_completed: newTodo.is_completed,
-          completed_at: newTodo.completed_at,
-          assigned_to: newTodo.assigned_to || null,
-          lead_id: newTodo.lead_id,
-          lead_name: newTodo.lead_name || null,
-          sort_order: 0,
-          created_by: newTodo.created_by
-        }
-      ])
-      .select()
-      .single();
+      .select('*')
+      .order('is_completed', { ascending: false }) // pinned first
+      .order('created_at', { ascending: true });
 
-    if (!error && data) {
-      newTodo.id = data.id;
-      newTodo.created_at = data.created_at;
-    } else if (error) {
-      console.warn('Note creating todo in Supabase:', error.message || error);
+    if (!error && Array.isArray(data)) {
+      const notes = data.map(normalizeNote);
+      setCachedNotes(notes);
+      return notes;
     }
-  } catch (e) {
-    console.warn('Note creating todo in Supabase:', e.message);
+  } catch (err) {
+    console.warn('Could not fetch remote sticky notes:', err);
   }
 
-  const allCached = getCachedTodos();
-  setCachedTodos([newTodo, ...allCached]);
-
-  return newTodo;
+  return getCachedNotes();
 }
 
 /**
- * Update a task (stage, completion status, priority, title, etc.)
+/**
+ * Create a new sticky note synchronously with instant cache update and background Supabase sync
  */
-export async function updateTodo(todoId, updates) {
-  // If stage changed to done or is_completed changed
-  if (updates.stage_id === 'done' && updates.is_completed === undefined) {
-    updates.is_completed = true;
-    updates.completed_at = new Date().toISOString();
-  } else if (updates.is_completed === true && !updates.completed_at) {
-    updates.completed_at = new Date().toISOString();
-  } else if (updates.is_completed === false) {
-    updates.completed_at = null;
-  }
+export function createStickyNoteSync({
+  title = '',
+  content = '',
+  isChecklist = false,
+  checklist = [],
+  color = 'yellow',
+  isPinned = false,
+  currentUser = null
+}) {
+  const newId = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `note-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-  try {
-    await supabase.from('crm_todos').update(updates).eq('id', todoId);
-  } catch (e) {
-    console.warn('Note updating todo in Supabase:', e.message);
-  }
+  const createdBy = currentUser?.name || currentUser?.email || 'Me';
+  const descriptionPayload = isChecklist ? JSON.stringify(checklist) : content;
 
-  const allCached = getCachedTodos();
-  const updatedList = allCached.map((t) => (t.id === todoId ? { ...t, ...updates } : t));
-  setCachedTodos(updatedList);
+  const newNote = {
+    id: newId,
+    title,
+    content: isChecklist ? '' : content,
+    isChecklist,
+    checklist,
+    color,
+    isPinned,
+    createdAt: new Date().toISOString(),
+    createdBy
+  };
 
-  return updatedList.find((t) => t.id === todoId);
+  // 1. Immediately update local cache synchronously
+  const current = getCachedNotes();
+  const updated = [...current.filter(n => n.id !== newId), newNote];
+  setCachedNotes(updated);
+
+  // 2. Persist to Supabase asynchronously in background (0ms UI latency)
+  (async () => {
+    try {
+      const payload = {
+        id: newId,
+        title: title || '',
+        description: descriptionPayload,
+        priority: color,
+        stage_id: isChecklist ? 'checklist' : 'note',
+        is_completed: isPinned,
+        created_by: createdBy
+      };
+
+      await supabase
+        .from('crm_todos')
+        .insert([payload]);
+    } catch (err) {
+      console.warn('Failed to insert sticky note to Supabase in background:', err);
+    }
+  })();
+
+  return newNote;
+}
+
+export function createStickyNote(params) {
+  return createStickyNoteSync(params);
 }
 
 /**
- * Delete a task
+ * Update an existing sticky note
  */
-export async function deleteTodo(todoId) {
-  try {
-    await supabase.from('crm_todos').delete().eq('id', todoId);
-  } catch (e) {
-    console.warn('Note deleting todo in Supabase:', e.message);
+export async function updateStickyNote(id, changes) {
+  // 1. Update local cache immediately
+  const current = getCachedNotes();
+  let updatedNote = null;
+  const updatedList = current.map(note => {
+    if (note.id === id) {
+      updatedNote = { ...note, ...changes };
+      return updatedNote;
+    }
+    return note;
+  });
+
+  if (updatedNote) {
+    setCachedNotes(updatedList);
   }
 
-  const allCached = getCachedTodos().filter((t) => t.id !== todoId);
-  setCachedTodos(allCached);
+  // 2. Persist changes to Supabase
+  try {
+    const payload = {};
+    if (changes.title !== undefined) payload.title = changes.title;
+    if (changes.color !== undefined) payload.priority = changes.color;
+    if (changes.isPinned !== undefined) payload.is_completed = changes.isPinned;
+
+    if (changes.isChecklist !== undefined || changes.checklist !== undefined || changes.content !== undefined) {
+      const isChecklist = changes.isChecklist !== undefined ? changes.isChecklist : updatedNote?.isChecklist;
+      payload.stage_id = isChecklist ? 'checklist' : 'note';
+      if (isChecklist) {
+        payload.description = JSON.stringify(changes.checklist || updatedNote?.checklist || []);
+      } else {
+        payload.description = changes.content !== undefined ? changes.content : (updatedNote?.content || '');
+      }
+    }
+
+    await supabase
+      .from('crm_todos')
+      .update(payload)
+      .eq('id', id);
+  } catch (err) {
+    console.warn('Failed to update sticky note in Supabase:', err);
+  }
+
+  return updatedNote;
+}
+
+/**
+/**
+ * Delete a sticky note (Instant local cache update + background Supabase delete)
+ */
+export function deleteStickyNote(id) {
+  // 1. Remove from local cache immediately
+  const current = getCachedNotes();
+  setCachedNotes(current.filter(n => n.id !== id));
+
+  // 2. Remove from Supabase in background
+  (async () => {
+    try {
+      await supabase
+        .from('crm_todos')
+        .delete()
+        .eq('id', id);
+    } catch (err) {
+      console.warn('Failed to delete sticky note in Supabase:', err);
+    }
+  })();
 
   return true;
 }

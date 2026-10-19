@@ -5,6 +5,8 @@ import { hasPermission, getLeadScope, getFollowUpScope, canDeleteFollowUp, isLea
 import { recordActivity, fetchLeadActivities } from '../lib/activities';
 import { fetchFollowUps, getStoredFollowUps, getFollowUpUrgency, formatFollowUpTime, completeFollowUp, reopenFollowUp, deleteFollowUp } from '../lib/followups';
 import { addNotification } from '../lib/notifications';
+import { sendWhatsAppMessage } from '../lib/whatsapp';
+import { sendEmailViaResend, fetchEmailTemplates } from '../lib/email';
 import ScheduleFollowUpModal from './common/ScheduleFollowUpModal';
 import Skeleton from './common/Skeleton';
 import '../styles/leads.css';
@@ -480,6 +482,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
   const [draggedLeadId, setDraggedLeadId] = useState(null);
   const [dragOverColumnId, setDragOverColumnId] = useState(null);
   const justDraggedRef = useRef(false);
+  const inFlightAutomationsRef = useRef(new Set());
 
   const draggedLead = useMemo(() => {
     if (!draggedLeadId) return null;
@@ -524,6 +527,42 @@ export default function LeadsView({ currentUser, onNavigate }) {
       document.removeEventListener('mousedown', handleDocumentMouseDown);
     };
   }, []);
+
+  // Keyboard horizontal scrolling controls (smooth full-column ~320px steps)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ignore if user is typing in an input, textarea, select, or if a modal/drawer is open
+      const activeEl = document.activeElement;
+      const tag = activeEl?.tagName?.toLowerCase();
+      if (
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        activeEl?.isContentEditable ||
+        isModalOpen ||
+        isDetailOpen
+      ) {
+        return;
+      }
+
+      if (e.key === 'ArrowLeft') {
+        if (boardRef.current) {
+          e.preventDefault();
+          boardRef.current.scrollBy({ left: -320, behavior: 'smooth' });
+        }
+      } else if (e.key === 'ArrowRight') {
+        if (boardRef.current) {
+          e.preventDefault();
+          boardRef.current.scrollBy({ left: 320, behavior: 'smooth' });
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isModalOpen, isDetailOpen]);
 
   const handleDragStart = (e, lead) => {
     if (e.target.closest('button, input, select, .lead-card-assign-wrap, .stage-custom-trigger, .lead-card-delete-btn')) {
@@ -605,6 +644,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
 
   const handleColumnDrop = async (e, targetColumnId) => {
     e.preventDefault();
+    e.stopPropagation();
     stopAutoScroll();
     setDragOverColumnId(null);
 
@@ -637,6 +677,9 @@ export default function LeadsView({ currentUser, onNavigate }) {
       assignedTo: leadToMove.assigned_to || leadToMove.assignedTo,
       userName: currentUser?.name
     });
+
+    // Trigger WhatsApp stage automation if configured
+    triggerStageAutomation(leadToMove, targetColumnId);
 
     // Persist stage update in Supabase
     try {
@@ -767,6 +810,148 @@ export default function LeadsView({ currentUser, onNavigate }) {
     }
   };
 
+  // Trigger Stage Automations (WhatsApp & Email) if configured for target pipeline stage
+  const triggerStageAutomation = async (lead, targetStageId) => {
+    if (!lead || !targetStageId) return;
+
+    // Deduplication lock: block duplicate triggers for the same lead + stage within 5s
+    const lockKey = `${lead.id || lead.phone || lead.email}_${targetStageId}`;
+    if (inFlightAutomationsRef.current.has(lockKey)) {
+      return;
+    }
+    inFlightAutomationsRef.current.add(lockKey);
+    setTimeout(() => {
+      inFlightAutomationsRef.current.delete(lockKey);
+    }, 5000);
+    try {
+      const pipeId = lead.pipeline_id || activePipelineId;
+      const targetPipe = pipelinesList.find(p => p.id === pipeId) || pipelinesList.find(p => p.is_default);
+      if (!targetPipe || !Array.isArray(targetPipe.stage_automations)) return;
+
+      const auto = targetPipe.stage_automations.find(a => a.stage_id === targetStageId);
+      if (!auto) return;
+
+      const stageObj = (targetPipe.stages || []).find(s => s.id === targetStageId);
+      const stageName = stageObj?.label || targetStageId;
+
+      // 1. WhatsApp Automation
+      if (auto.is_active && auto.template_name && lead.phone) {
+        try {
+          if (lead.id) {
+            const { data: existingAct } = await supabase
+              .from('lead_activities')
+              .select('id')
+              .eq('lead_id', lead.id)
+              .eq('type', 'whatsapp_sent')
+              .eq('to_stage', targetStageId)
+              .limit(1)
+              .maybeSingle();
+            if (existingAct) return;
+          }
+
+          await sendWhatsAppMessage({
+            to: lead.phone,
+            leadName: lead.name,
+            templateName: auto.template_name,
+            leadId: lead.id,
+            pipelineId: pipeId,
+            stageId: targetStageId,
+            isAutomated: true
+          });
+
+          recordActivity({
+            type: 'whatsapp_sent',
+            leadId: lead.id,
+            leadName: lead.name,
+            toStage: targetStageId,
+            details: `Automated WhatsApp "${auto.template_name}" sent on reaching stage "${stageName}"`,
+            userName: 'Automation'
+          });
+
+          addNotification({
+            type: 'whatsapp_automation',
+            title: 'WhatsApp Automation Sent',
+            message: `Sent "${auto.template_name}" to ${lead.name} (${lead.phone}) on entering "${stageName}".`,
+            leadId: lead.id,
+            timestamp: new Date().toISOString()
+          });
+        } catch (waErr) {
+          console.warn(`Stage automation WhatsApp dispatch error for ${lead.name}:`, waErr);
+        }
+      }
+
+      // 2. Email (Resend) Automation
+      if (auto.email_active && auto.email_template_id && lead.email) {
+        try {
+          if (lead.id) {
+            const { data: existingLog } = await supabase
+              .from('email_logs')
+              .select('id')
+              .eq('lead_id', lead.id)
+              .eq('stage_id', targetStageId)
+              .eq('status', 'sent')
+              .limit(1)
+              .maybeSingle();
+            if (existingLog) return;
+          }
+
+          const emailTmpls = await fetchEmailTemplates();
+          const targetTmpl = Array.isArray(emailTmpls) ? emailTmpls.find(t => t.id === auto.email_template_id) : null;
+          if (targetTmpl) {
+            const res = await sendEmailViaResend({
+              to: lead.email,
+              leadName: lead.name,
+              template: targetTmpl,
+              templateName: targetTmpl.name,
+              subject: targetTmpl.subject,
+              html: targetTmpl.body_html,
+              lead: {
+                ...lead,
+                stage: stageName
+              },
+              leadId: lead.id,
+              pipelineId: pipeId,
+              stageId: targetStageId,
+              isAutomated: true
+            });
+
+            if (res.success) {
+              recordActivity({
+                type: 'email_sent',
+                leadId: lead.id,
+                leadName: lead.name,
+                toStage: targetStageId,
+                details: `Automated Email "${targetTmpl.name}" sent to ${lead.email} on reaching stage "${stageName}"`,
+                userName: 'Automation'
+              });
+
+              addNotification({
+                type: 'email_automation',
+                title: 'Email Automation Sent',
+                message: `Sent "${targetTmpl.name}" to ${lead.name} (${lead.email}) on entering "${stageName}".`,
+                leadId: lead.id,
+                timestamp: new Date().toISOString()
+              });
+            } else {
+              console.warn(`Stage automation Email failed for ${lead.name}:`, res.error);
+              addNotification({
+                type: 'email_automation',
+                title: 'Email Automation Failed',
+                message: `Failed sending "${targetTmpl.name}" to ${lead.name}: ${res.error || 'Check Resend settings'}`,
+                leadId: lead.id,
+                timestamp: new Date().toISOString()
+              });
+            }
+          }
+        } catch (emailErr) {
+          console.warn(`Stage automation Email dispatch error for ${lead.name}:`, emailErr);
+        }
+      }
+    } catch (err) {
+      console.warn(`Stage automation dispatch error for ${lead.name}:`, err);
+    }
+  };
+
   // Fetch team members from crm_users
   useEffect(() => {
     let isMounted = true;
@@ -865,6 +1050,9 @@ export default function LeadsView({ currentUser, onNavigate }) {
               if (prev.some((l) => l.id === payload.new.id)) return prev;
               return [payload.new, ...prev];
             });
+            if (payload.new?.stage) {
+              triggerStageAutomation(payload.new, payload.new.stage);
+            }
           } else if (payload.eventType === 'DELETE') {
             setLeads((prev) => prev.filter((l) => l.id !== payload.old.id));
           } else if (payload.eventType === 'UPDATE') {
@@ -1203,6 +1391,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
         setLeads((prev) =>
           prev.map((l) => (l.id === tempId ? data : l))
         );
+        triggerStageAutomation(data, newLeadStage);
       }
     } catch (err) {
       console.warn('Error inserting lead:', err);
@@ -1298,6 +1487,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
         assignedTo: targetLead.assigned_to || targetLead.assignedTo,
         userName: currentUser?.name
       });
+      triggerStageAutomation(targetLead, newStage);
     }
     try {
       await supabase.from('leads').update({ stage: newStage }).eq('id', leadId);
@@ -1318,6 +1508,8 @@ export default function LeadsView({ currentUser, onNavigate }) {
       assignedTo: lead.assigned_to || lead.assignedTo,
       userName: currentUser?.name
     });
+
+    triggerStageAutomation(lead, targetStage);
 
     const currentIndex = columns.findIndex((c) => c.id === lead.stage);
     const targetIndex = columns.findIndex((c) => c.id === targetStage);
@@ -1957,6 +2149,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
       {/* Board Container with Common Separators */}
       <div
         ref={boardRef}
+        tabIndex={0}
         className={`leads-board ${filterType === 'followups' ? 'followups-mode' : ''} ${draggedLeadId ? 'is-dragging-active' : ''}`}
         onDragOver={handleBoardDragOver}
         onDragLeave={stopAutoScroll}
@@ -2058,7 +2251,6 @@ export default function LeadsView({ currentUser, onNavigate }) {
                 <div
                   className="leads-column-cards"
                   onDragOver={(e) => handleColumnDragOver(e, column.id)}
-                  onDrop={(e) => handleColumnDrop(e, column.id)}
                 >
                   {/* Drop Preview of dragged card in target column */}
                   {isTargetColumn && draggedLead && (
@@ -2588,6 +2780,8 @@ export default function LeadsView({ currentUser, onNavigate }) {
                           act.type === 'lead_created' || act.type === 'arrival' || act.type === 'lead_received';
                         const isAssignment = act.type === 'assignment';
                         const isStageChange = act.type === 'stage_change';
+                        const isWhatsApp = act.type === 'whatsapp_sent';
+                        const isEmail = act.type === 'email_sent';
 
                         const fromLabel =
                           columns.find((c) => c.id === act.from_stage)?.label || act.from_stage || 'Initial';
@@ -2601,7 +2795,11 @@ export default function LeadsView({ currentUser, onNavigate }) {
                             </td>
                             <td className="audit-cell-event">
                               <span
-                                className={`audit-pill ${isStageChange
+                                className={`audit-pill ${isWhatsApp
+                                  ? 'audit-pill-arrival'
+                                  : isEmail
+                                  ? 'audit-pill-stage'
+                                  : isStageChange
                                   ? 'audit-pill-stage'
                                   : isAssignment
                                     ? 'audit-pill-assign'
@@ -2609,8 +2807,19 @@ export default function LeadsView({ currentUser, onNavigate }) {
                                       ? 'audit-pill-arrival'
                                       : 'audit-pill-default'
                                   }`}
+                                style={
+                                  isWhatsApp
+                                    ? { background: '#dcfce7', color: '#15803d' }
+                                    : isEmail
+                                    ? { background: '#e0f2fe', color: '#0369a1' }
+                                    : undefined
+                                }
                               >
-                                {isStageChange
+                                {isWhatsApp
+                                  ? 'WhatsApp'
+                                  : isEmail
+                                  ? 'Email'
+                                  : isStageChange
                                   ? 'Stage Change'
                                   : isAssignment
                                     ? 'Assignment'
@@ -2620,6 +2829,16 @@ export default function LeadsView({ currentUser, onNavigate }) {
                               </span>
                             </td>
                             <td className="audit-cell-details">
+                              {isWhatsApp && (
+                                <span className="audit-text-main" style={{ color: '#166534', fontWeight: 500 }}>
+                                  {act.details || 'Automated WhatsApp template sent'}
+                                </span>
+                              )}
+                              {isEmail && (
+                                <span className="audit-text-main" style={{ color: '#0369a1', fontWeight: 500 }}>
+                                  {act.details || 'Automated Email sent'}
+                                </span>
+                              )}
                               {isStageChange && (
                                 <div className="audit-stage-transition">
                                   <span className="audit-stage-tag">{fromLabel}</span>
@@ -2642,7 +2861,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
                                   )}
                                 </div>
                               )}
-                              {!isStageChange && !isAssignment && !isArrival && (
+                              {!isWhatsApp && !isEmail && !isStageChange && !isAssignment && !isArrival && (
                                 <span>{act.details || 'Lead modified'}</span>
                               )}
                             </td>

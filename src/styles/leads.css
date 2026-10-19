@@ -470,6 +470,11 @@
   scrollbar-color: #cbd5e1 transparent;
   user-select: none;
   -webkit-user-select: none;
+  outline: none;
+}
+
+.leads-board:focus {
+  outline: none;
 }
 
 .leads-board::-webkit-scrollbar {

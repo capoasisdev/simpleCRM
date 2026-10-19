@@ -19,15 +19,10 @@ import {
   Smile,
   ChevronDown,
   ChevronRight,
-  Sliders,
-  GitBranch,
-  Scale,
   User,
   Users,
   Play,
-  Pause,
-  Zap,
-  RotateCcw
+  Zap
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { sendWhatsAppMessage } from '../lib/whatsapp';
@@ -35,7 +30,7 @@ import Skeleton from './common/Skeleton';
 import '../styles/automations.css';
 
 export default function AutomationsView({ currentUser }) {
-  const [currentView, setCurrentView] = useState('hub'); // 'hub' | 'whatsapp' | 'lead_routing'
+  const [currentView, setCurrentView] = useState('hub'); // 'hub' | 'whatsapp'
   const [isLoading, setIsLoading] = useState(true);
   const [toast, setToast] = useState(null);
 
@@ -63,119 +58,31 @@ export default function AutomationsView({ currentUser }) {
   const [emailSubject, setEmailSubject] = useState('Welcome to our platform!');
   const [emailBody, setEmailBody] = useState('Hi {{name}}, thanks for reaching out! We received your request.');
 
-  // --------------------------------------------------------------------------
-  // Lead Routing Automation States (Two Independent Simultaneous Flows)
-  // --------------------------------------------------------------------------
-  const [lrStep, setLrStep] = useState(3);
-  const [lrName, setLrName] = useState('Inbound Lead Routing Engine');
-  const [isNewLeadFlowActive, setIsNewLeadFlowActive] = useState(true);
-  const [isUnassignedFlowActive, setIsUnassignedFlowActive] = useState(true);
-  const [newLeadMode, setNewLeadMode] = useState('round_robin'); // 'round_robin' | 'weighted' | 'single'
-  const [unassignedMode, setUnassignedMode] = useState('round_robin');
-  const [newLeadSingleAssignee, setNewLeadSingleAssignee] = useState('');
-  const [unassignedSingleAssignee, setUnassignedSingleAssignee] = useState('');
-  const [lrConfigId, setLrConfigId] = useState(null);
-  const [isLrActive, setIsLrActive] = useState(true);
-  const [isSavingLr, setIsSavingLr] = useState(false);
-  const [newLeadRoundRobinIndex, setNewLeadRoundRobinIndex] = useState(0);
-  const [unassignedRoundRobinIndex, setUnassignedRoundRobinIndex] = useState(0);
-  const [newLeadTeam, setNewLeadTeam] = useState([]);
-  const [unassignedTeam, setUnassignedTeam] = useState([]);
-
-  // Simulation Feed for Lead Routing preview
-  const [simulatedLeads, setSimulatedLeads] = useState([
-    { id: 101, name: 'Rahul Sharma', source: 'Website Form', rep: 'Priya Patel', time: '2m ago' },
-    { id: 102, name: 'Amit Verma', source: 'Meta Ad Campaign', rep: 'Pranav Patil', time: '14m ago' },
-    { id: 103, name: 'Kavita Joshi', source: 'CSV Upload', rep: 'Rahul Verma', time: '1h ago' }
-  ]);
-
   const showToast = (message, type = 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
   // --------------------------------------------------------------------------
-  // Data Fetching: Supabase Meta Config & Lead Routing Config
+  // Data Fetching: Supabase Meta WhatsApp Config
   // --------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true;
     const fetchAllData = async () => {
       try {
-        // 1. Fetch Meta WhatsApp Config
         const { data: metaData } = await supabase
           .from('meta_config')
           .select('*')
           .limit(1)
           .maybeSingle();
 
-        // 2. Fetch Users
-        const { data: usersData } = await supabase
-          .from('crm_users')
-          .select('id, name, email, role')
-          .order('name', { ascending: true });
-
-        // 3. Fetch Lead Routing Config
-        const { data: routingData } = await supabase
-          .from('lead_routing_config')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
-
-        if (isMounted) {
-          // Sync WhatsApp
-          if (metaData) {
-            setWaConfigId(metaData.id);
-            setPhoneId(metaData.whatsapp_phone_number_id || '');
-            setWabaId(metaData.whatsapp_business_account_id || '');
-            setAccessToken(metaData.whatsapp_access_token || '');
-            setTemplateName(metaData.whatsapp_template || 'salado_lead_welcome');
-            setIsWaActive(Boolean(metaData.whatsapp_auto_welcome));
-          }
-
-          // Sync Lead Routing & Independent Team Rosters
-          const rawNewRules = routingData?.new_lead_rules || routingData?.user_rules || [];
-          const rawUnassignedRules = routingData?.unassigned_rules || routingData?.user_rules || [];
-          const usersList = (usersData && usersData.length > 0)
-            ? usersData
-            : [
-                { id: '1', name: 'Pranav Patil', email: 'pranav.p@capoasis.com', role: 'admin' },
-                { id: '2', name: 'Priya Patel', email: 'priya@capoasis.com', role: 'member' },
-                { id: '3', name: 'Rahul Verma', email: 'rahul@capoasis.com', role: 'member' }
-              ];
-
-          const mapUsers = (rulesList) =>
-            usersList.map((user) => {
-              const existing = (rulesList || []).find(
-                (r) => r.id === user.id || r.email === user.email || r.name === user.name
-              );
-              return {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                role: user.role || 'member',
-                enabled: existing ? existing.enabled !== false : true,
-                weight: existing?.weight !== undefined ? Number(existing.weight) : 50
-              };
-            });
-
-          setNewLeadTeam(mapUsers(rawNewRules));
-          setUnassignedTeam(mapUsers(rawUnassignedRules));
-
-          if (routingData) {
-            setLrConfigId(routingData.id);
-            setNewLeadMode(routingData.new_lead_mode || routingData.mode || 'round_robin');
-            setUnassignedMode(routingData.unassigned_mode || 'round_robin');
-            setNewLeadSingleAssignee(routingData.new_lead_single_assignee || routingData.default_assignee || '');
-            setUnassignedSingleAssignee(routingData.unassigned_single_assignee || routingData.default_assignee || '');
-            if (routingData.new_lead_enabled !== undefined) {
-              setIsNewLeadFlowActive(routingData.new_lead_enabled !== false);
-            }
-            if (routingData.unassigned_enabled !== undefined) {
-              setIsUnassignedFlowActive(routingData.unassigned_enabled !== false);
-            }
-            setNewLeadRoundRobinIndex(routingData.new_lead_round_robin_index || routingData.round_robin_index || 0);
-            setUnassignedRoundRobinIndex(routingData.unassigned_round_robin_index || 0);
-          }
+        if (isMounted && metaData) {
+          setWaConfigId(metaData.id);
+          setPhoneId(metaData.whatsapp_phone_number_id || '');
+          setWabaId(metaData.whatsapp_business_account_id || '');
+          setAccessToken(metaData.whatsapp_access_token || '');
+          setTemplateName(metaData.whatsapp_template || 'salado_lead_welcome');
+          setIsWaActive(Boolean(metaData.whatsapp_auto_welcome));
         }
       } catch (err) {
         console.warn('Error loading automation data:', err);
@@ -189,14 +96,6 @@ export default function AutomationsView({ currentUser }) {
       isMounted = false;
     };
   }, []);
-
-  const newLeadActiveReps = useMemo(() => {
-    return newLeadTeam.filter((m) => m.enabled);
-  }, [newLeadTeam]);
-
-  const unassignedActiveReps = useMemo(() => {
-    return unassignedTeam.filter((m) => m.enabled);
-  }, [unassignedTeam]);
 
   // --------------------------------------------------------------------------
   // WhatsApp Actions
@@ -309,159 +208,46 @@ export default function AutomationsView({ currentUser }) {
     }
   };
 
-  // --------------------------------------------------------------------------
-  // Lead Routing Actions
-  // --------------------------------------------------------------------------
-  const handleToggleNewLeadMember = (memberId) => {
-    setNewLeadTeam((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, enabled: !m.enabled } : m))
-    );
-  };
 
-  const handleToggleUnassignedMember = (memberId) => {
-    setUnassignedTeam((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, enabled: !m.enabled } : m))
-    );
-  };
-
-  const handleNewLeadWeightChange = (memberId, newWeight) => {
-    const val = Math.max(0, Math.min(100, parseInt(newWeight, 10) || 0));
-    setNewLeadTeam((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, weight: val } : m))
-    );
-  };
-
-  const handleUnassignedWeightChange = (memberId, newWeight) => {
-    const val = Math.max(0, Math.min(100, parseInt(newWeight, 10) || 0));
-    setUnassignedTeam((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, weight: val } : m))
-    );
-  };
-
-  const handleSaveRouting = async () => {
-    setIsSavingLr(true);
-    try {
-      const payload = {
-        mode: newLeadMode,
-        new_lead_mode: newLeadMode,
-        unassigned_mode: unassignedMode,
-        new_lead_enabled: isNewLeadFlowActive,
-        unassigned_enabled: isUnassignedFlowActive,
-        new_lead_single_assignee: newLeadSingleAssignee || newLeadActiveReps[0]?.name || '',
-        unassigned_single_assignee: unassignedSingleAssignee || unassignedActiveReps[0]?.name || '',
-        new_lead_rules: newLeadTeam,
-        unassigned_rules: unassignedTeam,
-        user_rules: newLeadTeam,
-        round_robin_index: newLeadRoundRobinIndex,
-        new_lead_round_robin_index: newLeadRoundRobinIndex,
-        unassigned_round_robin_index: unassignedRoundRobinIndex,
-        default_assignee: newLeadSingleAssignee || newLeadActiveReps[0]?.name || 'Unassigned',
-        updated_at: new Date().toISOString()
-      };
-
-      if (lrConfigId) {
-        await supabase.from('lead_routing_config').update(payload).eq('id', lrConfigId);
-      } else {
-        const { data } = await supabase.from('lead_routing_config').insert(payload).select().single();
-        if (data) setLrConfigId(data.id);
-      }
-
-      showToast('Lead distribution settings saved', 'success');
-    } catch (err) {
-      console.error('Error saving routing config:', err);
-      showToast('Could not save routing: ' + err.message, 'error');
-    } finally {
-      setIsSavingLr(false);
-    }
-  };
-
-  const handleToggleMasterLr = async () => {
-    const nextState = !isLrActive;
-    setIsLrActive(nextState);
-    showToast(nextState ? 'Lead distribution activated' : 'Lead distribution paused');
-  };
-
-  // Run Live Simulation
-  const handleSimulateLead = (flowType = 'new_lead') => {
-    const isNew = flowType === 'new_lead';
-    const activeList = isNew ? newLeadActiveReps : unassignedActiveReps;
-    const mode = isNew ? newLeadMode : unassignedMode;
-    const singleAssignee = isNew ? newLeadSingleAssignee : unassignedSingleAssignee;
-
-    if (mode === 'unassigned') {
-      const randomLeadNames = ['Deepak Roy', 'Ananya Gupta', 'Siddharth Sen', 'Tanya Mehra', 'Vikram Seth', 'Aditi Rao', 'Karan Patel'];
-      const randomName = randomLeadNames[Math.floor(Math.random() * randomLeadNames.length)];
-      const sourceLabel = 'Route Unassigned Leads';
-      const newSim = {
-        id: Date.now(),
-        name: randomName,
-        source: sourceLabel,
-        rep: 'Unassigned',
-        time: 'Just now'
-      };
-      setSimulatedLeads((prev) => [newSim, ...prev.slice(0, 4)]);
-      showToast(`${randomName} kept in unassigned pool`, 'info');
-      return;
-    }
-
-    if (mode !== 'single' && activeList.length === 0) {
-      showToast(`Enable at least 1 team member in ${isNew ? 'Route New Leads' : 'Route Unassigned Leads'} rotation`, 'error');
-      return;
-    }
-
-    let assignedRepName = '';
-    if (mode === 'single') {
-      assignedRepName = singleAssignee || activeList[0]?.name || 'Dedicated Rep';
-    } else if (mode === 'weighted') {
-      const totalWeight = activeList.reduce((s, r) => s + (Number(r.weight) || 0), 0);
-      if (totalWeight <= 0) {
-        assignedRepName = activeList[0]?.name || 'Assignee';
-      } else {
-        let rand = Math.random() * totalWeight;
-        for (const rep of activeList) {
-          rand -= (Number(rep.weight) || 0);
-          if (rand <= 0) {
-            assignedRepName = rep.name;
-            break;
-          }
-        }
-        if (!assignedRepName) assignedRepName = activeList[0]?.name;
-      }
-    } else {
-      // Round robin
-      const currIdx = isNew ? newLeadRoundRobinIndex : unassignedRoundRobinIndex;
-      const assignedRep = activeList[currIdx % activeList.length];
-      assignedRepName = assignedRep.name;
-      const nextIdx = (currIdx + 1) % activeList.length;
-      if (isNew) setNewLeadRoundRobinIndex(nextIdx);
-      else setUnassignedRoundRobinIndex(nextIdx);
-    }
-
-    const randomLeadNames = ['Deepak Roy', 'Ananya Gupta', 'Siddharth Sen', 'Tanya Mehra', 'Vikram Seth', 'Aditi Rao', 'Karan Patel'];
-    const randomName = randomLeadNames[Math.floor(Math.random() * randomLeadNames.length)];
-    const sourceLabel = isNew ? 'Route New Leads' : 'Route Unassigned Leads';
-
-    const newSim = {
-      id: Date.now(),
-      name: randomName,
-      source: sourceLabel,
-      rep: assignedRepName,
-      time: 'Just now'
-    };
-
-    setSimulatedLeads((prev) => [newSim, ...prev.slice(0, 4)]);
-    showToast(`Assigned ${randomName} to ${assignedRepName} via ${sourceLabel}`, 'success');
-  };
 
   if (isLoading) {
     return (
       <div className="automations-builder-root">
         <div className="automations-hub-container">
-          <Skeleton width="220px" height="28px" borderRadius="4px" />
-          <Skeleton width="340px" height="16px" borderRadius="4px" />
-          <div className="hub-cards-grid" style={{ marginTop: 24 }}>
-            <Skeleton width="100%" height="240px" borderRadius="8px" />
-            <Skeleton width="100%" height="240px" borderRadius="8px" />
+          <div className="hub-master-header">
+            <h1 className="hub-master-title">Automations</h1>
+          </div>
+
+          <div className="hub-cards-grid">
+            {[1, 2].map((i) => (
+              <div key={i} className="automations-skeleton-card">
+                <div className="automations-skeleton-card-top">
+                  <div className="automations-skeleton-card-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Skeleton width="34px" height="34px" borderRadius="8px" />
+                      <Skeleton width={i === 1 ? '160px' : '140px'} height="17px" borderRadius="4px" />
+                    </div>
+                    <Skeleton width="54px" height="20px" borderRadius="999px" />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                    <Skeleton width="100%" height="13px" borderRadius="3px" />
+                    <Skeleton width="82%" height="13px" borderRadius="3px" />
+                  </div>
+
+                  <div className="automations-skeleton-flow">
+                    <Skeleton width="90px" height="13px" borderRadius="3px" />
+                    <span style={{ color: '#cbd5e1', fontSize: '11px' }}>──▶</span>
+                    <Skeleton width="130px" height="13px" borderRadius="3px" />
+                  </div>
+                </div>
+
+                <div className="automations-skeleton-card-footer">
+                  <Skeleton width="125px" height="14px" borderRadius="3px" />
+                  <Skeleton width="14px" height="14px" borderRadius="3px" />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -498,11 +284,8 @@ export default function AutomationsView({ currentUser }) {
         )}
 
         <div className="automations-hub-container">
-          <div className="hub-header">
-            <h1 className="hub-title">Automations</h1>
-            <p className="hub-subtitle">
-              Choose an automation workflow to configure, monitor, or test.
-            </p>
+          <div className="hub-master-header">
+            <h1 className="hub-master-title">Automations</h1>
           </div>
 
           <div className="hub-cards-grid">
@@ -533,42 +316,6 @@ export default function AutomationsView({ currentUser }) {
                   <span style={{ color: '#9ca3af' }}>──▶</span>
                   <MessageCircle size={13} />
                   <span>Send WhatsApp Welcome</span>
-                </div>
-              </div>
-
-              <div className="hub-btn-configure">
-                <span>Configure Workflow</span>
-                <ArrowRight size={14} />
-              </div>
-            </div>
-
-            {/* WORKFLOW 2: Lead Distribution */}
-            <div className="hub-workflow-card" onClick={() => setCurrentView('lead_routing')}>
-              <div className="hub-card-top">
-                <div className="hub-card-header-row">
-                  <div className="hub-card-title-group">
-                    <div className="hub-card-icon">
-                      <GitBranch size={18} />
-                    </div>
-                    <h3 className="hub-card-title">Lead Distribution</h3>
-                  </div>
-                  <span className={`hub-status-badge ${isLrActive ? 'active' : 'paused'}`}>
-                    <span>{isLrActive ? 'Active' : 'Paused'}</span>
-                  </span>
-                </div>
-
-                <div className="hub-card-info">
-                  <p>
-                    Automatically distribute new incoming leads and unassigned backlog fairly across active sales reps.
-                  </p>
-                </div>
-
-                <div className="hub-flow-snippet">
-                  <Zap size={13} />
-                  <span>New & Unassigned Leads</span>
-                  <span style={{ color: '#9ca3af' }}>──▶</span>
-                  <GitBranch size={13} />
-                  <span>Fair Round-Robin</span>
                 </div>
               </div>
 
@@ -929,331 +676,6 @@ export default function AutomationsView({ currentUser }) {
     );
   }
 
-  // ==========================================================================
-  // VIEW 3: LEAD ROUTING & DISTRIBUTION FLOW BUILDER
-  // ==========================================================================
-  return (
-    <div className="automations-builder-root">
-      {toast && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: 24,
-            right: 28,
-            zIndex: 9999,
-            backgroundColor: '#111827',
-            color: '#ffffff',
-            padding: '8px 16px',
-            borderRadius: '4px',
-            fontSize: '12.5px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8
-          }}
-        >
-          <Check size={14} style={{ color: '#10b981' }} />
-          <span>{toast.message}</span>
-        </div>
-      )}
-
-      {/* Clean Top Bar */}
-      <div className="simple-lr-header">
-        <div className="simple-lr-header-left">
-          <button
-            type="button"
-            className="btn-back-automations"
-            onClick={() => setCurrentView('hub')}
-          >
-            <ArrowLeft size={13} />
-            <span>Automations</span>
-          </button>
-          <div className="simple-lr-title-wrap">
-            <h1 className="simple-lr-title">Lead Distribution</h1>
-          </div>
-        </div>
-
-        <div className="simple-lr-header-actions">
-          <button
-            type="button"
-            className="btn-simple-save"
-            onClick={handleSaveRouting}
-            disabled={isSavingLr}
-          >
-            {isSavingLr ? (
-              <>
-                <RefreshCw size={13} className="spin-icon" />
-                <span>Saving...</span>
-              </>
-            ) : (
-              <span>Save Changes</span>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Clean Settings Container */}
-      <div className="simple-lr-body">
-        <div className="simple-lr-content">
-          {/* Section 1: Two Separate Columns for Flows */}
-          <div className="simple-two-cols-grid">
-            {/* Column 1: Route New Leads */}
-            <div className="simple-flow-col-card">
-              <div className="flow-col-header">
-                <div className="flow-col-title-wrap">
-                  <div className="flow-col-icon">
-                    <UserPlus size={16} />
-                  </div>
-                  <h3 className="flow-col-title">Route New Leads</h3>
-                </div>
-              </div>
-
-              <div className="flow-col-fields">
-                <div className="flow-col-field-group">
-                  <label className="flow-col-label">Distribution Mode</label>
-                  <select
-                    className="simple-select full-width"
-                    value={newLeadMode}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setNewLeadMode(val);
-                      if (val === 'single' && !newLeadSingleAssignee && newLeadActiveReps.length > 0) {
-                        setNewLeadSingleAssignee(newLeadActiveReps[0].name);
-                      }
-                    }}
-                  >
-                    <option value="round_robin">Round-Robin (Equal 1:1)</option>
-                    <option value="weighted">Weighted Ratio</option>
-                    <option value="single">Single Dedicated Rep</option>
-                  </select>
-                </div>
-
-                {newLeadMode === 'single' && (
-                  <div className="flow-col-field-group">
-                    <label className="flow-col-label">Assign To</label>
-                    <select
-                      className="simple-select full-width assignee-select"
-                      value={newLeadSingleAssignee || newLeadActiveReps[0]?.name || ''}
-                      onChange={(e) => setNewLeadSingleAssignee(e.target.value)}
-                    >
-                      {newLeadActiveReps.map((rep) => (
-                        <option key={rep.id} value={rep.name}>
-                          {rep.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Team Members List with Checkboxes */}
-                {newLeadMode !== 'single' && (
-                  <div className="flow-col-team-section">
-                    <div className="flow-col-team-header">
-                      <span className="flow-col-label">Team Members</span>
-                      <span className="flow-col-team-meta">
-                        {newLeadActiveReps.length} of {newLeadTeam.length} in rotation
-                      </span>
-                    </div>
-
-                    <div className="flow-col-members-list">
-                      {newLeadTeam.map((member) => {
-                        const isNextInLine =
-                          newLeadActiveReps[newLeadRoundRobinIndex % Math.max(newLeadActiveReps.length, 1)]?.id === member.id;
-                        const isWeighted = newLeadMode === 'weighted';
-
-                        return (
-                          <div
-                            key={member.id}
-                            className={`flow-member-item ${member.enabled ? 'included' : 'excluded'}`}
-                          >
-                            <label className="flow-member-left">
-                              <input
-                                type="checkbox"
-                                className="member-check-input"
-                                checked={member.enabled}
-                                onChange={() => handleToggleNewLeadMember(member.id)}
-                              />
-                              <div className="flow-member-avatar">
-                                {member.name.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="flow-member-info">
-                                <div className="flow-member-name-row">
-                                  <span className="flow-member-name">{member.name}</span>
-                                  {isNextInLine && member.enabled && !isWeighted && (
-                                    <span className="next-in-line-badge">Next</span>
-                                  )}
-                                </div>
-                                <span className="flow-member-email">{member.email}</span>
-                              </div>
-                            </label>
-
-                            {isWeighted && member.enabled && (
-                              <div className="member-weight-wrap">
-                                <span className="member-weight-label">Weight:</span>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="100"
-                                  className="member-weight-input"
-                                  value={member.weight ?? 50}
-                                  onChange={(e) => handleNewLeadWeightChange(member.id, e.target.value)}
-                                />
-                                <span className="member-weight-unit">%</span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="flow-col-footer">
-                <button
-                  type="button"
-                  className="btn-simple-test full-width"
-                  onClick={() => handleSimulateLead('new_lead')}
-                >
-                  <Play size={11} fill="#111827" />
-                  <span>Test Route New Leads</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Column 2: Route Unassigned Leads */}
-            <div className="simple-flow-col-card">
-              <div className="flow-col-header">
-                <div className="flow-col-title-wrap">
-                  <div className="flow-col-icon">
-                    <RefreshCw size={16} />
-                  </div>
-                  <h3 className="flow-col-title">Route Unassigned Leads</h3>
-                </div>
-              </div>
-
-              <div className="flow-col-fields">
-                <div className="flow-col-field-group">
-                  <label className="flow-col-label">Distribution Mode</label>
-                  <select
-                    className="simple-select full-width"
-                    value={unassignedMode}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setUnassignedMode(val);
-                      if (val === 'single' && !unassignedSingleAssignee && unassignedActiveReps.length > 0) {
-                        setUnassignedSingleAssignee(unassignedActiveReps[0].name);
-                      }
-                    }}
-                  >
-                    <option value="unassigned">Leave Unassigned</option>
-                    <option value="round_robin">Round-Robin (Equal 1:1)</option>
-                    <option value="weighted">Weighted Ratio</option>
-                    <option value="single">Single Dedicated Rep</option>
-                  </select>
-                </div>
-
-                {unassignedMode === 'unassigned' && (
-                  <div className="flow-col-unassigned-notice">
-                    <span>Leads remain in the unassigned pool for manual assignment.</span>
-                  </div>
-                )}
-
-                {unassignedMode === 'single' && (
-                  <div className="flow-col-field-group">
-                    <label className="flow-col-label">Assign To</label>
-                    <select
-                      className="simple-select full-width assignee-select"
-                      value={unassignedSingleAssignee || unassignedActiveReps[0]?.name || ''}
-                      onChange={(e) => setUnassignedSingleAssignee(e.target.value)}
-                    >
-                      {unassignedActiveReps.map((rep) => (
-                        <option key={rep.id} value={rep.name}>
-                          {rep.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Team Members List with Checkboxes */}
-                {unassignedMode !== 'single' && unassignedMode !== 'unassigned' && (
-                  <div className="flow-col-team-section">
-                    <div className="flow-col-team-header">
-                      <span className="flow-col-label">Team Members</span>
-                      <span className="flow-col-team-meta">
-                        {unassignedActiveReps.length} of {unassignedTeam.length} in rotation
-                      </span>
-                    </div>
-
-                    <div className="flow-col-members-list">
-                      {unassignedTeam.map((member) => {
-                        const isNextInLine =
-                          unassignedActiveReps[unassignedRoundRobinIndex % Math.max(unassignedActiveReps.length, 1)]?.id === member.id;
-                        const isWeighted = unassignedMode === 'weighted';
-
-                        return (
-                          <div
-                            key={member.id}
-                            className={`flow-member-item ${member.enabled ? 'included' : 'excluded'}`}
-                          >
-                            <label className="flow-member-left">
-                              <input
-                                type="checkbox"
-                                className="member-check-input"
-                                checked={member.enabled}
-                                onChange={() => handleToggleUnassignedMember(member.id)}
-                              />
-                              <div className="flow-member-avatar">
-                                {member.name.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="flow-member-info">
-                                <div className="flow-member-name-row">
-                                  <span className="flow-member-name">{member.name}</span>
-                                  {isNextInLine && member.enabled && !isWeighted && (
-                                    <span className="next-in-line-badge">Next</span>
-                                  )}
-                                </div>
-                                <span className="flow-member-email">{member.email}</span>
-                              </div>
-                            </label>
-
-                            {isWeighted && member.enabled && (
-                              <div className="member-weight-wrap">
-                                <span className="member-weight-label">Weight:</span>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="100"
-                                  className="member-weight-input"
-                                  value={member.weight ?? 50}
-                                  onChange={(e) => handleUnassignedWeightChange(member.id, e.target.value)}
-                                />
-                                <span className="member-weight-unit">%</span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="flow-col-footer">
-                <button
-                  type="button"
-                  className="btn-simple-test full-width"
-                  onClick={() => handleSimulateLead('unassigned')}
-                >
-                  <Play size={11} fill="#111827" />
-                  <span>Test Route Unassigned Leads</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }
+

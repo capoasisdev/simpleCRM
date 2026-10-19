@@ -27,18 +27,20 @@ import {
   UploadCloud,
   Zap,
   Database,
-  ListTodo
+  StickyNote,
+  ListTodo,
+  MessageSquare
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getDashboardScope } from '../lib/permissions';
 import { getStoredActivities } from '../lib/activities';
 import LeadsView from './LeadsView';
+import MessagesView from './MessagesView';
 import TodosView from './TodosView';
 import AdminUsersView from './AdminUsersView';
 import MetaIntegrationView from './MetaIntegrationView';
 import PipelineSettingsView from './PipelineSettingsView';
 import CsvImportView from './CsvImportView';
-import AutomationsView from './AutomationsView';
 import BackupsView from './BackupsView';
 import NotificationDrawer from './NotificationDrawer';
 import { getStoredNotifications, clearAllNotifications, markAllNotificationsRead } from '../lib/notifications';
@@ -60,6 +62,7 @@ export default function DashboardView({ currentUser, onLogout }) {
   const dashboardScope = getDashboardScope(user);
   const isDashboardGlobal = isAdmin || dashboardScope === 'all';
   const canViewLeads = hasPermission(user, 'leads', 'view');
+  const canViewMessages = hasPermission(user, 'messages', 'view');
   const canViewPipelines = hasPermission(user, 'pipeline', 'view');
   const canManageUsers = hasPermission(user, 'admin', 'manage_users');
   const canManageRouting = hasPermission(user, 'admin', 'manage_routing');
@@ -70,6 +73,7 @@ export default function DashboardView({ currentUser, onLogout }) {
   const TAB_ROUTES = {
     dashboard: 'Dashboard',
     leads: 'Leads',
+    messages: 'Messages',
     todos: 'Todos',
     tasks: 'Todos',
     admin: 'Admin'
@@ -78,6 +82,9 @@ export default function DashboardView({ currentUser, onLogout }) {
   const getRouteForTab = (tab, adminSub = 'users') => {
     if (tab === 'Admin') {
       return adminSub === 'users' ? '/admin' : `/admin/${adminSub}`;
+    }
+    if (tab === 'Messages') {
+      return '/messages';
     }
     if (tab === 'Todos') {
       return '/todos';
@@ -93,15 +100,12 @@ export default function DashboardView({ currentUser, onLogout }) {
     if (path.startsWith('/admin')) {
       const parts = path.split('/').filter(Boolean);
       let sub = parts[1] || 'users';
-      if (sub === 'routing') sub = 'automations';
+      if (sub === 'routing' || sub === 'automations') sub = 'integrations';
       return { tab: 'Admin', adminSub: sub };
     }
     const clean = path.replace(/^\//, '');
     if (clean === 'pipelines') {
       return { tab: 'Admin', adminSub: 'stages' };
-    }
-    if (clean === 'automations') {
-      return { tab: 'Admin', adminSub: 'automations' };
     }
     const matched = TAB_ROUTES[clean];
     if (matched) {
@@ -121,7 +125,9 @@ export default function DashboardView({ currentUser, onLogout }) {
 
   const [activeTab, setActiveTab] = useState(validInitialTab);
   const [adminSubTab, setAdminSubTab] = useState(
-    initialLoc.adminSub === 'routing' ? 'automations' : (initialLoc.adminSub || (canManageUsers ? 'users' : 'automations'))
+    (initialLoc.adminSub === 'routing' || initialLoc.adminSub === 'automations')
+      ? 'users'
+      : (initialLoc.adminSub || (canManageUsers ? 'users' : 'integrations'))
   );
 
   const [isPipelineConfiguring, setIsPipelineConfiguring] = useState(false);
@@ -582,8 +588,6 @@ export default function DashboardView({ currentUser, onLogout }) {
                 <span className="breadcrumb-current">
                   {adminSubTab === 'integrations'
                     ? 'Integrations'
-                    : adminSubTab === 'automations'
-                    ? 'Automations'
                     : adminSubTab === 'users'
                     ? 'Users'
                     : adminSubTab.charAt(0).toUpperCase() + adminSubTab.slice(1)}
@@ -665,7 +669,8 @@ export default function DashboardView({ currentUser, onLogout }) {
                 {[
                   canViewDashboard && { name: 'Dashboard', label: 'Dashboard', icon: LayoutDashboard },
                   canViewLeads && { name: 'Leads', label: 'Leads', icon: UserCheck },
-                  { name: 'Todos', label: "To-Do's", icon: ListTodo }
+                  canViewMessages && { name: 'Messages', label: 'Messages', icon: MessageSquare },
+                  { name: 'Todos', label: "To-Do's", icon: StickyNote }
                 ]
                   .filter(Boolean)
                   .map((item) => {
@@ -973,6 +978,21 @@ export default function DashboardView({ currentUser, onLogout }) {
           )}
 
           {activeTab === 'Leads' && <LeadsView currentUser={user} onNavigate={navigateTo} />}
+          {activeTab === 'Messages' && (
+            <MessagesView
+              currentUser={user}
+              onNavigateToLead={(leadId) => {
+                navigateTo('Leads');
+                setTimeout(() => {
+                  window.dispatchEvent(
+                    new CustomEvent('crm-open-lead-detail', {
+                      detail: { leadId }
+                    })
+                  );
+                }, 80);
+              }}
+            />
+          )}
           {activeTab === 'Todos' && <TodosView currentUser={user} />}
           {activeTab === 'Admin' && (
             <div className="settings-workspace-layout">
@@ -982,7 +1002,6 @@ export default function DashboardView({ currentUser, onLogout }) {
                   {[
                     ...(canManageUsers || user.role === 'admin' ? [{ id: 'users', label: 'Users', icon: Users }] : []),
                     ...(user.role === 'admin' ? [{ id: 'import', label: 'Import Leads', icon: UploadCloud }] : []),
-                    ...(canManageMeta || user.role === 'admin' ? [{ id: 'automations', label: 'Automations', icon: Zap }] : []),
                     ...(canManageMeta || user.role === 'admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
                     ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : []),
                     ...(user.role === 'admin' ? [{ id: 'backups', label: 'Backups', icon: Database }] : [])
@@ -1012,7 +1031,6 @@ export default function DashboardView({ currentUser, onLogout }) {
                 {adminSubTab === 'import' && user.role === 'admin' && (
                   <CsvImportView currentUser={user} onNavigate={navigateTo} />
                 )}
-                {adminSubTab === 'automations' && <AutomationsView currentUser={user} />}
                 {adminSubTab === 'integrations' && (canManageMeta || user.role === 'admin') && (
                   <MetaIntegrationView currentUser={user} />
                 )}
@@ -1027,7 +1045,7 @@ export default function DashboardView({ currentUser, onLogout }) {
             </div>
           )}
 
-          {activeTab !== 'Dashboard' && activeTab !== 'Leads' && activeTab !== 'Todos' && activeTab !== 'Admin' && (
+          {activeTab !== 'Dashboard' && activeTab !== 'Leads' && activeTab !== 'Messages' && activeTab !== 'Todos' && activeTab !== 'Admin' && (
             <div className="tab-placeholder-view">
               <h2 className="placeholder-title">{activeTab}</h2>
               <p className="placeholder-desc">This section is currently under development.</p>
