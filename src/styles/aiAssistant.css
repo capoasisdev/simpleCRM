@@ -1,0 +1,830 @@
+/**
+ * aiAssistant.css - Minimal, Clean Light 3D Mascot CTA & Conversational Assistant
+ */
+
+/* Fixed Floating Widget Container at Bottom Right */
+.crm-ai-floating-widget {
+  position: fixed;
+  bottom: 10px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: auto;
+  font-family: inherit;
+}
+
+/* ========================================================
+   Clean 3D Robot Mascot CTA - Fixed Top-Left Pose
+   ======================================================== */
+.container-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 58px;
+  height: 58px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.container-wrap:hover {
+  transform: translateY(-2px);
+}
+
+.container-wrap:active {
+  transform: translateY(0) scale(0.96);
+}
+
+.container-wrap:after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 52px;
+  height: 52px;
+  background-color: #0f172a;
+  border-radius: 17px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.25);
+  z-index: 1;
+  transition: all 0.2s ease;
+}
+
+.container-wrap:hover:after {
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.35);
+}
+
+.card {
+  width: 52px;
+  height: 52px;
+  border-radius: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 2;
+  transform: translate(-3px, -3px);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.container-wrap:hover .card {
+  transform: translate(-4px, -4px);
+  box-shadow:
+    0 10px 25px rgba(0, 0, 60, 0.12),
+    inset 0 0 10px rgba(255, 255, 255, 0.8);
+}
+
+.background-blur-balls {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translateX(-50%) translateY(-50%);
+  width: 100%;
+  height: 100%;
+  z-index: -10;
+  border-radius: 17px;
+  transition: all 0.3s ease;
+  background-color: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+}
+
+.balls {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translateX(-50%) translateY(-50%);
+  animation: rotate-background-balls 10s linear infinite;
+}
+
+.container-wrap:hover .balls {
+  animation-play-state: paused;
+}
+
+.background-blur-balls .ball {
+  width: 2.6rem;
+  height: 2.6rem;
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(14px);
+}
+
+.background-blur-balls .ball.violet {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #9147ff;
+}
+
+.background-blur-balls .ball.green {
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #34d399;
+}
+
+.background-blur-balls .ball.rosa {
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  background-color: #ec4899;
+}
+
+.background-blur-balls .ball.cyan {
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  background-color: #05e0f5;
+}
+
+.content-card {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  border-radius: 17px;
+  transition: all 0.3s ease;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+}
+
+.background-blur-card {
+  width: 100%;
+  height: 100%;
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.eyes {
+  position: absolute;
+  left: 45%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  gap: 8px;
+  transition: all 0.3s ease;
+}
+
+.eyes .eye {
+  width: 9px;
+  height: 20px;
+  background-color: #ffffff;
+  border-radius: 6px;
+  animation: animate-eyes 10s infinite linear;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}
+
+.eyes.happy {
+  display: none;
+  color: #ffffff;
+  gap: 0;
+}
+
+.eyes.happy svg {
+  width: 26px;
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.9));
+}
+
+.container-wrap:hover .eyes .eye {
+  display: none;
+}
+
+.container-wrap:hover .eyes.happy {
+  display: flex;
+}
+
+
+
+@keyframes rotate-background-balls {
+  from {
+    transform: translateX(-50%) translateY(-50%) rotate(360deg);
+  }
+  to {
+    transform: translateX(-50%) translateY(-50%) rotate(0);
+  }
+}
+
+@keyframes animate-eyes {
+  46% { height: 20px; }
+  48% { height: 6px; }
+  50% { height: 20px; }
+  96% { height: 20px; }
+  98% { height: 6px; }
+  100% { height: 20px; }
+}
+
+/* ========================================================
+   Clean, Minimal White Conversational Assistant Window
+   ======================================================== */
+.crm-ai-chat-window {
+  width: 340px;
+  height: 480px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: crmAiOpen 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: bottom right;
+}
+
+@keyframes crmAiOpen {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Minimal Clean Header matching lead-modal */
+.crm-ai-header {
+  padding: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  border-bottom: 1px solid #e2e8f0;
+  background-color: #ffffff;
+  flex-shrink: 0;
+  min-height: 48px;
+}
+
+.crm-ai-header-left {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  flex: 1;
+  min-width: 0;
+}
+
+.crm-ai-header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.crm-ai-header-close-wrap {
+  display: flex;
+  align-items: stretch;
+  padding: 0;
+  margin: 0;
+  border-left: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+.crm-ai-header-close-btn {
+  width: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: #00000008;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  transition: all 0.15s ease;
+}
+
+.crm-ai-header-close-btn:hover {
+  background-color: #fee2e2;
+  color: #ef4444;
+}
+
+/* Chat Messages */
+.crm-ai-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: #ffffff;
+}
+
+.crm-ai-message-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.crm-ai-message-row.user {
+  align-self: flex-end;
+  align-items: flex-end;
+  max-width: 82%;
+}
+
+.crm-ai-message-row.assistant {
+  align-self: flex-start;
+  align-items: flex-start;
+  max-width: 100%;
+  width: 100%;
+}
+
+.crm-ai-bubble {
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+  color: #0f172a;
+}
+
+/* User Message: clean rounded bubble without harsh borders */
+.crm-ai-message-row.user .crm-ai-bubble {
+  background: #f4f4f5;
+  color: #0f172a;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 18px;
+  border-bottom-right-radius: 4px;
+}
+
+/* Assistant Response: open, document-flow text without background box or border */
+.crm-ai-message-row.assistant .crm-ai-bubble {
+  background: transparent;
+  color: #0f172a;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.crm-ai-bubble strong {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.crm-ai-bubble .crm-ai-p {
+  margin: 3px 0 6px 0;
+  line-height: 1.6;
+  color: #1e293b;
+  font-size: 13px;
+}
+
+.crm-ai-bubble .crm-ai-md-h1 {
+  margin: 12px 0 6px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.crm-ai-bubble .crm-ai-md-h2 {
+  margin: 10px 0 6px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.crm-ai-bubble .crm-ai-md-h3 {
+  margin: 10px 0 4px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.crm-ai-bubble .crm-ai-md-h4 {
+  margin: 8px 0 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.crm-ai-bubble .crm-ai-md-bullet {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 3px 0 3px 2px;
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.crm-ai-bubble .crm-ai-md-numbered {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 3px 0 3px 2px;
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.crm-ai-num-dot {
+  color: #64748b;
+  font-weight: 600;
+  min-width: 16px;
+  user-select: none;
+  font-size: 12px;
+}
+
+.crm-ai-bullet-dot {
+  color: #64748b;
+  font-weight: 700;
+  user-select: none;
+  line-height: 1.55;
+}
+
+.crm-ai-md-spacer {
+  height: 8px;
+}
+
+/* Beautiful Executive Tables */
+.crm-ai-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 10px 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  -webkit-overflow-scrolling: touch;
+}
+
+.crm-ai-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.crm-ai-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.crm-ai-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+.crm-ai-table tr:last-child td {
+  border-bottom: none;
+}
+
+.crm-ai-table tr:hover td {
+  background: #f8fafc;
+}
+
+/* Clickable Table Rows with interactive selection cue */
+.crm-ai-table tr.crm-ai-clickable-row {
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.crm-ai-table tr.crm-ai-clickable-row:hover td {
+  background: #f0f7ff;
+}
+
+.crm-ai-table tr.crm-ai-clickable-row:hover td:first-child {
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.crm-ai-table tr.crm-ai-clickable-row:active td {
+  background: #e0e7ff;
+}
+
+.crm-ai-table-hint {
+  padding: 5px 10px;
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Micro Stage Badges in Tables & Responses */
+.crm-ai-stage-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0.01em;
+}
+
+.crm-ai-stage-badge.new {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.crm-ai-stage-badge.contacted {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.crm-ai-stage-badge.call {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.crm-ai-stage-badge.proposal {
+  background: #f3e8ff;
+  color: #7e22ce;
+}
+
+.crm-ai-stage-badge.qualified {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.crm-ai-stage-badge.won {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.crm-ai-stage-badge.lost {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+/* Callout and Alert lines (e.g. ⚠️, 📧, 💡) */
+.crm-ai-callout-line {
+  margin: 6px 0;
+  padding: 7px 10px;
+  background: #f8fafc;
+  border-left: 3px solid #94a3b8;
+  border-radius: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #1e293b;
+}
+
+.crm-ai-bubble code,
+.crm-ai-inline-code {
+  background: #f1f5f9;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-family: monospace;
+  color: #0f172a;
+}
+
+.crm-ai-bubble pre,
+.crm-ai-code-block {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  overflow-x: auto;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  color: #0f172a;
+}
+
+/* ChatGPT-style discreet action footer below assistant response */
+.crm-ai-msg-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.crm-ai-msg-action-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  transition: all 0.15s ease;
+}
+
+.crm-ai-msg-action-btn:hover {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.crm-ai-msg-time {
+  font-size: 10.5px;
+  color: #94a3b8;
+  padding: 0 2px;
+}
+
+
+/* Minimal Action Preview Card */
+.crm-ai-action-card {
+  margin-top: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.crm-ai-action-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.crm-ai-action-card-body {
+  font-size: 11.5px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.crm-ai-action-btn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.crm-ai-confirm-btn {
+  background: #0f172a;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.crm-ai-confirm-btn:hover {
+  background: #334155;
+}
+
+.crm-ai-confirm-btn.executed {
+  background: #e2e8f0;
+  color: #64748b;
+  cursor: default;
+}
+
+.crm-ai-copy-btn {
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.crm-ai-copy-btn:hover {
+  background: #f1f5f9;
+}
+
+/* Minimal Typing Indicator */
+.crm-ai-typing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  background: transparent;
+  width: fit-content;
+}
+
+.crm-ai-typing-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #94a3b8;
+  animation: crmAiTyping 1.4s infinite ease-in-out both;
+}
+
+.crm-ai-typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.crm-ai-typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes crmAiTyping {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+/* Minimal Bottom Input Area */
+.crm-ai-input-area {
+  padding: 10px 14px 14px 14px;
+  background: #ffffff;
+  border-top: 1px solid #f1f5f9;
+}
+
+.crm-ai-chat-box {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: all 0.15s ease;
+}
+
+.crm-ai-chat-box:focus-within {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.crm-ai-chat-box textarea {
+  flex: 1;
+  min-height: 22px;
+  max-height: 110px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 2px 0 3px 0;
+  margin: 0;
+  font-size: 13px;
+  color: #0f172a;
+  resize: none;
+  font-family: inherit;
+  line-height: 20px;
+  overflow-y: auto;
+}
+
+.crm-ai-chat-box textarea::placeholder {
+  color: #94a3b8;
+}
+
+/* User's Gradient Submit Button */
+.crm-ai-btn-submit {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background-image: linear-gradient(to top, #ff4141, #9147ff, #3b82f6);
+  border-radius: 8px;
+  box-shadow: inset 0 4px 2px -2px rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  border: none;
+  outline: none;
+  opacity: 0.85;
+  transition: all 0.15s ease;
+}
+
+.crm-ai-btn-submit i {
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.crm-ai-btn-submit svg {
+  width: 14px;
+  height: 14px;
+}
+
+.crm-ai-btn-submit:hover {
+  opacity: 1;
+}
+
+.crm-ai-btn-submit:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+

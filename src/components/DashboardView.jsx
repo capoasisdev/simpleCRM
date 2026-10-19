@@ -45,6 +45,7 @@ import CsvImportView from './CsvImportView';
 import BackupsView from './BackupsView';
 import AnalyticsView from './AnalyticsView';
 import NotificationDrawer from './NotificationDrawer';
+import AiAssistantWidget from './AiAssistantWidget';
 import { getStoredNotifications, clearAllNotifications, markAllNotificationsRead } from '../lib/notifications';
 import { checkAndRunDailyAutoBackup } from '../lib/backups';
 import Skeleton from './common/Skeleton';
@@ -1310,6 +1311,17 @@ export default function DashboardView({ currentUser, onLogout }) {
             );
           }, 80);
         }}
+      />
+
+      {/* 3D Floating AI Assistant Widget */}
+      <AiAssistantWidget
+        leads={leads}
+        deals={deals}
+        pipelinesList={pipelinesList}
+        usersList={usersList}
+        currentUser={user}
+        activities={activities}
+        onNavigate={navigateTo}
       />
     </div>
   );

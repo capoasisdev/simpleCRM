@@ -213,36 +213,14 @@ Deno.serve(async (req) => {
                 }
               }
 
-              // 1. Resolve Target Pipeline & Initial Stage
-              let targetPipelineId: string | null = null;
-              let entryStage = "new";
-
-              if (connectedForm?.pipeline_id) {
-                targetPipelineId = connectedForm.pipeline_id;
-                entryStage = connectedForm.entry_stage_id || "new";
-              } else {
-                // Fallback to default pipeline from pipelines table
-                try {
-                  const { data: defaultPipe } = await supabase
-                    .from("pipelines")
-                    .select("id, stages")
-                    .order("is_default", { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-
-                  if (defaultPipe) {
-                    targetPipelineId = defaultPipe.id;
-                    if (Array.isArray(defaultPipe.stages) && defaultPipe.stages.length > 0) {
-                      const explicitEntry = defaultPipe.stages.find((s: any) => s.is_entry === true);
-                      const fallbackNew = defaultPipe.stages.find((s: any) => s.id === "new");
-                      const resolved = explicitEntry || fallbackNew || defaultPipe.stages[0];
-                      if (resolved?.id) entryStage = resolved.id;
-                    }
-                  }
-                } catch (pipeErr) {
-                  console.warn("[Meta Webhook] Could not fetch default pipeline stages:", pipeErr);
-                }
+              // 1. Check if Form is linked to a Pipeline
+              if (!connectedForm?.pipeline_id) {
+                console.warn(`[Meta Webhook] Form "${formName}" (ID: ${formId}) is not linked to any pipeline. Skipping lead insertion.`);
+                continue;
               }
+
+              const targetPipelineId = connectedForm.pipeline_id;
+              let entryStage = connectedForm.entry_stage_id || "new";
 
               // 2. Resolve Assignee
               let assignedTo = "pranav";
