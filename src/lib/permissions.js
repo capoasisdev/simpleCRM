@@ -329,4 +329,83 @@ export function canDeleteFollowUp(user, followUp, lead) {
   return isCreatedBySelf || isAssigned;
 }
 
+/**
+ * Checks whether a user has access/assignment to a pipeline.
+ * Admins and users with lead scope 'all' have access to all pipelines.
+ * Members with lead scope 'assigned' only have access if:
+ * 1. The pipeline's lead_distribution assigns leads to them (in user_rules with enabled !== false, or mode === 'single' and default_assignee matches user).
+ * 2. OR the user currently has at least one lead assigned to them in that pipeline.
+ */
+export function isUserAssignedToPipeline(pipe, user, leads = [], pipelineForms = []) {
+  if (!pipe || !user) return false;
+  if (user.role === 'admin') return true;
+
+  // Check if user has permission to view all leads
+  const perms = normalizePermissions(user);
+  if (perms.leads?.scope === 'all') return true;
+
+  const userName = (user.name || '').toLowerCase().trim();
+  const userFirst = userName.split(' ')[0] || '';
+  const userEmail = (user.email || '').toLowerCase().trim();
+  const userId = (user.id || '').toLowerCase().trim();
+
+  const isUserMatch = (identifier) => {
+    if (!identifier) return false;
+    const str = String(identifier).toLowerCase().trim();
+    return (
+      str === userName ||
+      str === userFirst ||
+      (userEmail && str === userEmail) ||
+      (userId && str === userId) ||
+      (userName.includes('pranav') && str === 'pranav') ||
+      (userName.includes('dipak') && (str.includes('dipak') || str === 'bd01@salado.in'))
+    );
+  };
+
+  // 1. Check pipeline lead distribution
+  const pipeDist = pipe.lead_distribution;
+  if (pipeDist && typeof pipeDist === 'object') {
+    const mode = pipeDist.mode || 'round_robin';
+    if (mode === 'single') {
+      if (isUserMatch(pipeDist.default_assignee)) return true;
+    } else {
+      // round_robin or weighted
+      if (Array.isArray(pipeDist.user_rules)) {
+        const rule = pipeDist.user_rules.find((r) =>
+          (r.id && isUserMatch(r.id)) ||
+          (r.email && isUserMatch(r.email)) ||
+          (r.name && isUserMatch(r.name))
+        );
+        if (rule && rule.enabled !== false && rule.active !== false) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // 2. Check if user has any assigned leads in this pipeline
+  if (Array.isArray(leads) && leads.length > 0) {
+    const hasAssignedLead = leads.some((lead) => {
+      if (!isLeadAssignedToUser(lead, user)) return false;
+
+      let leadPipeId = lead.pipeline_id;
+      if (!leadPipeId && lead.form_id && Array.isArray(pipelineForms) && pipelineForms.length > 0) {
+        const matchedForm = pipelineForms.find((f) => String(f.form_id) === String(lead.form_id));
+        if (matchedForm?.pipeline_id) {
+          leadPipeId = matchedForm.pipeline_id;
+        }
+      }
+
+      if (leadPipeId) {
+        return leadPipeId === pipe.id;
+      }
+      return pipe.is_default;
+    });
+
+    if (hasAssignedLead) return true;
+  }
+
+  return false;
+}
+
 

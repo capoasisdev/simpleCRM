@@ -34,7 +34,7 @@
   max-width: 860px;
   width: 100%;
   margin: 0 auto;
-  padding: 36px 32px 64px 32px;
+  padding: 20px 32px 64px 32px;
   display: flex;
   flex-direction: column;
   gap: 22px;
@@ -168,33 +168,27 @@
   z-index: 2;
 }
 
-.meta-card-attached-pill {
+.meta-id-pill {
   position: absolute;
-  bottom: 100%;
-  right: 1px;
-  z-index: 1;
-  margin-bottom: -1px;
-}
-
-.meta-card-attached-pill .meta-id-pill {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-bottom: 1px solid #ffffff;
-  border-top-left-radius: 8px;
-  border-top-right-radius: 8px;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  padding: 4px 12px;
-  font-size: 12px;
-  color: #64748b;
+  top: 8px;
+  right: 18px;
+  font-size: 11px;
+  color: #94a3b8;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  line-height: 1;
+  z-index: 5;
+  pointer-events: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  box-shadow: 0 -2px 6px rgba(15, 23, 42, 0.02);
+  gap: 4px;
 }
 
-.meta-card-attached-pill .meta-id-pill strong {
+.meta-id-pill strong {
   font-weight: 500;
+  color: #64748b;
 }
 
 /* Dynamic Hero Card Health Tints */
@@ -204,23 +198,12 @@
   box-shadow: 0 2px 8px -1px rgba(22, 163, 74, 0.12), 0 8px 24px -4px rgba(22, 163, 74, 0.06);
 }
 
-.meta-hero-card-container.is-healthy .meta-card-attached-pill .meta-id-pill {
-  background: #f0fdf4;
-  border-color: #bbf7d0;
-  border-bottom-color: #f0fdf4;
-}
-
 .meta-hero-card-container.is-broken .meta-panel-card {
   background: #fef2f2;
   border: 1px solid #fecaca;
   box-shadow: 0 2px 8px -1px rgba(220, 38, 38, 0.12), 0 8px 24px -4px rgba(220, 38, 38, 0.06);
 }
 
-.meta-hero-card-container.is-broken .meta-card-attached-pill .meta-id-pill {
-  background: #fef2f2;
-  border-color: #fecaca;
-  border-bottom-color: #fef2f2;
-}
 
 .meta-account-actions {
   display: flex;
@@ -2067,14 +2050,18 @@
 .meta-subnav-bar {
   display: flex;
   align-items: center;
-  background-color: #f1f5f9;
-  padding: 7px;
-  border-radius: 14px;
+  background-color: #f8fafc;
+  padding: 8px 32px;
+  border-radius: 0;
   gap: 10px;
   width: 100%;
   box-sizing: border-box;
-  margin-bottom: 24px;
-  border: 1px solid #e2e8f0;
+  margin-bottom: 0;
+  border: none;
+  border-bottom: 1px solid #e2e8f0;
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
 
 .meta-subnav-btn {
@@ -2082,14 +2069,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  height: 56px;
-  padding: 0 24px;
-  border-radius: 10px;
-  border: none;
+  gap: 10px;
+  height: 46px;
+  padding: 0 18px;
+  border-radius: 9px;
+  border: 1px solid transparent;
   background: transparent;
-  color: #475569;
-  font-size: 16.5px;
+  color: #64748b;
+  font-size: 14.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.18s ease;
@@ -2099,14 +2086,15 @@
 
 .meta-subnav-btn:hover:not(.active) {
   color: #0f172a;
-  background-color: rgba(255, 255, 255, 0.7);
+  background-color: #f1f5f9;
 }
 
 .meta-subnav-btn.active {
   background-color: #ffffff;
   color: #0f172a;
   font-weight: 600;
-  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-color: #e2e8f0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
 /* ==========================================================================
@@ -2417,5 +2405,156 @@
   background-color: #fee2e2;
   color: #b91c1c;
 }
+
+/* ----------------- Minimal Procedure Steps & Script Modal ----------------- */
+.meta-steps-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 24px 20px 24px;
+  gap: 16px;
+}
+
+.meta-step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.meta-step-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.meta-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.meta-step-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.meta-step-desc {
+  font-size: 12.5px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.meta-step-desc strong {
+  color: #334155;
+}
+
+.meta-code-inline {
+  background: #f1f5f9;
+  color: #0f172a;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.meta-script-preview-box {
+  background: #090d16;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.meta-script-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #0d131f;
+  border-bottom: 1px solid #1e293b;
+}
+
+.meta-script-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.meta-script-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.meta-script-dot.red { background: #ef4444; }
+.meta-script-dot.yellow { background: #f59e0b; }
+.meta-script-dot.green { background: #10b981; }
+
+.meta-script-filename {
+  font-size: 11px;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  margin-left: 4px;
+}
+
+.meta-script-copy-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #f1f5f9;
+  border-radius: 5px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.meta-script-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.meta-script-code-wrap {
+  padding: 14px 16px;
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+.meta-script-code {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: hidden;
+}
+
+/* Syntax highlight token colors */
+.syn-tag { color: #f43f5e; font-weight: 600; }
+.syn-kw { color: #c084fc; font-weight: 600; }
+.syn-obj { color: #38bdf8; }
+.syn-fn { color: #60a5fa; }
+.syn-str { color: #34d399; }
+.syn-prop { color: #cbd5e1; }
+.syn-punct { color: #64748b; }
+.syn-var { color: #f1f5f9; }
+
+
 
 

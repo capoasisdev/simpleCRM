@@ -764,12 +764,24 @@
   box-shadow: none;
   transition: background-color 0.15s ease;
   position: relative;
-  will-change: transform;
+}
+
+/* Ensure any row with an active/open dropdown elevates above all sibling rows */
+.pipeline-numbered-item:has(.pipeline-custom-select-wrap.is-open),
+.pipeline-numbered-item:has(.pipeline-custom-select-menu),
+.pipeline-numbered-item:has(.pipeline-custom-select-trigger.active),
+.pipeline-numbered-item.has-open-dropdown {
+  z-index: 250 !important;
 }
 
 .pipeline-numbered-item:hover {
   background: #f8fafc;
   border: none;
+  z-index: 180 !important;
+}
+
+.pipeline-numbered-item:has([data-tooltip]:hover) {
+  z-index: 190 !important;
 }
 
 .pipeline-numbered-actions > *:last-child,
@@ -781,6 +793,10 @@
 /* Instant Custom Tooltips */
 [data-tooltip] {
   position: relative;
+}
+
+[data-tooltip]:hover {
+  z-index: 50;
 }
 
 [data-tooltip]::before {
@@ -796,7 +812,7 @@
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.12s ease, transform 0.12s ease;
-  z-index: 101;
+  z-index: 1001;
 }
 
 [data-tooltip]::after {
@@ -818,7 +834,7 @@
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.12s ease, transform 0.12s ease;
-  z-index: 100;
+  z-index: 1000;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 
@@ -968,8 +984,21 @@
 }
 
 .btn-number-trash:disabled {
-  opacity: 0.2;
   cursor: not-allowed;
+}
+
+.btn-number-trash:disabled svg {
+  opacity: 0.22;
+}
+
+.btn-field-info-icon {
+  cursor: help;
+  color: #94a3b8;
+}
+
+.btn-field-info-icon:hover {
+  color: #0f172a;
+  background: #f1f5f9;
 }
 
 /* Minimal Add Item Next Row */
@@ -1805,4 +1834,144 @@
   background: #bae6fd;
 }
 
+/* Fields Configuration Tab */
+.pipeline-field-key-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-left: 8px;
+}
 
+.pipeline-card-toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #64748b;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.pipeline-card-toggle-pill:hover {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+.pipeline-card-toggle-pill.active {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #15803d;
+  font-weight: 600;
+}
+
+.pipeline-field-map-slot {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  flex: 0 0 280px;
+  width: 280px;
+  min-width: 280px;
+  max-width: 280px;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.pipeline-field-map-slot:has(.pipeline-custom-select-wrap.is-open),
+.pipeline-field-map-slot:has(.pipeline-custom-select-menu) {
+  z-index: 150;
+}
+
+.pipeline-field-custom-select {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.pipeline-field-custom-select .pipeline-custom-select-trigger {
+  width: 100%;
+  min-height: 34px;
+  height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-sizing: border-box;
+}
+
+.pipeline-field-custom-select .pipeline-custom-select-trigger:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.pipeline-field-custom-select .pipeline-custom-select-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 225px;
+}
+
+.pipeline-field-custom-select .pipeline-custom-select-placeholder {
+  font-size: 13px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 225px;
+}
+
+.pipeline-field-custom-select .pipeline-custom-select-menu {
+  max-height: 280px;
+  min-width: 100%;
+  width: 100%;
+  max-width: 360px;
+  z-index: 999;
+}
+
+/* Specific styling for the inline Add Field row */
+.pipeline-field-add-row {
+  margin-top: 4px;
+}
+
+.pipeline-field-add-row .btn-add-field-action {
+  color: #94a3b8;
+  background: transparent;
+  cursor: not-allowed;
+  transition: all 0.15s ease;
+}
+
+.pipeline-field-add-row .btn-add-field-action.active {
+  color: #15803d;
+  background: #dcfce7;
+  cursor: pointer;
+}
+
+.pipeline-field-add-row .btn-add-field-action.active:hover {
+  background: #bbf7d0;
+  color: #166534;
+}
+
+.btn-field-placeholder {
+  aspect-ratio: 1 / 1;
+  height: 100%;
+  width: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  visibility: hidden;
+  pointer-events: none;
+}

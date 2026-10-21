@@ -30,7 +30,8 @@ import {
   Database,
   StickyNote,
   ListTodo,
-  MessageSquare
+  MessageSquare,
+  Layers
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getDashboardScope, getAnalyticsScope } from '../lib/permissions';

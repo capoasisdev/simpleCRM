@@ -57,7 +57,7 @@
 .email-hero-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 20px 24px;
   display: flex;
   align-items: center;
@@ -65,11 +65,56 @@
   gap: 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   transition: all 0.2s ease;
+  position: relative;
 }
 
+.email-card-top-id {
+  position: absolute;
+  top: 8px;
+  right: 18px;
+  font-size: 11px;
+  color: #94a3b8;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  line-height: 1;
+  z-index: 5;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.email-card-top-id strong {
+  font-weight: 500;
+  color: #64748b;
+}
+
+/* Green / Healthy Tint when Connected (Preserving Email Blue accents) */
 .email-hero-card.is-connected {
-  border-color: #bae6fd;
-  background: linear-gradient(to right, #ffffff, #f0f9ff 90%);
+  background: #f0fdf4;
+  border: 1px solid #bae6fd;
+  box-shadow: 0 2px 8px -1px rgba(2, 132, 199, 0.08), 0 8px 24px -4px rgba(22, 163, 74, 0.06);
+}
+
+.email-hero-card.is-connected .email-brand-tile {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  color: #0284c7;
+}
+
+/* Red / Broken Tint when Disconnected */
+.email-hero-card.is-disconnected {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  box-shadow: 0 2px 8px -1px rgba(220, 38, 38, 0.12), 0 8px 24px -4px rgba(220, 38, 38, 0.06);
+}
+
+.email-hero-card.is-disconnected .email-brand-tile {
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+  color: #dc2626;
 }
 
 .email-hero-left {
@@ -91,6 +136,7 @@
   justify-content: center;
   color: #0284c7;
   flex-shrink: 0;
+  transition: all 0.2s ease;
 }
 
 .email-hero-info {
@@ -129,8 +175,8 @@
 }
 
 .email-status-chip.disconnected {
-  background: #f1f5f9;
-  color: #64748b;
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .email-status-dot {
@@ -144,15 +190,6 @@
   box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
 }
 
-.email-sender-pill {
-  font-size: 12px;
-  font-weight: 500;
-  color: #0369a1;
-  background: #e0f2fe;
-  padding: 2px 8px;
-  border-radius: 6px;
-  border: 1px solid #bae6fd;
-}
 
 
 .email-hero-actions {

@@ -6,12 +6,15 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   X,
   Check,
-  Copy
+  Copy,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react';
 import {
   askAiAssistant,
   executeCrmAction
 } from '../lib/aiAssistant';
+import { logAiInteraction, updateAiFeedback } from '../lib/aiLogger';
 import { formatAssistantMarkdown } from '../lib/markdownFormatter';
 import '../styles/aiAssistant.css';
 
@@ -39,15 +42,19 @@ export default function AiAssistantWidget({
   const [isTyping, setIsTyping] = useState(false);
   const [actionStatuses, setActionStatuses] = useState({}); // { [actionId]: 'executed' | 'error' }
   const [copyFeedback, setCopyFeedback] = useState(null);
+  const [feedbackMap, setFeedbackMap] = useState({});
+  const [streamingMsgId, setStreamingMsgId] = useState(null);
+  const sessionIdRef = useRef('sess_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now());
 
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
+  // Initial scroll to bottom when opening the chat widget
   useEffect(() => {
     if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
     }
-  }, [messages, isOpen]);
+  }, [isOpen]);
 
   // Auto-grow textarea with content up to max-height
   useEffect(() => {
@@ -63,6 +70,7 @@ export default function AiAssistantWidget({
     if (!textToSend || isTyping) return;
 
     const userMsgId = `user-${Date.now()}`;
+    const assistantMsgId = `ai-${Date.now()}`;
     const newMsg = {
       id: userMsgId,
       sender: 'user',
@@ -73,6 +81,14 @@ export default function AiAssistantWidget({
     setMessages((prev) => [...prev, newMsg]);
     setInputQuery('');
     setIsTyping(true);
+    setStreamingMsgId(assistantMsgId);
+
+    // Scroll down to show user question and typing indicator
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 30);
+
+    let hasScrolledToResponseTop = false;
 
     try {
       const response = await askAiAssistant(textToSend, {
@@ -82,23 +98,88 @@ export default function AiAssistantWidget({
         usersList,
         currentUser,
         chatHistory: messages,
-        activities
+        activities,
+        onChunk: (partialText) => {
+          setIsTyping(false); // Hide dots once stream begins
+          setMessages((prev) => {
+            const exists = prev.some((m) => m.id === assistantMsgId);
+            if (exists) {
+              return prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, text: partialText } : m
+              );
+            } else {
+              return [
+                ...prev,
+                {
+                  id: assistantMsgId,
+                  sender: 'assistant',
+                  text: partialText,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                }
+              ];
+            }
+          });
+
+          // Anchor response top at top of viewport so user can read naturally from beginning
+          if (!hasScrolledToResponseTop) {
+            hasScrolledToResponseTop = true;
+            requestAnimationFrame(() => {
+              const rowEl = document.getElementById(`msg-${assistantMsgId}`);
+              if (rowEl) {
+                rowEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            });
+          }
+        }
       });
 
+      setStreamingMsgId(null);
+
       const assistantMsg = {
-        id: `ai-${Date.now()}`,
+        id: assistantMsgId,
         sender: 'assistant',
         text: response.text,
         action: response.action,
         draftContent: response.draftContent,
+        model: response.model,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => {
+        const exists = prev.some((m) => m.id === assistantMsgId);
+        if (exists) {
+          return prev.map((m) => (m.id === assistantMsgId ? assistantMsg : m));
+        } else {
+          return [...prev, assistantMsg];
+        }
+      });
+
+      // Keep response anchored at top upon completion
+      requestAnimationFrame(() => {
+        const rowEl = document.getElementById(`msg-${assistantMsgId}`);
+        if (rowEl) {
+          rowEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+
+      // Silently log conversation in background to Supabase for model training
+      logAiInteraction({
+        sessionId: sessionIdRef.current,
+        userQuery: textToSend,
+        assistantResponse: response.text,
+        modelUsed: response.model || 'openrouter',
+        currentUser
+      }).then((logId) => {
+        if (logId) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMsgId ? { ...m, logId } : m))
+          );
+        }
+      });
     } catch (err) {
       console.error('Error generating AI response:', err);
       setMessages((prev) => [
-        ...prev,
+        ...prev.filter((m) => m.id !== assistantMsgId),
         {
           id: `ai-err-${Date.now()}`,
           sender: 'assistant',
@@ -108,6 +189,7 @@ export default function AiAssistantWidget({
       ]);
     } finally {
       setIsTyping(false);
+      setStreamingMsgId(null);
     }
   };
 
@@ -146,6 +228,16 @@ export default function AiAssistantWidget({
     navigator.clipboard.writeText(text);
     setCopyFeedback(id);
     setTimeout(() => setCopyFeedback(null), 2000);
+  };
+
+  // Submit Feedback (thumbs up / thumbs down) for Training Data
+  const handleFeedback = (msgId, logId, type) => {
+    const current = feedbackMap[msgId];
+    const newFeedback = current === type ? null : type;
+    setFeedbackMap((prev) => ({ ...prev, [msgId]: newFeedback }));
+    if (logId) {
+      updateAiFeedback(logId, newFeedback);
+    }
   };
 
   return (
@@ -221,7 +313,7 @@ export default function AiAssistantWidget({
               const isExecuted = actionStatuses[m.id] === 'executed';
 
               return (
-                <div key={m.id} className={`crm-ai-message-row ${m.sender}`}>
+                <div key={m.id} id={`msg-${m.id}`} className={`crm-ai-message-row ${m.sender}`}>
                   <div className="crm-ai-bubble">
                     <div
                       className="crm-ai-bubble-content"
@@ -231,10 +323,16 @@ export default function AiAssistantWidget({
                           handleSendMessage(`give details of ${row.dataset.leadName}`);
                         }
                       }}
-                      dangerouslySetInnerHTML={{
-                        __html: formatAssistantMarkdown(m.text)
-                      }}
-                    />
+                    >
+                      <span
+                        dangerouslySetInnerHTML={{
+                          __html: formatAssistantMarkdown(m.text)
+                        }}
+                      />
+                      {streamingMsgId === m.id && (
+                        <span className="crm-ai-streaming-cursor" title="Generating response..." />
+                      )}
+                    </div>
 
                     {/* Interactive Action Card if AI generated a task or action */}
                     {isAssistant && m.action && (
@@ -286,22 +384,41 @@ export default function AiAssistantWidget({
                   </div>
 
                   {/* ChatGPT-style subtle action footer for assistant response */}
-                  {isAssistant ? (
+                  {isAssistant && m.id !== 'welcome' ? (
                     <div className="crm-ai-msg-footer">
-                      <button
-                        className="crm-ai-msg-action-btn"
-                        title="Copy response"
-                        onClick={() => handleCopyDraft(m.text, m.id)}
-                      >
-                        {copyFeedback === m.id ? (
-                          <>
-                            <Check size={12} color="#10b981" />
-                            <span style={{ color: '#10b981' }}>Copied</span>
-                          </>
-                        ) : (
-                          <Copy size={12} />
-                        )}
-                      </button>
+                      <div className="crm-ai-msg-actions-left">
+                        <button
+                          className="crm-ai-msg-action-btn"
+                          title="Copy response"
+                          onClick={() => handleCopyDraft(m.text, m.id)}
+                        >
+                          {copyFeedback === m.id ? (
+                            <>
+                              <Check size={12} color="#10b981" />
+                              <span style={{ color: '#10b981' }}>Copied</span>
+                            </>
+                          ) : (
+                            <Copy size={12} />
+                          )}
+                        </button>
+
+                        <button
+                          className={`crm-ai-msg-action-btn ${feedbackMap[m.id] === 'thumbs_up' ? 'active-up' : ''}`}
+                          title="Helpful & accurate"
+                          onClick={() => handleFeedback(m.id, m.logId, 'thumbs_up')}
+                        >
+                          <ThumbsUp size={12} />
+                        </button>
+
+                        <button
+                          className={`crm-ai-msg-action-btn ${feedbackMap[m.id] === 'thumbs_down' ? 'active-down' : ''}`}
+                          title="Needs improvement"
+                          onClick={() => handleFeedback(m.id, m.logId, 'thumbs_down')}
+                        >
+                          <ThumbsDown size={12} />
+                        </button>
+                      </div>
+
                       <span className="crm-ai-msg-time">{m.timestamp}</span>
                     </div>
                   ) : (

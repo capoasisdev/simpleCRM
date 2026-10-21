@@ -25,8 +25,10 @@ const OPENROUTER_STORAGE_KEY = 'crm_openrouter_api_key';
 const GEMINI_STORAGE_KEY = 'crm_gemini_api_key';
 
 export const OPENROUTER_MODELS = [
-  'nvidia/nemotron-3.5-super-vl:free',
   'minimax/minimax-m3.1-flash:free',
+  'google/gemini-2.0-flash-exp:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'nvidia/nemotron-3.5-super-vl:free',
   'nvidia/nemotron-3.5-lightning:free'
 ];
 
@@ -759,41 +761,103 @@ export async function executeCrmAction(action, { currentUser = {} }) {
 }
 
 /**
- * Call OpenRouter Chat Completions API with Model Fallbacks
+ * Call OpenRouter Chat Completions API with Model Fallbacks, Timeouts, and Streaming
  */
-async function callOpenRouter(messages, apiKey) {
+async function callOpenRouter(messages, apiKey, onChunk = null) {
   let lastError = null;
 
   for (const model of OPENROUTER_MODELS) {
+    const controller = new AbortController();
+    let receivedAnyData = false;
+
+    // 7.5s connection / queue timeout: if model is backlogged, fail over to next model immediately
+    const timeoutId = setTimeout(() => {
+      if (!receivedAnyData) {
+        controller.abort();
+      }
+    }, 7500);
+
     try {
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Authorization': `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
+          'X-Title': 'SimpleCRM'
         },
         body: JSON.stringify({
           model,
           messages,
-          temperature: 0.4,
-          max_tokens: 1000
+          temperature: 0.3,
+          max_tokens: 1000,
+          stream: Boolean(onChunk)
         })
       });
 
       if (!response.ok) {
+        clearTimeout(timeoutId);
         const errText = await response.text();
         console.warn(`OpenRouter model ${model} returned ${response.status}: ${errText}`);
         lastError = new Error(`OpenRouter ${model} error: ${response.status}`);
         continue; // Try next model in fallback list
       }
 
-      const data = await response.json();
-      const text = data.choices?.[0]?.message?.content || '';
-      if (text) {
-        return text;
+      // Handle streaming SSE
+      if (onChunk && response.body && typeof response.body.getReader === 'function') {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let fullText = '';
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          receivedAnyData = true;
+          clearTimeout(timeoutId);
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith(':')) continue;
+            if (trimmed === 'data: [DONE]') continue;
+            if (trimmed.startsWith('data: ')) {
+              try {
+                const parsed = JSON.parse(trimmed.slice(6));
+                const content = parsed.choices?.[0]?.delta?.content || '';
+                if (content) {
+                  fullText += content;
+                  onChunk(fullText);
+                }
+              } catch {}
+            }
+          }
+        }
+
+        clearTimeout(timeoutId);
+        if (fullText.trim()) {
+          return { text: fullText, model };
+        }
+      } else {
+        // Non-streaming fallback
+        receivedAnyData = true;
+        clearTimeout(timeoutId);
+        const data = await response.json();
+        const text = data.choices?.[0]?.message?.content || '';
+        if (text) {
+          if (onChunk) onChunk(text);
+          return { text, model };
+        }
       }
     } catch (err) {
-      console.warn(`Network/fetch failed for OpenRouter model ${model}:`, err);
+      clearTimeout(timeoutId);
+      const isAbort = err.name === 'AbortError' || controller.signal.aborted;
+      console.warn(`Model ${model} ${isAbort ? 'timed out after 7.5s queue wait' : 'failed'}:`, err);
       lastError = err;
     }
   }
@@ -808,7 +872,7 @@ async function callOpenRouter(messages, apiKey) {
  * 3. Prompts OpenRouter models (primary & fallback) with rich rep breakdown and past-48h activity timeline
  * 4. Gracefully falls back to local engine with conversational memory
  */
-export async function askAiAssistant(userMessage, { leads = [], deals = [], pipelinesList = [], usersList = [], currentUser = {}, chatHistory = [], activities = [] }) {
+export async function askAiAssistant(userMessage, { leads = [], deals = [], pipelinesList = [], usersList = [], currentUser = {}, chatHistory = [], activities = [], onChunk = null }) {
   const apiKey = getOpenRouterApiKey();
   const scopedLeads = getScopedLeads(leads, currentUser);
   const scopedDeals = getScopedDeals(deals, scopedLeads, currentUser);
@@ -818,8 +882,8 @@ export async function askAiAssistant(userMessage, { leads = [], deals = [], pipe
 
   // If no OpenRouter API key configured, use local analytical intelligence engine with conversational memory
   if (!apiKey) {
-    await new Promise((r) => setTimeout(r, 350));
-    return queryLocalCrmEngine(userMessage, {
+    await new Promise((r) => setTimeout(r, 200));
+    const localRes = queryLocalCrmEngine(userMessage, {
       leads,
       deals,
       pipelinesList,
@@ -828,6 +892,8 @@ export async function askAiAssistant(userMessage, { leads = [], deals = [], pipe
       activities: completeActivities,
       chatHistory
     });
+    if (onChunk && localRes.text) onChunk(localRes.text);
+    return localRes;
   }
 
   try {
@@ -868,6 +934,16 @@ export async function askAiAssistant(userMessage, { leads = [], deals = [], pipe
         })), null, 2)}\n`
       : '';
 
+    // Compact token compression: ~70% fewer tokens than heavy JSON
+    const compactActivities = (context.activitiesPast2Days || [])
+      .slice(0, 30)
+      .map((a) => `${a.created_at?.slice(0, 16) || ''} | ${a.user_name || a.assigned_to || '-'} | ${a.lead_name || '-'} | ${a.type || '-'} | ${a.from_stage || ''}->${a.to_stage || ''} | ${a.details || ''}`)
+      .join('\n');
+
+    const compactLeadsRoster = scopedLeads
+      .map((l) => `${l.id} | ${l.name || 'Unknown'} | ${l.stage || 'new'} | ${l.assigned_to || '-'} | ${l.city || '-'} | ${l.phone || '-'} | ${l.email || '-'}`)
+      .join('\n');
+
     const systemPrompt = `You are the executive AI Sales & Operations Assistant for SimpleCRM (CapOasis).
 You are currently assisting: ${userName} (Role: ${userRole}, Data Scope: ${isScopeAll ? 'All CRM Data (Admin/Full)' : 'Assigned Leads Only'}).
 
@@ -884,16 +960,8 @@ ${context.repBreakdownSummary || 'No representatives recorded.'}
 ACTIVITIES & ACTIONS IN PAST 48 HOURS (PAST 2 DAYS):
 ${context.repWorkedOnSummary || 'No stage movements or direct call logs recorded in the past 48 hours.'}
 
-RECENT RAW ACTIVITIES (LATEST EVENTS):
-${JSON.stringify(context.activitiesPast2Days.map((a) => ({
-  time: a.created_at,
-  user: a.user_name || a.assigned_to,
-  lead: a.lead_name,
-  type: a.type,
-  from: a.from_stage,
-  to: a.to_stage,
-  details: a.details
-})))}
+RECENT RAW ACTIVITIES (Time | Rep | Lead | Type | Stage Move | Details):
+${compactActivities || 'No recent events recorded.'}
 
 LIVE OVERALL CRM METRICS:
 - Total Accessible Leads: ${context.totalLeads}
@@ -902,8 +970,8 @@ LIVE OVERALL CRM METRICS:
 - Stale Leads (>5 days in early stages): ${context.staleLeadsCount}
 - Overall Stage Breakdown: ${JSON.stringify(context.stageCounts)}
 - Pipelines: ${context.pipelines.map((p) => `${p.name} (stages: ${p.stages.join(' -> ')})`).join('; ')}
-- COMPLETE ACCESSIBLE LEADS ROSTER (${scopedLeads.length} Total Leads):
-${JSON.stringify(scopedLeads.map((l) => ({ id: l.id, name: l.name, phone: l.phone, email: l.email, stage: l.stage, rep: l.assigned_to, city: l.city, date: l.created_at || l.date })))}
+- COMPLETE ACCESSIBLE LEADS ROSTER (${scopedLeads.length} Total Leads) (ID | Name | Stage | Rep | City | Phone | Email):
+${compactLeadsRoster}
 
 CRITICAL RESPONSE GUIDELINES:
 1. DISAMBIGUATION RULE FOR MULTIPLE MATCHES (CRITICAL):
@@ -947,7 +1015,9 @@ CRITICAL RESPONSE GUIDELINES:
       content: userMessage
     });
 
-    const replyText = await callOpenRouter(messages, apiKey);
+    const replyResult = await callOpenRouter(messages, apiKey, onChunk);
+    const replyText = typeof replyResult === 'object' ? replyResult.text : replyResult;
+    const usedModel = typeof replyResult === 'object' ? replyResult.model : 'openrouter';
 
     // Check if the reply includes an action block
     let action = null;
@@ -988,11 +1058,12 @@ CRITICAL RESPONSE GUIDELINES:
 
     return {
       text: cleanText || replyText,
-      action
+      action,
+      model: usedModel
     };
   } catch (err) {
     console.warn('OpenRouter API error, falling back to local engine:', err);
-    return queryLocalCrmEngine(userMessage, {
+    const localRes = queryLocalCrmEngine(userMessage, {
       leads,
       deals,
       pipelinesList,
@@ -1001,5 +1072,9 @@ CRITICAL RESPONSE GUIDELINES:
       activities: completeActivities,
       chatHistory
     });
+    return {
+      ...localRes,
+      model: 'local-crm-engine'
+    };
   }
 }

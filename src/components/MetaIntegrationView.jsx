@@ -22,9 +22,11 @@ import {
   Send,
   Phone,
   Zap,
-  Mail
+  Mail,
+  Globe
 } from 'lucide-react';
 import EmailIntegrationView from './EmailIntegrationView';
+import WebsiteFormsView from './WebsiteFormsView';
 import { supabase } from '../lib/supabase';
 import {
   loginWithMeta,
@@ -73,9 +75,9 @@ function CustomDropdown({
 
   const filteredOptions = searchable && search.trim()
     ? options.filter(o =>
-        (o.label || '').toLowerCase().includes(search.toLowerCase()) ||
-        (o.sublabel || '').toLowerCase().includes(search.toLowerCase())
-      )
+      (o.label || '').toLowerCase().includes(search.toLowerCase()) ||
+      (o.sublabel || '').toLowerCase().includes(search.toLowerCase())
+    )
     : options;
 
   return (
@@ -1188,40 +1190,44 @@ export default function MetaIntegrationView({ currentUser }) {
   if (isLoading) {
     return (
       <div className="meta-container">
+        <div className="meta-subnav-bar">
+          <button
+            type="button"
+            className={`meta-subnav-btn ${activeChannel === 'facebook' ? 'active' : ''}`}
+            onClick={() => setActiveChannel('facebook')}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1877F2' }}>
+              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+            </svg>
+            Facebook Lead Ads
+          </button>
+          <button
+            type="button"
+            className={`meta-subnav-btn ${activeChannel === 'whatsapp' ? 'active' : ''}`}
+            onClick={() => setActiveChannel('whatsapp')}
+          >
+            <MessageCircle size={20} style={{ color: '#25D366' }} />
+            WhatsApp Cloud API
+          </button>
+          <button
+            type="button"
+            className={`meta-subnav-btn ${activeChannel === 'email' ? 'active' : ''}`}
+            onClick={() => setActiveChannel('email')}
+          >
+            <Mail size={20} style={{ color: '#0284c7' }} />
+            Email
+          </button>
+          <button
+            type="button"
+            className={`meta-subnav-btn ${activeChannel === 'website' ? 'active' : ''}`}
+            onClick={() => setActiveChannel('website')}
+          >
+            <Globe size={18} style={{ color: '#6366f1' }} />
+            Website Forms
+          </button>
+        </div>
+
         <div className="meta-inner">
-          <div className="meta-master-header">
-            <h1 className="meta-master-title">Integrations Hub</h1>
-          </div>
-
-          <div className="meta-subnav-bar">
-            <button
-              type="button"
-              className={`meta-subnav-btn ${activeChannel === 'facebook' ? 'active' : ''}`}
-              onClick={() => setActiveChannel('facebook')}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1877F2' }}>
-                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-              </svg>
-              Facebook Lead Ads
-            </button>
-            <button
-              type="button"
-              className={`meta-subnav-btn ${activeChannel === 'whatsapp' ? 'active' : ''}`}
-              onClick={() => setActiveChannel('whatsapp')}
-            >
-              <MessageCircle size={20} style={{ color: '#25D366' }} />
-              WhatsApp Cloud API
-            </button>
-            <button
-              type="button"
-              className={`meta-subnav-btn ${activeChannel === 'email' ? 'active' : ''}`}
-              onClick={() => setActiveChannel('email')}
-            >
-              <Mail size={20} style={{ color: '#0284c7' }} />
-              Email (Resend)
-            </button>
-          </div>
-
           {/* Section 1: Hero Card Skeleton */}
           <div className="meta-hero-card-container">
             <div className="meta-panel-card" style={{ padding: '20px 24px' }}>
@@ -1274,269 +1280,271 @@ export default function MetaIntegrationView({ currentUser }) {
 
   return (
     <div className="meta-container">
+      {/* Subnav Pill Toggle - Full Width at Top */}
+      <div className="meta-subnav-bar">
+        <button
+          type="button"
+          className={`meta-subnav-btn ${activeChannel === 'facebook' ? 'active' : ''}`}
+          onClick={() => setActiveChannel('facebook')}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1877F2' }}>
+            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+          </svg>
+          Facebook Lead Ads
+        </button>
+        <button
+          type="button"
+          className={`meta-subnav-btn ${activeChannel === 'whatsapp' ? 'active' : ''}`}
+          onClick={() => setActiveChannel('whatsapp')}
+        >
+          <MessageCircle size={20} style={{ color: '#25D366' }} />
+          WhatsApp Cloud API
+        </button>
+        <button
+          type="button"
+          className={`meta-subnav-btn ${activeChannel === 'email' ? 'active' : ''}`}
+          onClick={() => setActiveChannel('email')}
+        >
+          <Mail size={20} style={{ color: '#0284c7' }} />
+          Email
+        </button>
+        <button
+          type="button"
+          className={`meta-subnav-btn ${activeChannel === 'website' ? 'active' : ''}`}
+          onClick={() => setActiveChannel('website')}
+        >
+          <Globe size={18} style={{ color: '#6366f1' }} />
+          Website Forms
+        </button>
+      </div>
+
       <div className="meta-inner">
-        <div className="meta-master-header">
-          <h1 className="meta-master-title">Integrations Hub</h1>
-        </div>
-
-        {/* Subnav Pill Toggle */}
-        <div className="meta-subnav-bar">
-          <button
-            type="button"
-            className={`meta-subnav-btn ${activeChannel === 'facebook' ? 'active' : ''}`}
-            onClick={() => setActiveChannel('facebook')}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1877F2' }}>
-              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-            </svg>
-            Facebook Lead Ads
-          </button>
-          <button
-            type="button"
-            className={`meta-subnav-btn ${activeChannel === 'whatsapp' ? 'active' : ''}`}
-            onClick={() => setActiveChannel('whatsapp')}
-          >
-            <MessageCircle size={20} style={{ color: '#25D366' }} />
-            WhatsApp Cloud API
-          </button>
-          <button
-            type="button"
-            className={`meta-subnav-btn ${activeChannel === 'email' ? 'active' : ''}`}
-            onClick={() => setActiveChannel('email')}
-          >
-            <Mail size={20} style={{ color: '#0284c7' }} />
-            Email (Resend)
-          </button>
-        </div>
-
         {activeChannel === 'facebook' && (
           <>
 
-        {/* Success / Error Banners */}
-        {fbSuccessBanner && (
-          <div className="meta-sync-banner success">
-            <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-            <div>{fbSuccessBanner}</div>
-          </div>
-        )}
-
-        {fbConnectError && (
-          <div className="meta-sync-banner error">
-            <AlertCircle size={16} style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>{fbConnectError}</div>
-            <button
-              type="button"
-              onClick={() => setFbConnectError('')}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
-            >
-              <XCircle size={15} />
-            </button>
-          </div>
-        )}
-
-        {/* Token Expired Warning Banner */}
-        {tokenHealth.status === 'expired' && !isHealthBannerDismissed && (
-          <div className="meta-sync-banner error" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderRadius: '8px', border: '1px solid #fecaca', backgroundColor: '#fef2f2' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-              <AlertCircle size={18} style={{ color: '#dc2626', marginTop: '2px', flexShrink: 0 }} />
-              <div>
-                <strong style={{ display: 'block', fontSize: '13.5px', color: '#991b1b', fontWeight: 600 }}>
-                  Meta Access Token Expired (Code {tokenHealth.code || 190})
-                </strong>
-                <span style={{ fontSize: '12px', color: '#b91c1c', display: 'block', marginTop: '2px' }}>
-                  {tokenHealth.message || 'Your Meta session has expired. Inbound leads cannot be retrieved until you reconnect or update your token.'}
-                </span>
+            {/* Success / Error Banners */}
+            {fbSuccessBanner && (
+              <div className="meta-sync-banner success">
+                <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+                <div>{fbSuccessBanner}</div>
               </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-              <button
-                type="button"
-                className="meta-btn-secondary"
-                onClick={handleConnectWithFacebook}
-                style={{ fontSize: '12px', padding: '6px 12px', backgroundColor: '#ffffff', color: '#991b1b', borderColor: '#fca5a5' }}
-              >
-                Reconnect with Facebook
-              </button>
-              <button
-                type="button"
-                className="meta-btn-secondary"
-                onClick={() => setShowManualConfig(true)}
-                style={{ fontSize: '12px', padding: '6px 12px', backgroundColor: '#ffffff', color: '#475569' }}
-              >
-                Paste Token
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsHealthBannerDismissed(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b', display: 'flex', alignItems: 'center', padding: '4px' }}
-                title="Dismiss warning"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* Section 1: Connected Facebook Account Hero Card */}
-        <div className={`meta-hero-card-container ${config.is_connected ? (tokenHealth.status === 'valid' ? 'is-healthy' : tokenHealth.status === 'expired' ? 'is-broken' : '') : ''}`}>
-          {config.is_connected && (config.connected_account_name || config.ad_account_id) && (
-            <div className="meta-card-attached-pill">
-              <span className="meta-id-pill">
-                Ad Account: <strong>{config.connected_account_name || config.ad_account_id}</strong>
-              </span>
-            </div>
-          )}
-          <div className="meta-panel-card">
-            {config.is_connected ? (
-              <div className="meta-account-row">
-                <div className="meta-account-identity">
-                  <div className="meta-brand-tile">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="#1877F2">
-                      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                    </svg>
-                  </div>
-                  <div className="meta-account-details">
-                    <div className="meta-account-title-line">
-                      <span className="meta-account-name">{config.connected_page_name || 'Connected Page'}</span>
-                    </div>
+            {fbConnectError && (
+              <div className="meta-sync-banner error">
+                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>{fbConnectError}</div>
+                <button
+                  type="button"
+                  onClick={() => setFbConnectError('')}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+                >
+                  <XCircle size={15} />
+                </button>
+              </div>
+            )}
+
+            {/* Token Expired Warning Banner */}
+            {tokenHealth.status === 'expired' && !isHealthBannerDismissed && (
+              <div className="meta-sync-banner error" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderRadius: '8px', border: '1px solid #fecaca', backgroundColor: '#fef2f2' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <AlertCircle size={18} style={{ color: '#dc2626', marginTop: '2px', flexShrink: 0 }} />
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '13.5px', color: '#991b1b', fontWeight: 600 }}>
+                      Meta Access Token Expired (Code {tokenHealth.code || 190})
+                    </strong>
+                    <span style={{ fontSize: '12px', color: '#b91c1c', display: 'block', marginTop: '2px' }}>
+                      {tokenHealth.message || 'Your Meta session has expired. Inbound leads cannot be retrieved until you reconnect or update your token.'}
+                    </span>
                   </div>
                 </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    className="meta-btn-secondary"
+                    onClick={handleConnectWithFacebook}
+                    style={{ fontSize: '12px', padding: '6px 12px', backgroundColor: '#ffffff', color: '#991b1b', borderColor: '#fca5a5' }}
+                  >
+                    Reconnect with Facebook
+                  </button>
+                  <button
+                    type="button"
+                    className="meta-btn-secondary"
+                    onClick={() => setShowManualConfig(true)}
+                    style={{ fontSize: '12px', padding: '6px 12px', backgroundColor: '#ffffff', color: '#475569' }}
+                  >
+                    Paste Token
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsHealthBannerDismissed(true)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b', display: 'flex', alignItems: 'center', padding: '4px' }}
+                    title="Dismiss warning"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
 
-              <div className="meta-account-actions">
-                {testFeedback && (
-                  <span className={`meta-inline-feedback ${testFeedback.type}`}>
-                    {testFeedback.type === 'testing' && <RefreshCw size={11} className="meta-spin" />}
-                    {testFeedback.type === 'success' && <CheckCircle2 size={11} />}
-                    {testFeedback.type === 'error' && <AlertCircle size={11} />}
-                    <span>{testFeedback.text}</span>
+            {/* Section 1: Connected Facebook Account Hero Card */}
+            <div className={`meta-hero-card-container ${config.is_connected ? (tokenHealth.status === 'valid' ? 'is-healthy' : tokenHealth.status === 'expired' ? 'is-broken' : '') : ''}`}>
+              <div className="meta-panel-card">
+                {config.is_connected && (config.connected_account_name || config.ad_account_id) && (
+                  <span className="meta-id-pill">
+                    Ad Account: <strong>{config.connected_account_name || config.ad_account_id}</strong>
                   </span>
                 )}
-                <button
-                  type="button"
-                  className="btn-meta-clean btn-meta-icon-only"
-                  onClick={() => checkTokenHealth(undefined, true)}
-                  disabled={tokenHealth.status === 'checking'}
-                  data-tooltip="Test Token"
-                  aria-label="Test Token"
-                >
-                  <RefreshCw size={15} className={tokenHealth.status === 'checking' ? 'meta-spin' : ''} />
-                </button>
-                <button
-                  type="button"
-                  className="btn-meta-clean btn-meta-icon-only"
-                  onClick={handleOpenAssetModal}
-                  disabled={isConnectingFb}
-                  data-tooltip="Switch Page / Forms"
-                  aria-label="Switch Page / Forms"
-                >
-                  <Layers size={15} />
-                </button>
-                <button
-                  type="button"
-                  className="btn-meta-disconnect btn-meta-icon-only"
-                  onClick={handleDisconnect}
-                  disabled={isSaving}
-                  data-tooltip="Disconnect Facebook"
-                  data-tooltip-pos="right-edge"
-                  aria-label="Disconnect Facebook"
-                >
-                  <Unlink size={15} />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="meta-disconnected-row">
-              <div className="meta-account-identity">
-                <div className="meta-brand-tile muted">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#94a3b8">
-                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                  </svg>
-                </div>
-                <div className="meta-account-details">
-                  <span className="meta-account-name">Connect with Facebook</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="btn-meta-facebook-connect"
-                onClick={handleConnectWithFacebook}
-                disabled={isConnectingFb}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                </svg>
-                {isConnectingFb ? 'Connecting...' : 'Connect Facebook'}
-              </button>
-            </div>
-          )}
-        </div>
-        </div>
-
-        {/* Section 2: Connected Lead Forms Panel */}
-        {config.is_connected && (
-          <div className="meta-panel-card">
-            <div className="meta-panel-header">
-              <div className="meta-panel-header-left">
-                <span className="meta-panel-title">Connected Lead Forms</span>
-                <span className="meta-count-badge">{forms.length} {forms.length === 1 ? 'form' : 'forms'} active</span>
-              </div>
-              <button
-                type="button"
-                className="btn-meta-add-form"
-                onClick={handleOpenAssetModal}
-              >
-                <Plus size={14} /> Add Form
-              </button>
-            </div>
-
-            {forms.length === 0 ? (
-              <div className="meta-forms-empty-state">
-                <FileText size={24} color="#94a3b8" />
-                <p className="meta-empty-title">No lead forms connected</p>
-                <button
-                  type="button"
-                  className="btn-meta-clean"
-                  onClick={handleOpenAssetModal}
-                  style={{ marginTop: '8px' }}
-                >
-                  <Plus size={13} /> Select Forms
-                </button>
-              </div>
-            ) : (
-              <div className="meta-forms-table">
-                {forms.map((form, index) => (
-                  <div key={form.id || form.form_id || `form-${index}`} className="meta-form-row-item">
-                    <div className="meta-form-identity">
-                      <div className="meta-doc-tile">
-                        <FileText size={16} color="#475569" />
+                {config.is_connected ? (
+                  <div className="meta-account-row">
+                    <div className="meta-account-identity">
+                      <div className="meta-brand-tile">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="#1877F2">
+                          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                        </svg>
                       </div>
-                      <div className="meta-form-info-col">
-                        <span className="meta-form-title">{form.form_name || `Form ${form.form_id}`}</span>
-                        <div className="meta-form-meta-row">
-                          <span className="meta-id-tag">ID: {form.form_id}</span>
+                      <div className="meta-account-details">
+                        <div className="meta-account-title-line">
+                          <span className="meta-account-name">{config.connected_page_name || 'Connected Page'}</span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="meta-form-actions-col">
+                    <div className="meta-account-actions">
+                      {testFeedback && (
+                        <span className={`meta-inline-feedback ${testFeedback.type}`}>
+                          {testFeedback.type === 'testing' && <RefreshCw size={11} className="meta-spin" />}
+                          {testFeedback.type === 'success' && <CheckCircle2 size={11} />}
+                          {testFeedback.type === 'error' && <AlertCircle size={11} />}
+                          <span>{testFeedback.text}</span>
+                        </span>
+                      )}
                       <button
                         type="button"
-                        className="btn-meta-icon-trash"
-                        onClick={() => handleRemoveFormRow(index)}
-                        data-tooltip="Remove form"
-                        data-tooltip-pos="right-edge"
-                        aria-label="Remove form"
+                        className="btn-meta-clean btn-meta-icon-only"
+                        onClick={() => checkTokenHealth(undefined, true)}
+                        disabled={tokenHealth.status === 'checking'}
+                        data-tooltip="Test Token"
+                        aria-label="Test Token"
                       >
-                        <Trash2 size={15} />
+                        <RefreshCw size={15} className={tokenHealth.status === 'checking' ? 'meta-spin' : ''} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-meta-clean btn-meta-icon-only"
+                        onClick={handleOpenAssetModal}
+                        disabled={isConnectingFb}
+                        data-tooltip="Switch Page / Forms"
+                        aria-label="Switch Page / Forms"
+                      >
+                        <Layers size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-meta-disconnect btn-meta-icon-only"
+                        onClick={handleDisconnect}
+                        disabled={isSaving}
+                        data-tooltip="Disconnect Facebook"
+                        data-tooltip-pos="right-edge"
+                        aria-label="Disconnect Facebook"
+                      >
+                        <Unlink size={15} />
                       </button>
                     </div>
                   </div>
-                ))}
+                ) : (
+                  <div className="meta-disconnected-row">
+                    <div className="meta-account-identity">
+                      <div className="meta-brand-tile muted">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="#94a3b8">
+                          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                        </svg>
+                      </div>
+                      <div className="meta-account-details">
+                        <span className="meta-account-name">Connect with Facebook</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-meta-facebook-connect"
+                      onClick={handleConnectWithFacebook}
+                      disabled={isConnectingFb}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                      </svg>
+                      {isConnectingFb ? 'Connecting...' : 'Connect Facebook'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Section 2: Connected Lead Forms Panel */}
+            {config.is_connected && (
+              <div className="meta-panel-card">
+                <div className="meta-panel-header">
+                  <div className="meta-panel-header-left">
+                    <span className="meta-panel-title">Connected Lead Forms</span>
+                    <span className="meta-count-badge">{forms.length} {forms.length === 1 ? 'form' : 'forms'} active</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-meta-add-form"
+                    onClick={handleOpenAssetModal}
+                  >
+                    <Plus size={14} /> Add Form
+                  </button>
+                </div>
+
+                {forms.length === 0 ? (
+                  <div className="meta-forms-empty-state">
+                    <FileText size={24} color="#94a3b8" />
+                    <p className="meta-empty-title">No lead forms connected</p>
+                    <button
+                      type="button"
+                      className="btn-meta-clean"
+                      onClick={handleOpenAssetModal}
+                      style={{ marginTop: '8px' }}
+                    >
+                      <Plus size={13} /> Select Forms
+                    </button>
+                  </div>
+                ) : (
+                  <div className="meta-forms-table">
+                    {forms.map((form, index) => (
+                      <div key={form.id || form.form_id || `form-${index}`} className="meta-form-row-item">
+                        <div className="meta-form-identity">
+                          <div className="meta-doc-tile">
+                            <FileText size={16} color="#475569" />
+                          </div>
+                          <div className="meta-form-info-col">
+                            <span className="meta-form-title">{form.form_name || `Form ${form.form_id}`}</span>
+                            <div className="meta-form-meta-row">
+                              <span className="meta-id-tag">ID: {form.form_id}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="meta-form-actions-col">
+                          <button
+                            type="button"
+                            className="btn-meta-icon-trash"
+                            onClick={() => handleRemoveFormRow(index)}
+                            data-tooltip="Remove form"
+                            data-tooltip-pos="right-edge"
+                            aria-label="Remove form"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
-        </>
+          </>
         )}
 
         {/* =========================================================================
@@ -1565,14 +1573,12 @@ export default function MetaIntegrationView({ currentUser }) {
 
             {/* Section 1: Connected WhatsApp Account Hero Card */}
             <div className={`meta-hero-card-container ${waIsConnected ? 'is-healthy' : ''}`}>
-              {waIsConnected && (waPhoneId || waWabaId) && (
-                <div className="meta-card-attached-pill">
+              <div className="meta-panel-card">
+                {waIsConnected && (waPhoneId || waWabaId) && (
                   <span className="meta-id-pill">
                     {waPhoneId ? `Phone ID: ${waPhoneId}` : `WABA ID: ${waWabaId}`}
                   </span>
-                </div>
-              )}
-              <div className="meta-panel-card">
+                )}
                 {waIsConnected ? (
                   <div className="meta-account-row">
                     <div className="meta-account-identity">
@@ -1743,6 +1749,11 @@ export default function MetaIntegrationView({ currentUser }) {
           <EmailIntegrationView currentUser={currentUser} />
         )}
 
+        {/* Website Forms Channel Content */}
+        {activeChannel === 'website' && (
+          <WebsiteFormsView currentUser={currentUser} />
+        )}
+
         {/* End of Main Content */}
       </div>
 
@@ -1886,8 +1897,8 @@ export default function MetaIntegrationView({ currentUser }) {
                 {isSubmittingSelection
                   ? 'Connecting Selected Page...'
                   : selectedFormIds.length > 0
-                  ? `Connect (${selectedFormIds.length} Form${selectedFormIds.length > 1 ? 's' : ''})`
-                  : 'Select at least 1 Form'}
+                    ? `Connect (${selectedFormIds.length} Form${selectedFormIds.length > 1 ? 's' : ''})`
+                    : 'Select at least 1 Form'}
               </button>
             </div>
           </div>
@@ -2022,9 +2033,9 @@ export default function MetaIntegrationView({ currentUser }) {
                   options={
                     waTemplates.length > 0
                       ? waTemplates.map(t => ({
-                          value: t.name,
-                          label: t.name
-                        }))
+                        value: t.name,
+                        label: t.name
+                      }))
                       : [{ value: 'salado_lead_welcome', label: 'salado_lead_welcome' }]
                   }
                 />

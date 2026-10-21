@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, UserCheck, CalendarClock, RotateCcw, Download, GitFork } from 'lucide-react';
+import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, UserCheck, CalendarClock, RotateCcw, Download, GitFork, FolderInput } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { hasPermission, getLeadScope, getFollowUpScope, canDeleteFollowUp, isLeadAssignedToUser } from '../lib/permissions';
+import { hasPermission, getLeadScope, getFollowUpScope, canDeleteFollowUp, isLeadAssignedToUser, isUserAssignedToPipeline } from '../lib/permissions';
 import { recordActivity, fetchLeadActivities } from '../lib/activities';
 import { fetchFollowUps, getStoredFollowUps, getFollowUpUrgency, formatFollowUpTime, completeFollowUp, reopenFollowUp, deleteFollowUp } from '../lib/followups';
 import { addNotification } from '../lib/notifications';
@@ -9,7 +9,9 @@ import { sendWhatsAppMessage } from '../lib/whatsapp';
 import { sendEmailViaResend, fetchEmailTemplates } from '../lib/email';
 import ScheduleFollowUpModal from './common/ScheduleFollowUpModal';
 import Skeleton from './common/Skeleton';
+import { getPipelineFields, getLeadFieldValue } from '../lib/pipelineFields';
 import '../styles/leads.css';
+
 
 
 const getInitials = (name) => {
@@ -226,6 +228,18 @@ export default function LeadsView({ currentUser, onNavigate }) {
   const [leadToDelete, setLeadToDelete] = useState(null);
   const [followUpToDelete, setFollowUpToDelete] = useState(null);
   const [isDeletingFollowUp, setIsDeletingFollowUp] = useState(false);
+
+  // Bulk Lead Actions State (Shift+Click Multi-select)
+  const [selectedLeadIds, setSelectedLeadIds] = useState(() => new Set());
+  const [lastSelectedLeadId, setLastSelectedLeadId] = useState(null);
+  const [isBulkStageMenuOpen, setIsBulkStageMenuOpen] = useState(false);
+  const [isBulkAssigneeMenuOpen, setIsBulkAssigneeMenuOpen] = useState(false);
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const bulkStageDropdownRef = useRef(null);
+  const bulkAssigneeDropdownRef = useRef(null);
+
+  // New Lead Custom Fields State
+  const [newLeadCustomFields, setNewLeadCustomFields] = useState({});
 
   // Active Tab inside Lead Details Modal ('details' | 'activity')
   const [leadDetailTab, setLeadDetailTab] = useState('details');
@@ -703,18 +717,47 @@ export default function LeadsView({ currentUser, onNavigate }) {
     try {
       const cached = localStorage.getItem('crm_cached_pipelines');
       if (cached) return JSON.parse(cached);
-    } catch (e) {}
+    } catch (e) { }
     return [];
   });
   const [activePipelineId, setActivePipelineId] = useState(() => {
     try {
       return localStorage.getItem('crm_active_pipeline_id') || null;
-    } catch (e) {}
+    } catch (e) { }
     return null;
   });
   const [isPipelineDropdownOpen, setIsPipelineDropdownOpen] = useState(false);
   const [pipelineForms, setPipelineForms] = useState([]);
   const pipelineDropdownRef = useRef(null);
+
+  // Multi-Pipeline Visibility: admins and users with full lead scope see all pipelines;
+  // members only see pipelines they are assigned to (via distribution roster or assigned leads)
+  const visiblePipelines = useMemo(() => {
+    if (!pipelinesList || pipelinesList.length === 0) return [];
+    if (currentUser?.role === 'admin' || canViewAllLeads) return pipelinesList;
+
+    const assigned = pipelinesList.filter((pipe) =>
+      isUserAssignedToPipeline(pipe, currentUser, leads, pipelineForms)
+    );
+
+    if (assigned.length > 0) return assigned;
+    // Fallback if no specific pipeline matched: default pipeline
+    const fallback = pipelinesList.find((p) => p.is_default) || pipelinesList[0];
+    return fallback ? [fallback] : [];
+  }, [pipelinesList, currentUser, canViewAllLeads, leads, pipelineForms]);
+
+  const activePipeline = useMemo(() => {
+    return visiblePipelines.find((p) => p.id === activePipelineId) || visiblePipelines[0] || pipelinesList.find((p) => p.id === activePipelineId) || pipelinesList[0];
+  }, [visiblePipelines, pipelinesList, activePipelineId]);
+
+  const activePipelineFields = useMemo(() => {
+    return getPipelineFields(activePipeline);
+  }, [activePipeline]);
+
+  const cardFields = useMemo(() => {
+    return activePipelineFields.filter((f) => f.show_on_card && f.key !== 'name');
+  }, [activePipelineFields]);
+
 
   // Fetch dynamic pipelines from Supabase & subscribe to realtime
   useEffect(() => {
@@ -740,7 +783,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
           setPipelinesList(data);
           try {
             localStorage.setItem('crm_cached_pipelines', JSON.stringify(data));
-          } catch (e) {}
+          } catch (e) { }
 
           const savedId = localStorage.getItem('crm_active_pipeline_id');
           const targetPipe = data.find((p) => p.id === (activePipelineId || savedId)) || data.find((p) => p.is_default) || data[0];
@@ -749,14 +792,14 @@ export default function LeadsView({ currentUser, onNavigate }) {
             setActivePipelineId(targetPipe.id);
             try {
               localStorage.setItem('crm_active_pipeline_id', targetPipe.id);
-            } catch (e) {}
+            } catch (e) { }
 
             if (targetPipe.stages && Array.isArray(targetPipe.stages) && targetPipe.stages.length > 0) {
               const sorted = [...targetPipe.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
               setColumns(sorted);
               try {
                 localStorage.setItem('crm_pipeline_columns', JSON.stringify(sorted));
-              } catch (e) {}
+              } catch (e) { }
               const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
               if (entryCol?.id) {
                 setNewLeadStage((prev) => (sorted.some((c) => c.id === prev) ? prev : entryCol.id));
@@ -794,7 +837,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
     setIsPipelineDropdownOpen(false);
     try {
       localStorage.setItem('crm_active_pipeline_id', pipeId);
-    } catch (e) {}
+    } catch (e) { }
 
     const pipe = pipelinesList.find((p) => p.id === pipeId);
     if (pipe?.stages && Array.isArray(pipe.stages) && pipe.stages.length > 0) {
@@ -802,13 +845,26 @@ export default function LeadsView({ currentUser, onNavigate }) {
       setColumns(sorted);
       try {
         localStorage.setItem('crm_pipeline_columns', JSON.stringify(sorted));
-      } catch (e) {}
+      } catch (e) { }
       const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
       if (entryCol?.id) {
         setNewLeadStage(entryCol.id);
       }
     }
   };
+
+  // Automatically align activePipelineId with visible pipelines for assigned members
+  useEffect(() => {
+    if (visiblePipelines.length > 0) {
+      const isCurrentValid = visiblePipelines.some((p) => p.id === activePipelineId);
+      if (!isCurrentValid) {
+        const nextPipe = visiblePipelines.find((p) => p.is_default) || visiblePipelines[0];
+        if (nextPipe) {
+          handleSelectPipeline(nextPipe.id);
+        }
+      }
+    }
+  }, [visiblePipelines, activePipelineId]);
 
   // Trigger Stage Automations (WhatsApp & Email) if configured for target pipeline stage
   const triggerStageAutomation = async (lead, targetStageId) => {
@@ -880,7 +936,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
         }
       }
 
-      // 2. Email (Resend) Automation
+      // 2. Email Automation
       if (auto.email_active && auto.email_template_id && lead.email) {
         try {
           if (lead.id) {
@@ -987,6 +1043,37 @@ export default function LeadsView({ currentUser, onNavigate }) {
     window.addEventListener('click', handleOutsideClick);
     return () => window.removeEventListener('click', handleOutsideClick);
   }, [openDropdownLeadId, openAssigneeLeadId, isPipelineDropdownOpen]);
+
+  // Bulk dropdowns outside click listener
+  useEffect(() => {
+    if (!isBulkStageMenuOpen && !isBulkAssigneeMenuOpen) return;
+    const handleOutsideBulkClick = (e) => {
+      if (bulkStageDropdownRef.current && !bulkStageDropdownRef.current.contains(e.target)) {
+        setIsBulkStageMenuOpen(false);
+      }
+      if (bulkAssigneeDropdownRef.current && !bulkAssigneeDropdownRef.current.contains(e.target)) {
+        setIsBulkAssigneeMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideBulkClick);
+    return () => document.removeEventListener('mousedown', handleOutsideBulkClick);
+  }, [isBulkStageMenuOpen, isBulkAssigneeMenuOpen]);
+
+  // Escape key listener to clear bulk selection
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && selectedLeadIds.size > 0) {
+        setSelectedLeadIds(new Set());
+        setLastSelectedLeadId(null);
+        setIsBulkStageMenuOpen(false);
+        setIsBulkAssigneeMenuOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedLeadIds.size]);
+
+
 
   // New Lead Form State
   const [newLeadName, setNewLeadName] = useState('');
@@ -1361,7 +1448,8 @@ export default function LeadsView({ currentUser, onNavigate }) {
       date: todayStr,
       stage: newLeadStage,
       assigned_to: 'pranav',
-      pipeline_id: activePipelineId || null
+      pipeline_id: activePipelineId || null,
+      custom_fields: newLeadCustomFields
     };
 
     // Optimistic ID for instant UI feedback
@@ -1372,6 +1460,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
     setNewLeadName('');
     setNewLeadPhone('');
     setNewLeadEmail('');
+    setNewLeadCustomFields({});
     setIsModalOpen(false);
 
     try {
@@ -1572,6 +1661,238 @@ export default function LeadsView({ currentUser, onNavigate }) {
     }
   };
 
+  const handleUpdateCustomProperty = async (leadId, fieldKey, val) => {
+    const targetLead = leads.find((l) => l.id === leadId) || (selectedLead?.id === leadId ? selectedLead : null);
+    if (!targetLead) return;
+
+    const currentCF = targetLead.custom_fields || {};
+    const updatedCF = { ...currentCF, [fieldKey]: val };
+
+    const payload = fieldKey === 'city'
+      ? { city: val, custom_fields: updatedCF }
+      : { custom_fields: updatedCF };
+
+    // Optimistic UI update
+    setLeads((prev) =>
+      prev.map((l) => (l.id === leadId ? { ...l, ...payload } : l))
+    );
+    if (selectedLead && selectedLead.id === leadId) {
+      setSelectedLead((prev) => ({ ...prev, ...payload }));
+    }
+
+    try {
+      await supabase.from('leads').update(payload).eq('id', leadId);
+    } catch (err) {
+      console.error('Error updating field in Supabase:', err);
+    }
+  };
+
+  const handleLeadClick = (lead, e) => {
+    if (justDraggedRef.current) return;
+
+    const isShift = Boolean(e?.shiftKey);
+    const isCmd = Boolean(e?.metaKey || e?.ctrlKey);
+
+    if (isShift) {
+      if (e?.preventDefault) e.preventDefault();
+      if (lastSelectedLeadId && filteredLeads.some((l) => l.id === lastSelectedLeadId)) {
+        const lastIdx = filteredLeads.findIndex((l) => l.id === lastSelectedLeadId);
+        const currIdx = filteredLeads.findIndex((l) => l.id === lead.id);
+        if (lastIdx !== -1 && currIdx !== -1) {
+          const start = Math.min(lastIdx, currIdx);
+          const end = Math.max(lastIdx, currIdx);
+          const rangeIds = filteredLeads.slice(start, end + 1).map((l) => l.id);
+          setSelectedLeadIds((prev) => {
+            const next = new Set(prev);
+            rangeIds.forEach((id) => next.add(id));
+            return next;
+          });
+          return;
+        }
+      }
+
+      setSelectedLeadIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(lead.id)) {
+          next.delete(lead.id);
+        } else {
+          next.add(lead.id);
+        }
+        return next;
+      });
+      setLastSelectedLeadId(lead.id);
+      return;
+    }
+
+    if (isCmd) {
+      if (e?.preventDefault) e.preventDefault();
+      setSelectedLeadIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(lead.id)) {
+          next.delete(lead.id);
+        } else {
+          next.add(lead.id);
+        }
+        return next;
+      });
+      setLastSelectedLeadId(lead.id);
+      return;
+    }
+
+    // If bulk selection is active and user clicks a card normally, toggle its selection
+    if (selectedLeadIds.size > 0) {
+      setSelectedLeadIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(lead.id)) {
+          next.delete(lead.id);
+        } else {
+          next.add(lead.id);
+        }
+        return next;
+      });
+      setLastSelectedLeadId(lead.id);
+      return;
+    }
+
+    // Normal click without selection active: open lead details
+    setSelectedLead(lead);
+    setLeadDetailTab('details');
+    setIsDetailOpen(true);
+  };
+
+  const handleBulkMoveStage = async (targetStageId) => {
+    if (selectedLeadIds.size === 0) return;
+    setIsBulkStageMenuOpen(false);
+    const targetCol = columns.find((c) => c.id === targetStageId);
+    const targetStageName = targetCol?.label || targetStageId;
+    const idsToMove = Array.from(selectedLeadIds);
+    const selectedLeadsList = leads.filter((l) => selectedLeadIds.has(l.id) && l.stage !== targetStageId);
+
+    if (selectedLeadsList.length === 0) {
+      setSelectedLeadIds(new Set());
+      setLastSelectedLeadId(null);
+      return;
+    }
+
+    // Optimistic UI update
+    setLeads((prev) =>
+      prev.map((l) => (selectedLeadIds.has(l.id) ? { ...l, stage: targetStageId } : l))
+    );
+
+    // Activity logs & automations
+    selectedLeadsList.forEach((lead) => {
+      recordActivity({
+        type: 'stage_change',
+        leadId: lead.id,
+        leadName: lead.name,
+        fromStage: lead.stage,
+        toStage: targetStageId,
+        assignedTo: lead.assigned_to || lead.assignedTo,
+        userName: currentUser?.name
+      });
+      triggerStageAutomation(lead, targetStageId);
+    });
+
+    addNotification({
+      type: 'bulk_stage_change',
+      title: 'Bulk Stage Move',
+      message: `Moved ${selectedLeadsList.length} leads to "${targetStageName}".`,
+      timestamp: new Date().toISOString()
+    });
+
+    setSelectedLeadIds(new Set());
+    setLastSelectedLeadId(null);
+
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ stage: targetStageId })
+        .in('id', idsToMove);
+      if (error) {
+        console.error('Error updating bulk stages in Supabase:', error.message);
+      }
+    } catch (err) {
+      console.error('Network error during bulk stage update:', err);
+    }
+  };
+
+  const handleBulkAssign = async (assigneeName) => {
+    if (selectedLeadIds.size === 0) return;
+    setIsBulkAssigneeMenuOpen(false);
+    const targetVal = assigneeName === 'unassigned' ? 'unassigned' : assigneeName;
+    const idsToAssign = Array.from(selectedLeadIds);
+    const selectedLeadsList = leads.filter((l) => selectedLeadIds.has(l.id));
+
+    // Optimistic UI update
+    setLeads((prev) =>
+      prev.map((l) => (selectedLeadIds.has(l.id) ? { ...l, assigned_to: targetVal } : l))
+    );
+
+    // Activity logs
+    selectedLeadsList.forEach((lead) => {
+      recordActivity({
+        type: 'assignment',
+        leadId: lead.id,
+        leadName: lead.name,
+        assignedTo: targetVal,
+        userName: currentUser?.name
+      });
+    });
+
+    addNotification({
+      type: 'bulk_assignment',
+      title: 'Bulk Lead Assignment',
+      message: `Assigned ${selectedLeadsList.length} leads to ${targetVal === 'unassigned' ? 'Unassigned' : targetVal}.`,
+      timestamp: new Date().toISOString()
+    });
+
+    setSelectedLeadIds(new Set());
+    setLastSelectedLeadId(null);
+
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ assigned_to: targetVal })
+        .in('id', idsToAssign);
+      if (error) {
+        console.error('Error updating bulk assignment in Supabase:', error.message);
+      }
+    } catch (err) {
+      console.error('Network error during bulk assignment:', err);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedLeadIds.size === 0) return;
+    const idsToDelete = Array.from(selectedLeadIds);
+    const count = idsToDelete.length;
+
+    // Optimistic UI update
+    setLeads((prev) => prev.filter((l) => !selectedLeadIds.has(l.id)));
+    setIsBulkDeleteModalOpen(false);
+    setSelectedLeadIds(new Set());
+    setLastSelectedLeadId(null);
+
+    addNotification({
+      type: 'bulk_delete',
+      title: 'Bulk Leads Deleted',
+      message: `Permanently deleted ${count} leads.`,
+      timestamp: new Date().toISOString()
+    });
+
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .delete()
+        .in('id', idsToDelete);
+      if (error) {
+        console.error('Error bulk deleting leads in Supabase:', error.message);
+      }
+    } catch (err) {
+      console.error('Network error during bulk delete:', err);
+    }
+  };
+
   const renderLeadCard = (lead, includeCompletedFollowUp = false, isFollowUpCol = false) => {
     const anim = animatingLeads[lead.id];
     let animClass = 'fade-in-card';
@@ -1587,20 +1908,16 @@ export default function LeadsView({ currentUser, onNavigate }) {
     const isAssigneeOpen = openAssigneeLeadId === lead.id;
     const isOpen = isStageOpen || isAssigneeOpen;
     const assignedUser = resolveAssignee(lead.assigned_to || lead.assignedTo);
+    const isCardSelected = selectedLeadIds.has(lead.id);
 
     return (
       <div
         key={lead.id}
-        className={`lead-card-item ${animClass} ${isOpen ? 'has-open-dropdown' : ''} ${draggedLeadId === lead.id ? 'is-dragging' : ''} ${isFollowUpCol ? 'no-drag' : ''}`}
+        className={`lead-card-item ${animClass} ${isOpen ? 'has-open-dropdown' : ''} ${draggedLeadId === lead.id ? 'is-dragging' : ''} ${isFollowUpCol ? 'no-drag' : ''} ${isCardSelected ? 'is-selected' : ''}`}
         draggable={!isFollowUpCol}
         onDragStart={isFollowUpCol ? undefined : (e) => handleDragStart(e, lead)}
         onDragEnd={isFollowUpCol ? undefined : handleDragEnd}
-        onClick={() => {
-          if (justDraggedRef.current) return;
-          setSelectedLead(lead);
-          setLeadDetailTab('details');
-          setIsDetailOpen(true);
-        }}
+        onClick={(e) => handleLeadClick(lead, e)}
         style={{ cursor: 'pointer', ...(isOpen ? { zIndex: 100 } : {}) }}
       >
         <div
@@ -1693,25 +2010,42 @@ export default function LeadsView({ currentUser, onNavigate }) {
         </div>
 
         <div className="lead-card-contact-info">
-          {lead.phone && (
+          {cardFields.some((f) => f.key === 'phone') && lead.phone && (
             <div className="lead-card-contact-row">
               <Phone size={13} strokeWidth={2} className="lead-contact-icon" />
               <span>{formatPhoneNumber(lead.phone)}</span>
             </div>
           )}
-          {!isFollowUpCol && lead.email && (
+          {!isFollowUpCol && cardFields.some((f) => f.key === 'email') && lead.email && (
             <div className="lead-card-contact-row">
               <Mail size={13} strokeWidth={2} className="lead-contact-icon" />
               <span>{lead.email}</span>
             </div>
           )}
-          {lead.city && (
+          {cardFields.some((f) => f.key === 'city') && (lead.city || getLeadFieldValue(lead, { key: 'city', mapped_question: 'city' })) && (
             <div className="lead-card-contact-row">
               <MapPin size={13} strokeWidth={2} className="lead-contact-icon" />
-              <span>{lead.city}</span>
+              <span>{lead.city || getLeadFieldValue(lead, { key: 'city', mapped_question: 'city' })}</span>
             </div>
           )}
-          {!lead.phone && (!isFollowUpCol ? !lead.email : true) && !lead.city && (
+
+          {/* Any other fields marked "Show on Card" */}
+          {cardFields
+            .filter((f) => !['name', 'phone', 'email', 'city'].includes(f.key))
+            .map((f) => {
+              const val = getLeadFieldValue(lead, f);
+              if (!val) return null;
+              return (
+                <div key={f.key} className="lead-card-contact-row">
+                  <span className="lead-card-custom-badge">
+                    <span className="lead-card-badge-lbl">{f.label}:</span>
+                    <span className="lead-card-badge-val">{String(val)}</span>
+                  </span>
+                </div>
+              );
+            })}
+
+          {!lead.phone && !lead.email && !lead.city && (
             <div className="lead-card-empty-contact">
               <span>No contact details</span>
             </div>
@@ -1918,7 +2252,7 @@ export default function LeadsView({ currentUser, onNavigate }) {
       <div className="leads-toolbar">
         <div className="leads-filters-group">
           {/* Multi-Pipeline Switcher */}
-          {pipelinesList.length > 1 && (
+          {visiblePipelines.length > 1 ? (
             <div className="leads-filter-dropdown-wrap" ref={pipelineDropdownRef}>
               <button
                 type="button"
@@ -1929,14 +2263,14 @@ export default function LeadsView({ currentUser, onNavigate }) {
               >
                 <GitFork size={13} strokeWidth={2} style={{ color: '#2563eb' }} />
                 <span style={{ fontWeight: 600, color: '#0f172a' }}>
-                  {pipelinesList.find((p) => p.id === activePipelineId)?.name || 'Pipeline'}
+                  {visiblePipelines.find((p) => p.id === activePipelineId)?.name || 'Pipeline'}
                 </span>
                 <ChevronDown size={14} strokeWidth={2} className={`filter-chevron ${isPipelineDropdownOpen ? 'open' : ''}`} />
               </button>
 
               {isPipelineDropdownOpen && (
                 <div className="lead-filter-dropdown-menu" role="listbox" style={{ minWidth: '160px' }}>
-                  {pipelinesList.map((pipe) => {
+                  {visiblePipelines.map((pipe) => {
                     const isSelected = activePipelineId === pipe.id;
                     return (
                       <button
@@ -1958,7 +2292,18 @@ export default function LeadsView({ currentUser, onNavigate }) {
                 </div>
               )}
             </div>
-          )}
+          ) : visiblePipelines.length === 1 ? (
+            <div
+              className="lead-filter-dropdown-btn"
+              style={{ borderColor: '#e2e8f0', cursor: 'default', background: '#f8fafc' }}
+              title="Assigned Pipeline"
+            >
+              <GitFork size={13} strokeWidth={2} style={{ color: '#2563eb' }} />
+              <span style={{ fontWeight: 600, color: '#0f172a' }}>
+                {visiblePipelines[0]?.name || 'Pipeline'}
+              </span>
+            </div>
+          ) : null}
 
           <div className="leads-filter-dropdown-wrap" ref={filterDropdownRef}>
             <button
@@ -2471,6 +2816,37 @@ export default function LeadsView({ currentUser, onNavigate }) {
                     ))}
                   </select>
                 </div>
+
+                {/* Dynamically Render Configured Pipeline Fields */}
+                {activePipelineFields.filter((f) => !['name', 'phone', 'email'].includes(f.key)).length > 0 && (
+                  <div style={{ marginTop: '4px', paddingTop: '10px', borderTop: '1px solid #f1f5f9' }}>
+                    <div className="lead-prop-section-title" style={{ marginBottom: '10px' }}>
+                      Additional Details
+                    </div>
+                    {activePipelineFields
+                      .filter((f) => !['name', 'phone', 'email'].includes(f.key))
+                      .map((field) => {
+                        const targetKey = field.mapped_question || field.key;
+                        return (
+                          <div key={field.key} className="lead-field-group">
+                            <label className="lead-field-label">{field.label}</label>
+                            <input
+                              type="text"
+                              className="lead-field-input"
+                              placeholder={`Enter ${field.label.toLowerCase()}...`}
+                              value={newLeadCustomFields[targetKey] || ''}
+                              onChange={(e) =>
+                                setNewLeadCustomFields({
+                                  ...newLeadCustomFields,
+                                  [targetKey]: e.target.value
+                                })
+                              }
+                            />
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
               </div>
 
               <div className="lead-modal-footer">
@@ -2707,6 +3083,31 @@ export default function LeadsView({ currentUser, onNavigate }) {
                       </td>
                     </tr>
 
+                    {/* PIPELINE CONFIGURED FIELDS SECTION */}
+                    {activePipelineFields.filter((f) => !['name', 'phone', 'email'].includes(f.key)).map((field) => {
+                      const currentVal = getLeadFieldValue(selectedLead, field);
+                      const targetKey = field.mapped_question || field.key;
+
+                      return (
+                        <tr key={field.key}>
+                          <td className="lead-prop-label">{field.label}</td>
+                          <td className="lead-prop-value">
+                            {canEditLead ? (
+                              <input
+                                type="text"
+                                className="lead-prop-custom-input"
+                                placeholder={`Enter ${field.label.toLowerCase()}...`}
+                                value={currentVal || ''}
+                                onChange={(e) => handleUpdateCustomProperty(selectedLead.id, targetKey, e.target.value)}
+                              />
+                            ) : (
+                              currentVal || '—'
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+
                     {/* Notes Row */}
                     <tr>
                       <td className="lead-prop-label lead-prop-notes-label">Internal Notes</td>
@@ -2723,34 +3124,55 @@ export default function LeadsView({ currentUser, onNavigate }) {
                   </tbody>
                 </table>
 
-                {/* Table 2: Meta Questionnaire Responses */}
-                {selectedLead.custom_fields && Object.keys(selectedLead.custom_fields).length > 0 && (
-                  <div className="lead-prop-table-section">
-                    <div className="lead-prop-section-divider-bar">
-                      <span className="lead-prop-section-title">Meta Form Responses</span>
-                      <span className="lead-prop-section-badge">
-                        {Object.keys(selectedLead.custom_fields).length} {Object.keys(selectedLead.custom_fields).length === 1 ? 'question' : 'questions'}
-                      </span>
+                {/* Unmapped / Form Submission Data */}
+                {(() => {
+                  const definedKeys = new Set();
+                  activePipelineFields.forEach((f) => {
+                    if (f.key) definedKeys.add(f.key);
+                    if (f.mapped_question) definedKeys.add(f.mapped_question);
+                    if (f.label) definedKeys.add(f.label);
+                  });
+                  definedKeys.add('name');
+                  definedKeys.add('phone');
+                  definedKeys.add('email');
+                  definedKeys.add('city');
+                  definedKeys.add('City');
+                  definedKeys.add('notes');
+
+                  const unmappedEntries = Object.entries(selectedLead.custom_fields || {}).filter(
+                    ([k, v]) => !definedKeys.has(k) && v !== null && v !== undefined && v !== ''
+                  );
+
+                  if (unmappedEntries.length === 0) return null;
+
+                  return (
+                    <div className="lead-prop-table-section">
+                      <div className="lead-prop-section-divider-bar">
+                        <span className="lead-prop-section-title">Form Submission Data</span>
+                        <span className="lead-prop-section-badge">
+                          {unmappedEntries.length} {unmappedEntries.length === 1 ? 'field' : 'fields'}
+                        </span>
+                      </div>
+                      <table className="lead-properties-table">
+                        <tbody>
+                          {unmappedEntries.map(([question, answer]) => {
+                            const displayQuestion = question
+                              .replace(/_+/g, ' ')
+                              .trim()
+                              .replace(/^\w/, (c) => c.toUpperCase());
+                            const displayAnswer = Array.isArray(answer) ? answer.join(', ') : String(answer);
+                            return (
+                              <tr key={question}>
+                                <td className="lead-prop-label">{displayQuestion}</td>
+                                <td className="lead-prop-value">{displayAnswer}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
-                    <table className="lead-properties-table">
-                      <tbody>
-                        {Object.entries(selectedLead.custom_fields).map(([question, answer]) => {
-                          const displayQuestion = question
-                            .replace(/_+/g, ' ')
-                            .trim()
-                            .replace(/^\w/, (c) => c.toUpperCase());
-                          const displayAnswer = Array.isArray(answer) ? answer.join(', ') : String(answer);
-                          return (
-                            <tr key={question}>
-                              <td className="lead-prop-label">{displayQuestion}</td>
-                              <td className="lead-prop-value">{displayAnswer}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             ) : (
               <div className="lead-properties-body lead-audit-table-wrap">
@@ -2798,34 +3220,34 @@ export default function LeadsView({ currentUser, onNavigate }) {
                                 className={`audit-pill ${isWhatsApp
                                   ? 'audit-pill-arrival'
                                   : isEmail
-                                  ? 'audit-pill-stage'
-                                  : isStageChange
-                                  ? 'audit-pill-stage'
-                                  : isAssignment
-                                    ? 'audit-pill-assign'
-                                    : isArrival
-                                      ? 'audit-pill-arrival'
-                                      : 'audit-pill-default'
+                                    ? 'audit-pill-stage'
+                                    : isStageChange
+                                      ? 'audit-pill-stage'
+                                      : isAssignment
+                                        ? 'audit-pill-assign'
+                                        : isArrival
+                                          ? 'audit-pill-arrival'
+                                          : 'audit-pill-default'
                                   }`}
                                 style={
                                   isWhatsApp
                                     ? { background: '#dcfce7', color: '#15803d' }
                                     : isEmail
-                                    ? { background: '#e0f2fe', color: '#0369a1' }
-                                    : undefined
+                                      ? { background: '#e0f2fe', color: '#0369a1' }
+                                      : undefined
                                 }
                               >
                                 {isWhatsApp
                                   ? 'WhatsApp'
                                   : isEmail
-                                  ? 'Email'
-                                  : isStageChange
-                                  ? 'Stage Change'
-                                  : isAssignment
-                                    ? 'Assignment'
-                                    : isArrival
-                                      ? 'Lead Ingested'
-                                      : 'Update'}
+                                    ? 'Email'
+                                    : isStageChange
+                                      ? 'Stage Change'
+                                      : isAssignment
+                                        ? 'Assignment'
+                                        : isArrival
+                                          ? 'Lead Ingested'
+                                          : 'Update'}
                               </span>
                             </td>
                             <td className="audit-cell-details">
@@ -3044,6 +3466,179 @@ export default function LeadsView({ currentUser, onNavigate }) {
           fetchFollowUps().then(setFollowUps);
         }}
       />
+
+      {/* Sleek Floating Bulk Action Bar */}
+      {selectedLeadIds.size > 0 && (
+        <div className="leads-bulk-bar-container">
+          <div className="leads-bulk-bar">
+            <div className="leads-bulk-bar-info">
+              <span className="leads-bulk-count-badge">
+                {selectedLeadIds.size}
+              </span>
+              <span className="leads-bulk-info-text">
+                {selectedLeadIds.size === 1 ? 'lead selected' : 'leads selected'}
+              </span>
+            </div>
+
+            <div className="leads-bulk-divider" />
+
+            <div className="leads-bulk-actions">
+              {/* Move Stage Dropdown */}
+              {canEditLead && (
+                <div className="leads-bulk-dropdown-wrap" ref={bulkStageDropdownRef}>
+                  <button
+                    type="button"
+                    className={`btn-bulk-action ${isBulkStageMenuOpen ? 'active' : ''}`}
+                    onClick={() => {
+                      setIsBulkAssigneeMenuOpen(false);
+                      setIsBulkStageMenuOpen((prev) => !prev);
+                    }}
+                  >
+                    <FolderInput size={14} strokeWidth={2} />
+                    <span>Move Stage</span>
+                    <ChevronDown size={12} strokeWidth={2} />
+                  </button>
+
+                  {isBulkStageMenuOpen && (
+                    <div className="leads-bulk-menu">
+                      <div className="leads-bulk-menu-header">Move {selectedLeadIds.size} leads to</div>
+                      <div className="leads-bulk-menu-scroll">
+                        {columns.map((col) => (
+                          <button
+                            key={col.id}
+                            type="button"
+                            className="leads-bulk-menu-item"
+                            onClick={() => handleBulkMoveStage(col.id)}
+                          >
+                            <span>{col.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Assign To Dropdown */}
+              {isAdmin && (
+                <div className="leads-bulk-dropdown-wrap" ref={bulkAssigneeDropdownRef}>
+                  <button
+                    type="button"
+                    className={`btn-bulk-action ${isBulkAssigneeMenuOpen ? 'active' : ''}`}
+                    onClick={() => {
+                      setIsBulkStageMenuOpen(false);
+                      setIsBulkAssigneeMenuOpen((prev) => !prev);
+                    }}
+                  >
+                    <UserCheck size={14} strokeWidth={2} />
+                    <span>Assign To</span>
+                    <ChevronDown size={12} strokeWidth={2} />
+                  </button>
+
+                  {isBulkAssigneeMenuOpen && (
+                    <div className="leads-bulk-menu">
+                      <div className="leads-bulk-menu-header">Assign {selectedLeadIds.size} leads to</div>
+                      <div className="leads-bulk-menu-scroll">
+                        {teamMembers.map((member) => (
+                          <button
+                            key={member.id}
+                            type="button"
+                            className="leads-bulk-menu-item"
+                            onClick={() => handleBulkAssign(member.name)}
+                          >
+                            <span className="lead-assignee-avatar-mini">{getInitials(member.name)}</span>
+                            <span>{member.name}</span>
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className="leads-bulk-menu-item"
+                          onClick={() => handleBulkAssign('unassigned')}
+                        >
+                          <span className="lead-assignee-avatar-mini muted">—</span>
+                          <span style={{ color: '#64748b' }}>Unassigned</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Delete Button */}
+              {canDeleteLead && (
+                <button
+                  type="button"
+                  className="btn-bulk-action danger"
+                  onClick={() => setIsBulkDeleteModalOpen(true)}
+                  title="Delete selected leads"
+                >
+                  <Trash2 size={14} strokeWidth={2} />
+                  <span>Delete</span>
+                </button>
+              )}
+            </div>
+
+            <div className="leads-bulk-divider" />
+
+            {/* Deselect Button */}
+            <button
+              type="button"
+              className="btn-bulk-deselect"
+              onClick={() => {
+                setSelectedLeadIds(new Set());
+                setLastSelectedLeadId(null);
+                setIsBulkStageMenuOpen(false);
+                setIsBulkAssigneeMenuOpen(false);
+              }}
+              title="Clear selection (Esc)"
+            >
+              <X size={14} strokeWidth={2} />
+              <span>Deselect</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      {isBulkDeleteModalOpen && (
+        <div className="lead-modal-backdrop" style={{ zIndex: 400 }} onClick={() => setIsBulkDeleteModalOpen(false)}>
+          <div className="lead-modal-container" style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="lead-modal-header">
+              <h2 className="lead-modal-title" style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Trash2 size={18} />
+                <span>Delete {selectedLeadIds.size} Leads</span>
+              </h2>
+              <button
+                type="button"
+                className="lead-modal-close-btn"
+                onClick={() => setIsBulkDeleteModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="lead-modal-body" style={{ fontSize: '13.5px', color: '#475569', lineHeight: 1.5, padding: '16px 20px' }}>
+              Are you sure you want to permanently delete <strong>{selectedLeadIds.size}</strong> selected {selectedLeadIds.size === 1 ? 'lead' : 'leads'}? This action cannot be undone and will remove all associated logs and history.
+            </div>
+            <div className="lead-modal-footer" style={{ padding: '14px 20px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="lead-modal-cancel-btn"
+                onClick={() => setIsBulkDeleteModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="lead-delete-confirm-btn"
+                onClick={handleBulkDelete}
+              >
+                <Trash2 size={13} strokeWidth={2} />
+                <span>Delete Leads</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

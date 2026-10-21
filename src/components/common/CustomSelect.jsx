@@ -9,20 +9,26 @@ export default function CustomSelect({
   disabled = false,
   className = '',
   menuClassName = '',
-  style = {}
+  style = {},
+  onOpenChange
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
+  const closeDropdown = () => {
+    setIsOpen(false);
+    onOpenChange?.(false);
+  };
+
   useEffect(() => {
     const handleOutsideClick = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setIsOpen(false);
+        closeDropdown();
       }
     };
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
-        setIsOpen(false);
+        closeDropdown();
       }
     };
 
@@ -41,14 +47,25 @@ export default function CustomSelect({
   return (
     <div
       ref={dropdownRef}
-      className={`pipeline-custom-select-wrap ${className}`}
-      style={style}
+      className={`pipeline-custom-select-wrap ${isOpen ? 'open is-open' : ''} ${className}`}
+      style={{
+        ...style,
+        ...(isOpen ? { zIndex: 100 } : {})
+      }}
     >
       <button
         type="button"
         disabled={disabled}
         className={`pipeline-custom-select-trigger ${isOpen ? 'active' : ''} ${disabled ? 'disabled' : ''}`}
-        onClick={() => !disabled && setIsOpen((prev) => !prev)}
+        onClick={() => {
+          if (!disabled) {
+            setIsOpen((prev) => {
+              const next = !prev;
+              onOpenChange?.(next);
+              return next;
+            });
+          }
+        }}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
       >
@@ -94,7 +111,7 @@ export default function CustomSelect({
                   className={`pipeline-custom-select-option ${isSelected ? 'selected' : ''}`}
                   onClick={() => {
                     onChange(opt.value);
-                    setIsOpen(false);
+                    closeDropdown();
                   }}
                 >
                   <div className="pipeline-custom-select-option-content">

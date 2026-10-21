@@ -356,10 +356,100 @@ export default function EmailIntegrationView({ currentUser }) {
 
   if (isLoading) {
     return (
-      <div style={{ padding: '24px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Skeleton width="100%" height="88px" borderRadius="12px" />
-        <Skeleton width="100%" height="240px" borderRadius="12px" />
-        <Skeleton width="100%" height="200px" borderRadius="12px" />
+      <div className="email-view-container">
+        {/* SECTION 1: HERO STATUS CARD SKELETON */}
+        <div className="email-hero-card">
+          <div className="email-hero-left">
+            <Skeleton width="44px" height="44px" borderRadius="10px" />
+            <div className="email-hero-info">
+              <Skeleton width="170px" height="18px" borderRadius="4px" />
+            </div>
+          </div>
+          <div className="email-hero-actions">
+            <Skeleton width="95px" height="32px" borderRadius="6px" />
+          </div>
+        </div>
+
+        {/* SECTION 2: CREDENTIALS & SENDER CONFIGURATION SKELETON */}
+        <div className="email-panel-card">
+          <div className="email-panel-header">
+            <Skeleton width="220px" height="16px" borderRadius="4px" />
+            <Skeleton width="130px" height="14px" borderRadius="4px" />
+          </div>
+
+          <table className="email-kv-table">
+            <tbody>
+              <tr className="email-kv-row">
+                <td className="email-kv-key-col">
+                  <Skeleton width="115px" height="14px" borderRadius="4px" />
+                </td>
+                <td className="email-kv-val-col">
+                  <Skeleton width="100%" height="38px" borderRadius="6px" />
+                </td>
+              </tr>
+              <tr className="email-kv-row">
+                <td className="email-kv-key-col">
+                  <Skeleton width="80px" height="14px" borderRadius="4px" />
+                </td>
+                <td className="email-kv-val-col">
+                  <Skeleton width="100%" height="38px" borderRadius="6px" />
+                </td>
+              </tr>
+              <tr className="email-kv-row">
+                <td className="email-kv-key-col">
+                  <Skeleton width="135px" height="14px" borderRadius="4px" />
+                </td>
+                <td className="email-kv-val-col">
+                  <Skeleton width="100%" height="38px" borderRadius="6px" />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                    <Skeleton width="90px" height="13px" borderRadius="4px" />
+                    <Skeleton width="140px" height="22px" borderRadius="12px" />
+                  </div>
+                </td>
+              </tr>
+              <tr className="email-kv-row">
+                <td className="email-kv-key-col">
+                  <Skeleton width="90px" height="14px" borderRadius="4px" />
+                </td>
+                <td className="email-kv-val-col">
+                  <Skeleton width="100%" height="38px" borderRadius="6px" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* SECTION 3: EMAIL TEMPLATES SKELETON */}
+        <div className="email-panel-card">
+          <div className="email-panel-header">
+            <div className="email-panel-header-left">
+              <Skeleton width="190px" height="16px" borderRadius="4px" />
+              <Skeleton width="26px" height="18px" borderRadius="10px" />
+            </div>
+            <Skeleton width="130px" height="32px" borderRadius="6px" />
+          </div>
+
+          <div className="email-template-list">
+            {[1, 2].map((i) => (
+              <div key={i} className="email-template-item">
+                <div className="email-template-identity" style={{ flex: 1 }}>
+                  <Skeleton width="34px" height="34px" borderRadius="8px" />
+                  <div className="email-template-info" style={{ width: '100%', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <Skeleton width={i === 1 ? '130px' : '160px'} height="15px" borderRadius="4px" />
+                      <Skeleton width={i === 1 ? '160px' : '140px'} height="20px" borderRadius="10px" />
+                    </div>
+                    <Skeleton width={i === 1 ? '85%' : '70%'} height="12px" borderRadius="3px" />
+                  </div>
+                </div>
+                <div className="email-template-actions">
+                  <Skeleton width="28px" height="28px" borderRadius="6px" />
+                  <Skeleton width="28px" height="28px" borderRadius="6px" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -386,7 +476,12 @@ export default function EmailIntegrationView({ currentUser }) {
       )}
 
       {/* SECTION 1: HERO STATUS CARD */}
-      <div className={`email-hero-card ${config.is_connected ? 'is-connected' : ''}`}>
+      <div className={`email-hero-card ${config.is_connected ? 'is-connected' : 'is-disconnected'}`}>
+        {config.is_connected && config.from_email && (
+          <span className="email-card-top-id">
+            Sender: <strong>{config.from_email}</strong>
+          </span>
+        )}
         <div className="email-hero-left">
           <div className="email-brand-tile">
             <Mail size={24} />
@@ -394,13 +489,6 @@ export default function EmailIntegrationView({ currentUser }) {
           <div className="email-hero-info">
             <div className="email-hero-title-row">
               <span className="email-hero-title">Resend Email Engine</span>
-              <div className={`email-status-chip ${config.is_connected ? 'connected' : 'disconnected'}`}>
-                <span className="email-status-dot" />
-                <span>{config.is_connected ? 'Connected' : 'Disconnected'}</span>
-              </div>
-              {config.is_connected && config.from_email && (
-                <span className="email-sender-pill">Sender: {config.from_email}</span>
-              )}
             </div>
           </div>
         </div>

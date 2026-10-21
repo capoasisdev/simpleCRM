@@ -22,14 +22,22 @@ import {
   Users,
   Zap,
   MessageCircle,
-  Mail
+  Mail,
+  Globe,
+  ListFilter,
+  CreditCard,
+  Pin,
+  Info
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission } from '../lib/permissions';
 import { fetchEmailTemplates } from '../lib/email';
+import { getPipelineFields, DEFAULT_PIPELINE_FIELDS, labelToKey, extractPipelineFormQuestions } from '../lib/pipelineFields';
 import Skeleton from './common/Skeleton';
 import CustomSelect from './common/CustomSelect';
 import '../styles/pipeline.css';
+
+
 
 const DIST_MODE_OPTIONS = [
   { value: 'round_robin', label: 'Round-Robin', sublabel: '(Sequential Rotation)' },
@@ -104,6 +112,14 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   const [waTemplates, setWaTemplates] = useState([]);
   const [emailTemplates, setEmailTemplates] = useState([]);
 
+  // Pipeline Custom Properties states
+  const [pipelineProperties, setPipelineProperties] = useState([]);
+  // Pipeline Fields (Lead information & Card mapping)
+  const [pipelineFields, setPipelineFields] = useState([]);
+  const [newFieldName, setNewFieldName] = useState('');
+  const [newFieldMappedQuestion, setNewFieldMappedQuestion] = useState('');
+  const [openSelectFieldKey, setOpenSelectFieldKey] = useState(null);
+
   const triggerSavedFeedback = () => {
     setSaveStatus('saved');
     if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
@@ -119,6 +135,10 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     setToast(message);
     setTimeout(() => setToast(null), 2800);
   };
+
+  // Active editing pipeline object
+  const activePipeline = pipelines.find(p => p.id === editingPipelineId);
+  const attachedForm = connectedForms.find(f => f.pipeline_id === editingPipelineId);
 
   // Reset form changing state on pipeline or tab change
   useEffect(() => {
@@ -137,6 +157,17 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     onConfigureStateChange?.(editingPipelineId !== null);
   }, [editingPipelineId, onConfigureStateChange]);
 
+  // Sync pipeline fields when activePipeline changes
+  useEffect(() => {
+    if (activePipeline) {
+      setPipelineFields(getPipelineFields(activePipeline));
+    } else {
+      setPipelineFields(DEFAULT_PIPELINE_FIELDS);
+    }
+  }, [activePipeline]);
+
+
+
   // Fetch initial pipelines, leads, forms, users, routing config, and whatsapp templates
   useEffect(() => {
     let isMounted = true;
@@ -146,7 +177,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       try {
         const [pipeRes, leadsRes, formsRes, usersRes, routeRes, metaRes] = await Promise.all([
           supabase.from('pipelines').select('*').order('is_default', { ascending: false }),
-          supabase.from('leads').select('id, stage, pipeline_id'),
+          supabase.from('leads').select('id, stage, pipeline_id, form_id, form_name, custom_fields'),
           supabase.from('connected_forms').select('*'),
           supabase.from('crm_users').select('id, name, email, role').order('name', { ascending: true }),
           supabase.from('lead_routing_config').select('*').limit(1).maybeSingle(),
@@ -233,14 +264,68 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     return 0;
   };
 
-  // Active editing pipeline object
-  const activePipeline = pipelines.find(p => p.id === editingPipelineId);
-  const attachedForm = connectedForms.find(f => f.pipeline_id === editingPipelineId);
+  // Active pipeline leads strictly scoped to this pipeline and its attached form
+  const activePipelineLeads = useMemo(() => {
+    return allLeads.filter((l) => {
+      // 1. If this pipeline has a connected form, leads from that form strictly belong here
+      if (attachedForm) {
+        if (l.form_id && l.form_id === attachedForm.form_id) return true;
+        if (l.form_name && attachedForm.form_name && l.form_name.toLowerCase().trim() === attachedForm.form_name.toLowerCase().trim()) return true;
+      }
 
-  // Active pipeline leads
-  const activePipelineLeads = allLeads.filter(
-    (l) => l.pipeline_id === editingPipelineId || (!l.pipeline_id && activePipeline?.is_default)
-  );
+      // 2. Direct pipeline_id match, excluding any lead belonging to another attached form
+      if (l.pipeline_id === editingPipelineId) {
+        if (l.form_id) {
+          const otherForm = connectedForms.find(f => f.pipeline_id && f.pipeline_id !== editingPipelineId && f.form_id === l.form_id);
+          if (otherForm) return false;
+        }
+        return true;
+      }
+
+      // 3. Unassigned leads for default pipeline
+      if (!l.pipeline_id && activePipeline?.is_default) {
+        if (l.form_id) {
+          const otherForm = connectedForms.find(f => f.pipeline_id && f.pipeline_id !== editingPipelineId && f.form_id === l.form_id);
+          if (otherForm) return false;
+        }
+        return true;
+      }
+
+      return false;
+    });
+  }, [allLeads, editingPipelineId, attachedForm, connectedForms, activePipeline]);
+
+  const availableFormQuestions = useMemo(() => {
+    return extractPipelineFormQuestions(activePipelineLeads);
+  }, [activePipelineLeads]);
+
+  const getFieldMappingOptions = (field) => {
+    const opts = [];
+    if (field.key === 'name') opts.push({ value: 'name', label: 'Form: Full Name' });
+    if (field.key === 'phone') opts.push({ value: 'phone', label: 'Form: Phone Number' });
+    if (field.key === 'email') opts.push({ value: 'email', label: 'Form: Email Address' });
+
+    // Deduplicated list of available questions from connected forms
+    availableFormQuestions.forEach((q) => {
+      if (!opts.some((o) => o.value.toLowerCase() === q.toLowerCase())) {
+        opts.push({ value: q, label: q });
+      }
+    });
+
+    // If city is not already present as a form question, offer standard Form: City
+    if (field.key === 'city' && !opts.some((o) => o.value.toLowerCase() === 'city')) {
+      opts.push({ value: 'city', label: 'Form: City' });
+    }
+
+    if (!field.is_core && field.mapped_question && !opts.some((o) => o.value === field.mapped_question)) {
+      opts.push({ value: field.mapped_question, label: field.mapped_question });
+    }
+
+    if (!opts.some((o) => o.value.toLowerCase() === field.key.toLowerCase())) {
+      opts.push({ value: field.key, label: `Custom Key (${field.key})` });
+    }
+    return opts;
+  };
 
   const leadCounts = {};
   activePipelineLeads.forEach((l) => {
@@ -260,7 +345,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
     fetchEmailTemplates().then(tmpls => {
       if (Array.isArray(tmpls)) setEmailTemplates(tmpls);
-    }).catch(() => {});
+    }).catch(() => { });
 
     // Initialize pipeline-scoped distribution
     const defaultRoster = (usersList.length > 0 ? usersList : [
@@ -591,7 +676,113 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     setInitialStages([]);
     setInitialDist(null);
     setStageAutomations([]);
+    setPipelineFields([]);
+    setNewFieldName('');
+    setNewFieldMappedQuestion('');
   };
+
+  // Pipeline Field Handlers
+  const handleToggleShowOnCard = (fieldKey) => {
+    const updated = pipelineFields.map(f => f.key === fieldKey ? { ...f, show_on_card: !f.show_on_card } : f);
+    setPipelineFields(updated);
+    savePipelineFields(updated);
+  };
+
+  const handleFieldNameChange = (fieldKey, newLabel) => {
+    const updated = pipelineFields.map(f => f.key === fieldKey ? { ...f, label: newLabel } : f);
+    setPipelineFields(updated);
+  };
+
+  const handleFieldMappingChange = (fieldKey, mappedQuestion) => {
+    const updated = pipelineFields.map(f => f.key === fieldKey ? { ...f, mapped_question: mappedQuestion } : f);
+    setPipelineFields(updated);
+    savePipelineFields(updated);
+    showToast('Updated field mapping');
+  };
+
+  const handleFieldBlur = () => {
+    savePipelineFields(pipelineFields);
+  };
+
+  const handleSelectFormQuestionToAdd = (question) => {
+    setNewFieldMappedQuestion(question);
+    if (question) {
+      const clean = question
+        .replace(/\?$/, '')
+        .replace(/^Which\s+/i, '')
+        .replace(/^What\s+is\s+your\s+/i, '')
+        .replace(/^What\s+/i, '')
+        .replace(/^Do\s+you\s+/i, '')
+        .replace(/^Have\s+you\s+ever\s+been\s+a\s+/i, '')
+        .replace(/^Have\s+you\s+ever\s+/i, '')
+        .replace(/^How\s+soon\s+are\s+you\s+looking\s+to\s+/i, '')
+        .trim();
+      const capitalized = clean.charAt(0).toUpperCase() + clean.slice(1);
+      setNewFieldName(capitalized.slice(0, 32));
+    }
+  };
+
+  const handleAddField = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const trimmed = newFieldName.trim();
+    if (!trimmed) return;
+    const key = labelToKey(trimmed);
+    if (pipelineFields.some(f => f.key === key)) {
+      showToast(`Field "${key}" already exists`);
+      return;
+    }
+    const updated = [
+      ...pipelineFields,
+      {
+        key,
+        label: trimmed,
+        mapped_question: newFieldMappedQuestion || key,
+        show_on_card: false,
+        is_core: false
+      }
+    ];
+    setPipelineFields(updated);
+    setNewFieldName('');
+    setNewFieldMappedQuestion('');
+    savePipelineFields(updated);
+    showToast(`Added field "${trimmed}"`);
+  };
+
+  const handleDeleteField = (fieldKey) => {
+    const target = pipelineFields.find(f => f.key === fieldKey);
+    if (target?.is_core) {
+      showToast('Core fields cannot be deleted');
+      return;
+    }
+    const updated = pipelineFields.filter(f => f.key !== fieldKey);
+    setPipelineFields(updated);
+    savePipelineFields(updated);
+    showToast(`Removed field "${target?.label || fieldKey}"`);
+  };
+
+  const savePipelineFields = async (updated) => {
+    if (!editingPipelineId) return;
+    try {
+      const { error } = await supabase
+        .from('pipelines')
+        .update({ pipeline_fields: updated })
+        .eq('id', editingPipelineId);
+
+      if (error) throw error;
+
+      setPipelines(prev => prev.map(p => p.id === editingPipelineId ? { ...p, pipeline_fields: updated } : p));
+      try {
+        const cached = pipelines.map(p => p.id === editingPipelineId ? { ...p, pipeline_fields: updated } : p);
+        localStorage.setItem('crm_cached_pipelines', JSON.stringify(cached));
+      } catch (e) {}
+      triggerSavedFeedback();
+    } catch (err) {
+      console.error('Error saving pipeline fields:', err);
+      showToast('Failed to save fields');
+    }
+  };
+
+
 
   // Create new pipeline
   const handleCreatePipeline = async () => {
@@ -741,7 +932,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         setConnectedForms(updatedForms);
       }
 
-      showToast(formId ? 'Meta form linked.' : 'Meta form unlinked.');
+      showToast(formId ? 'Form linked.' : 'Form unlinked.');
     } catch (err) {
       console.error('Error updating form:', err);
       showToast('Failed to update form attachment.');
@@ -1099,6 +1290,16 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
               <li>
                 <button
                   type="button"
+                  className={`pipeline-config-nav-btn ${configureSubTab === 'fields' ? 'active' : ''}`}
+                  onClick={() => setConfigureSubTab('fields')}
+                >
+                  <ListFilter size={20} strokeWidth={1.75} />
+                  <span>Fields</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
                   className={`pipeline-config-nav-btn ${configureSubTab === 'distribution' ? 'active' : ''}`}
                   onClick={() => setConfigureSubTab('distribution')}
                 >
@@ -1177,10 +1378,19 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                       <div className="pipeline-source-info">
                         <span className="pipeline-source-name">{formatFormName(attachedForm)}</span>
                         <div className="pipeline-source-subtext">
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="#1877F2" style={{ flexShrink: 0 }}>
-                            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                          </svg>
-                          <span>Meta Instant Form</span>
+                          {attachedForm.source === 'website' ? (
+                            <>
+                              <Globe size={13} color="#6366f1" style={{ flexShrink: 0 }} />
+                              <span>Website Form</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="#1877F2" style={{ flexShrink: 0 }}>
+                                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                              </svg>
+                              <span>Meta Instant Form</span>
+                            </>
+                          )}
                         </div>
                       </div>
 
@@ -1202,7 +1412,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                                   .filter(f => f.form_id !== attachedForm.form_id)
                                   .map(f => ({
                                     value: f.form_id,
-                                    label: formatFormName(f)
+                                    label: f.source === 'website' ? `[Website] ${formatFormName(f)}` : formatFormName(f)
                                   }))}
                               />
                               <button
@@ -1242,7 +1452,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                       <div className="pipeline-source-info">
                         <span className="pipeline-source-name">No Form Connected</span>
                         <div className="pipeline-source-subtext">
-                          Select a Meta Lead form to start auto-routing leads.
+                          Select a Meta or Website form to start auto-routing leads.
                         </div>
                       </div>
 
@@ -1255,7 +1465,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                             placeholder="Select a form..."
                             options={connectedForms.map(f => ({
                               value: f.form_id,
-                              label: formatFormName(f)
+                              label: f.source === 'website' ? `[Website] ${formatFormName(f)}` : formatFormName(f)
                             }))}
                           />
                         </div>
@@ -1389,6 +1599,170 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                 )}
               </div>
             )}
+
+            {/* TAB: FIELDS & CARD MAPPING CONTENT */}
+            {configureSubTab === 'fields' && (
+              <div className="pipeline-numbered-list-wrap">
+                <div className="pipeline-general-header-between" style={{ marginBottom: 8 }}>
+                  <label className="pipeline-general-label" style={{ marginBottom: 0 }}>
+                    Pipeline Fields
+                  </label>
+                  <span className="pipeline-dist-count-badge">
+                    {pipelineFields.filter(f => f.show_on_card && f.key !== 'name').length} on card
+                  </span>
+                </div>
+
+                <div className="pipeline-numbered-list">
+                  {pipelineFields.map((field, idx) => {
+                    const isSelectOpen = openSelectFieldKey === field.key;
+                    return (
+                      <div
+                        key={field.key}
+                        className={`pipeline-numbered-item ${isSelectOpen ? 'has-open-dropdown' : ''}`}
+                        style={{
+                          zIndex: isSelectOpen ? 200 : (pipelineFields.length + 10 - idx)
+                        }}
+                      >
+                        <div className="pipeline-numbered-left">
+                          <span className="pipeline-number-index">{idx + 1}</span>
+                          <input
+                            type="text"
+                            className="pipeline-number-input"
+                            value={field.label}
+                            onChange={(e) => handleFieldNameChange(field.key, e.target.value)}
+                            onBlur={handleFieldBlur}
+                            disabled={!canEdit}
+                          />
+                        </div>
+
+                        <div className="pipeline-field-map-slot">
+                          <CustomSelect
+                            className="pipeline-field-custom-select"
+                            value={field.mapped_question || (field.is_core ? field.key : (field.key === 'city' ? (availableFormQuestions.find(q => q.toLowerCase() === 'city') || 'city') : ''))}
+                            onChange={(val) => handleFieldMappingChange(field.key, val)}
+                            onOpenChange={(isOpen) => setOpenSelectFieldKey(isOpen ? field.key : null)}
+                            disabled={!canEdit}
+                            placeholder="Select form question..."
+                            options={getFieldMappingOptions(field)}
+                          />
+                        </div>
+
+                        <div className="pipeline-numbered-actions">
+                          {field.key === 'name' ? (
+                            <span
+                              className="btn-entry-icon active"
+                              data-tooltip="Card Title: Full name is permanently shown on the card header"
+                            >
+                              <Pin size={17} strokeWidth={2.2} />
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className={`btn-entry-icon ${field.show_on_card ? 'active' : ''}`}
+                              onClick={() => handleToggleShowOnCard(field.key)}
+                              disabled={!canEdit}
+                              data-tooltip={field.show_on_card ? 'Showing on Kanban card (click to hide)' : 'Show on Kanban card'}
+                            >
+                              <CreditCard size={17} strokeWidth={2.2} />
+                            </button>
+                          )}
+
+                          {field.is_core ? (
+                            <span
+                              className="btn-number-trash btn-field-info-icon"
+                              data-tooltip={
+                                field.key === 'name'
+                                  ? 'Core Field: Primary contact name & Kanban card title'
+                                  : field.key === 'phone'
+                                  ? 'Core Field: Required for WhatsApp automations & direct calls'
+                                  : field.key === 'email'
+                                  ? 'Core Field: Required for Resend email automations'
+                                  : 'Core Field: Built-in contact identity'
+                              }
+                              data-tooltip-pos="right-edge"
+                            >
+                              <Info size={16} strokeWidth={2} />
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn-number-trash"
+                              disabled={!canEdit}
+                              onClick={() => handleDeleteField(field.key)}
+                              data-tooltip={`Delete ${field.label}`}
+                              data-tooltip-pos="right-edge"
+                            >
+                              <Trash2 size={16} strokeWidth={2} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Minimal Inline Add Field Row */}
+                  {canEdit && (
+                    <form
+                      onSubmit={handleAddField}
+                      className={`pipeline-numbered-item pipeline-field-add-row ${openSelectFieldKey === '__add_field__' ? 'has-open-dropdown' : ''}`}
+                      style={{
+                        zIndex: openSelectFieldKey === '__add_field__' ? 200 : 1
+                      }}
+                    >
+                      <div className="pipeline-numbered-left">
+                        <span className="pipeline-number-index pipeline-number-index-ghost">
+                          {pipelineFields.length + 1}
+                        </span>
+                        <input
+                          type="text"
+                          className="pipeline-number-input pipeline-add-input-minimal"
+                          placeholder="Add a field (e.g. Budget, Package, Timeline)..."
+                          value={newFieldName}
+                          onChange={(e) => setNewFieldName(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="pipeline-field-map-slot">
+                        <CustomSelect
+                          className="pipeline-field-custom-select"
+                          value={newFieldMappedQuestion}
+                          onChange={(val) => handleSelectFormQuestionToAdd(val)}
+                          onOpenChange={(isOpen) => setOpenSelectFieldKey(isOpen ? '__add_field__' : null)}
+                          placeholder="Map from form question..."
+                          disabled={!canEdit || availableFormQuestions.length === 0}
+                          options={[
+                            { value: '', label: 'Map from form question...' },
+                            ...availableFormQuestions
+                              .filter((q) => !pipelineFields.some((f) => f.mapped_question === q))
+                              .map((q) => ({ value: q, label: q }))
+                          ]}
+                        />
+                      </div>
+
+                      <div className="pipeline-numbered-actions">
+                        <button
+                          type="submit"
+                          disabled={!newFieldName.trim()}
+                          className={`btn-entry-icon btn-add-field-action ${newFieldName.trim() ? 'active' : ''}`}
+                          data-tooltip={newFieldName.trim() ? 'Add Field' : 'Enter field name'}
+                          data-tooltip-pos="right-edge"
+                        >
+                          <Plus size={17} strokeWidth={2.4} />
+                        </button>
+                        <span
+                          className="btn-number-trash"
+                          style={{ visibility: 'hidden', pointerEvents: 'none' }}
+                          aria-hidden="true"
+                        >
+                          <Trash2 size={16} />
+                        </span>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              </div>
+            )}
+
 
             {/* TAB 3: DISTRIBUTION CONTENT (Minimalist Style Matching General) */}
             {configureSubTab === 'distribution' && (
@@ -1696,7 +2070,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                             <div className="pipeline-auto-channel-icon" style={{ background: '#e0f2fe' }}>
                               <Mail size={14} color="#0369a1" />
                             </div>
-                            <span className="pipeline-auto-channel-name">Email (Resend)</span>
+                            <span className="pipeline-auto-channel-name">Email</span>
                           </div>
 
                           <div className="pipeline-auto-channel-controls">
@@ -1745,6 +2119,8 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         </div>
       )}
 
+
+
       {/* Floating Toast Notification */}
       {toast && (
         <div className="pipeline-toast">
@@ -1752,6 +2128,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
           <span>{toast}</span>
         </div>
       )}
+
     </div>
   );
 }
