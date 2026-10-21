@@ -31,7 +31,8 @@ import {
   StickyNote,
   ListTodo,
   MessageSquare,
-  Layers
+  Layers,
+  CalendarClock
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getDashboardScope, getAnalyticsScope } from '../lib/permissions';
@@ -39,6 +40,7 @@ import { getStoredActivities } from '../lib/activities';
 import LeadsView from './LeadsView';
 import MessagesView from './MessagesView';
 import TodosView from './TodosView';
+import LaterOnView from './LaterOnView';
 import AdminUsersView from './AdminUsersView';
 import MetaIntegrationView from './MetaIntegrationView';
 import PipelineSettingsView from './PipelineSettingsView';
@@ -665,7 +667,7 @@ export default function DashboardView({ currentUser, onLogout }) {
               </>
             ) : (
               <span className="breadcrumb-current">
-                {activeTab === 'Todos' ? "To-Do's" : activeTab}
+                {activeTab === 'Todos' ? "To-Do's" : activeTab === 'LaterOn' ? 'LaterOn' : activeTab}
               </span>
             )}
           </nav>
@@ -764,19 +766,46 @@ export default function DashboardView({ currentUser, onLogout }) {
             </div>
           </div>
 
-          {hasAdminAccess && (
-            <div className="sidebar-bottom-item">
-              <button
-                type="button"
-                className={`nav-item-btn ${activeTab === 'Admin' ? 'active' : ''}`}
-                onClick={() => navigateTo('Admin', adminSubTab || 'users')}
-                title="Admin Settings"
-              >
-                <Settings size={20} strokeWidth={1.75} />
-                <span>Admin</span>
-              </button>
+          <div className="sidebar-bottom-group">
+            {/* Tools / Ecosystem Section */}
+            <div className="nav-section" style={{ marginBottom: 8 }}>
+              <div className="nav-section-title">Tools</div>
+              <ul className="nav-list">
+                {[
+                  { name: 'LaterOn', label: 'LaterOn', icon: CalendarClock }
+                ].map((tool) => {
+                  const ToolIcon = tool.icon;
+                  return (
+                    <li key={tool.name}>
+                      <button
+                        type="button"
+                        className={`nav-item-btn ${activeTab === tool.name ? 'active' : ''}`}
+                        onClick={() => navigateTo(tool.name)}
+                        title={tool.name}
+                      >
+                        <ToolIcon size={20} strokeWidth={1.75} />
+                        <span>{tool.label}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
-          )}
+
+            {hasAdminAccess && (
+              <div className="sidebar-bottom-item">
+                <button
+                  type="button"
+                  className={`nav-item-btn ${activeTab === 'Admin' ? 'active' : ''}`}
+                  onClick={() => navigateTo('Admin', adminSubTab || 'users')}
+                  title="Admin Settings"
+                >
+                  <Settings size={20} strokeWidth={1.75} />
+                  <span>Admin</span>
+                </button>
+              </div>
+            )}
+          </div>
         </aside>
 
         {/* Center Main Section */}
@@ -1077,6 +1106,7 @@ export default function DashboardView({ currentUser, onLogout }) {
             />
           )}
           {activeTab === 'Todos' && <TodosView currentUser={user} />}
+          {activeTab === 'LaterOn' && <LaterOnView />}
           {activeTab === 'Admin' && (
             <div className="settings-workspace-layout">
               {/* Secondary Settings Sub-navigation inside Settings Main Section */}
@@ -1128,7 +1158,7 @@ export default function DashboardView({ currentUser, onLogout }) {
             </div>
           )}
 
-          {activeTab !== 'Dashboard' && activeTab !== 'Analytics' && activeTab !== 'Leads' && activeTab !== 'Messages' && activeTab !== 'Todos' && activeTab !== 'Admin' && (
+          {activeTab !== 'Dashboard' && activeTab !== 'Analytics' && activeTab !== 'Leads' && activeTab !== 'Messages' && activeTab !== 'Todos' && activeTab !== 'LaterOn' && activeTab !== 'Admin' && (
             <div className="tab-placeholder-view">
               <h2 className="placeholder-title">{activeTab}</h2>
               <p className="placeholder-desc">This section is currently under development.</p>

@@ -260,6 +260,17 @@
   display: none;
 }
 
+.sidebar-bottom-group {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-sidebar-left.collapsed .sidebar-bottom-group {
+  width: 100%;
+  align-items: center;
+}
+
 .sidebar-bottom-item {
   padding-top: var(--spacing-sm);
 }
