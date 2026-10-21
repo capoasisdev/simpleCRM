@@ -206,7 +206,7 @@
   max-height: 100%;
   flex-shrink: 0;
   background-color: var(--bg-chrome);
-  padding: 8px 16px 24px 16px;
+  padding: 24px 16px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -218,7 +218,7 @@
   width: 64px;
   min-width: 64px;
   max-width: 64px;
-  padding: 8px 8px 24px 8px;
+  padding:24px 8px;
   align-items: center;
 }
 

@@ -197,7 +197,7 @@
   height: 100%;
   background-color: #fafbfc;
   border-right: 1px solid rgb(218, 220, 224);
-  padding: 12px 16px 24px 16px;
+  padding: 24px 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -222,6 +222,7 @@
 }
 
 .pipeline-config-identity {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -229,21 +230,154 @@
   border-bottom: 1px solid #e2e8f0;
 }
 
-.pipeline-config-title-row {
+.pipeline-config-switcher-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  margin: -6px -8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.pipeline-config-switcher-btn:hover {
+  background-color: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+.pipeline-config-switcher-btn.active {
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
 }
 
 .pipeline-config-title {
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 600;
   color: #0f172a;
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+}
+
+.pipeline-config-switcher-chevron {
+  color: #64748b;
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+
+.pipeline-config-switcher-btn.active .pipeline-config-switcher-chevron {
+  transform: rotate(180deg);
+  color: #0f172a;
+}
+
+/* Custom Dropdown Menu */
+.pipeline-config-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: -6px;
+  right: -6px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+  padding: 5px;
+  z-index: 150;
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: pipelineDropdownEnter 0.14s ease-out;
+}
+
+@keyframes pipelineDropdownEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pipeline-config-dropdown-header {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  padding: 5px 8px 3px 8px;
+}
+
+.pipeline-config-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.12s ease;
+}
+
+.pipeline-config-dropdown-item:hover {
+  background-color: #f1f5f9;
+}
+
+.pipeline-config-dropdown-item.selected {
+  background-color: #f0fdf4;
+}
+
+.pipeline-config-dropdown-item-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pipeline-config-dropdown-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipeline-config-dropdown-item.selected .pipeline-config-dropdown-name {
+  font-weight: 600;
+  color: #15803d;
+}
+
+.pipeline-config-default-pill {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  background-color: #f1f5f9;
+  color: #64748b;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.pipeline-config-dropdown-check {
+  color: #16a34a;
+  flex-shrink: 0;
 }
 
 .btn-rename-icon {

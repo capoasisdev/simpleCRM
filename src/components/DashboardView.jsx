@@ -87,6 +87,7 @@ export default function DashboardView({ currentUser, onLogout }) {
     messages: 'Messages',
     todos: 'Todos',
     tasks: 'Todos',
+    lateron: 'LaterOn',
     admin: 'Admin'
   };
 
@@ -105,6 +106,9 @@ export default function DashboardView({ currentUser, onLogout }) {
     }
     if (tab === 'Analytics') {
       return '/analytics';
+    }
+    if (tab === 'LaterOn') {
+      return '/lateron';
     }
     return `/${tab.toLowerCase()}`;
   };
@@ -152,9 +156,50 @@ export default function DashboardView({ currentUser, onLogout }) {
   );
 
   const [isPipelineConfiguring, setIsPipelineConfiguring] = useState(false);
+  const [laterOnPrefill, setLaterOnPrefill] = useState(null);
+  const [hasVisitedLaterOn, setHasVisitedLaterOn] = useState(validInitialTab === 'LaterOn');
+
+  const handleScheduleWithLaterOn = (lead, channel = 'whatsapp') => {
+    if (!lead) return;
+    setHasVisitedLaterOn(true);
+    const cleanPhone = (lead.phone || '').trim();
+    const cleanEmail = (lead.email || '').trim();
+    const cleanName = (lead.name || '').trim();
+    const prefill = {
+      channel,
+      phone: cleanPhone,
+      email: cleanEmail,
+      name: cleanName,
+      subject: channel === 'email' ? `Follow-up: ${cleanName || 'Discussion'}` : undefined,
+      message: channel === 'email'
+        ? `Hi ${cleanName || 'there'},\n\nI wanted to follow up regarding our recent discussion.`
+        : `Hi ${cleanName || 'there'}, `
+    };
+
+    try {
+      sessionStorage.setItem('lateron_prefill', JSON.stringify(prefill));
+    } catch (e) {}
+
+    setLaterOnPrefill(prefill);
+    navigateTo('LaterOn');
+
+    // Also dispatch directly to iframe if it's already mounted in DOM
+    setTimeout(() => {
+      const lateronIframe = document.getElementById('lateron-iframe');
+      if (lateronIframe?.contentWindow) {
+        lateronIframe.contentWindow.postMessage({
+          type: 'LATERON_PREFILL',
+          ...prefill
+        }, '*');
+      }
+    }, 150);
+  };
 
   const navigateTo = (tabName, subTab = 'users') => {
     setActiveTab(tabName);
+    if (tabName === 'LaterOn') {
+      setHasVisitedLaterOn(true);
+    }
     if (tabName === 'Admin') {
       setAdminSubTab(subTab);
       if (subTab !== 'stages') {
@@ -178,11 +223,24 @@ export default function DashboardView({ currentUser, onLogout }) {
     const handlePopState = () => {
       const current = parseLocation();
       setActiveTab(current.tab);
+      if (current.tab === 'LaterOn') {
+        setHasVisitedLaterOn(true);
+      }
       setAdminSubTab(current.adminSub);
     };
 
+    const handleScheduleEvent = (e) => {
+      if (e.detail?.lead) {
+        handleScheduleWithLaterOn(e.detail.lead, e.detail.channel || 'whatsapp');
+      }
+    };
+
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('crm-schedule-lateron', handleScheduleEvent);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('crm-schedule-lateron', handleScheduleEvent);
+    };
   }, []);
 
   const [dealFilter, setDealFilter] = useState('Today');
@@ -813,7 +871,8 @@ export default function DashboardView({ currentUser, onLogout }) {
           className={`dashboard-main-section ${activeTab !== 'Dashboard' && activeTab !== 'Analytics' ? 'full-width' : ''}`}
           aria-label="Dashboard Content Area"
         >
-          <div key={activeTab} className="tab-pane-animated">
+          {activeTab !== 'LaterOn' && (
+            <div key={activeTab} className="tab-pane-animated">
             {activeTab === 'Dashboard' && (
               <div className="dashboard-columns-container">
               {/* Left Column (Pipeline Overview, Recent Deals, Tasks Overview) */}
@@ -1089,7 +1148,13 @@ export default function DashboardView({ currentUser, onLogout }) {
               />
             )}
 
-          {activeTab === 'Leads' && <LeadsView currentUser={user} onNavigate={navigateTo} />}
+          {activeTab === 'Leads' && (
+            <LeadsView
+              currentUser={user}
+              onNavigate={navigateTo}
+              onScheduleLaterOn={handleScheduleWithLaterOn}
+            />
+          )}
           {activeTab === 'Messages' && (
             <MessagesView
               currentUser={user}
@@ -1106,7 +1171,6 @@ export default function DashboardView({ currentUser, onLogout }) {
             />
           )}
           {activeTab === 'Todos' && <TodosView currentUser={user} />}
-          {activeTab === 'LaterOn' && <LaterOnView />}
           {activeTab === 'Admin' && (
             <div className="settings-workspace-layout">
               {/* Secondary Settings Sub-navigation inside Settings Main Section */}
@@ -1165,6 +1229,22 @@ export default function DashboardView({ currentUser, onLogout }) {
             </div>
           )}
           </div>
+          )}
+
+          {/* Persistent LaterOn Tab: Keeps iframe alive in DOM, never reloads on tab switches */}
+          {hasVisitedLaterOn && (
+            <div
+              className="tab-pane-animated"
+              style={{
+                display: activeTab === 'LaterOn' ? 'flex' : 'none',
+                width: '100%',
+                height: '100%',
+                flexDirection: 'column'
+              }}
+            >
+              <LaterOnView prefillData={laterOnPrefill} />
+            </div>
+          )}
         </main>
 
         {/* Right Sidebar - Activity Feed (Dynamic) */}

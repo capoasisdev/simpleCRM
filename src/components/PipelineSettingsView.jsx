@@ -130,11 +130,37 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   const [newStageName, setNewStageName] = useState('');
   const [renameValue, setRenameValue] = useState('');
   const [isChangingForm, setIsChangingForm] = useState(false);
+  const [isPipelineDropdownOpen, setIsPipelineDropdownOpen] = useState(false);
+  const pipelineDropdownRef = useRef(null);
 
   const showToast = (message) => {
     setToast(message);
     setTimeout(() => setToast(null), 2800);
   };
+
+  // Close pipeline switcher dropdown on outside click or Escape
+  useEffect(() => {
+    if (!isPipelineDropdownOpen) return;
+
+    const handleClickOutside = (e) => {
+      if (pipelineDropdownRef.current && !pipelineDropdownRef.current.contains(e.target)) {
+        setIsPipelineDropdownOpen(false);
+      }
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsPipelineDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isPipelineDropdownOpen]);
 
   // Active editing pipeline object
   const activePipeline = pipelines.find(p => p.id === editingPipelineId);
@@ -1257,12 +1283,53 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         <div className="pipeline-config-layout">
           {/* Left Contextual Pipeline Sidebar */}
           <div className="pipeline-config-subnav">
-            <div className="pipeline-config-identity">
-              <div className="pipeline-config-title-row">
+            <div className="pipeline-config-identity" ref={pipelineDropdownRef}>
+              <button
+                type="button"
+                className={`pipeline-config-switcher-btn ${isPipelineDropdownOpen ? 'active' : ''}`}
+                onClick={() => setIsPipelineDropdownOpen(prev => !prev)}
+                title="Switch pipeline"
+                aria-expanded={isPipelineDropdownOpen}
+              >
                 <h2 className="pipeline-config-title" title={activePipeline?.name}>
                   {activePipeline?.name}
                 </h2>
-              </div>
+                <ChevronDown size={15} strokeWidth={2.2} className="pipeline-config-switcher-chevron" />
+              </button>
+
+              {isPipelineDropdownOpen && (
+                <div className="pipeline-config-dropdown-menu">
+                  <div className="pipeline-config-dropdown-header">Select Pipeline</div>
+                  {pipelines.map((pipe) => {
+                    const isSelected = pipe.id === activePipeline?.id;
+                    return (
+                      <button
+                        key={pipe.id}
+                        type="button"
+                        className={`pipeline-config-dropdown-item ${isSelected ? 'selected' : ''}`}
+                        onClick={() => {
+                          setIsPipelineDropdownOpen(false);
+                          if (pipe.id !== activePipeline?.id) {
+                            handleOpenConfigure(pipe, configureSubTab);
+                          }
+                        }}
+                      >
+                        <div className="pipeline-config-dropdown-item-left">
+                          <span className="pipeline-config-dropdown-name" title={pipe.name}>
+                            {pipe.name}
+                          </span>
+                          {pipe.is_default && (
+                            <span className="pipeline-config-default-pill">Default</span>
+                          )}
+                        </div>
+                        {isSelected && (
+                          <Check size={14} strokeWidth={2.5} className="pipeline-config-dropdown-check" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Pipeline Configure Tabs List */}

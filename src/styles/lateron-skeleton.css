@@ -1,0 +1,309 @@
+/* LaterOn Shimmer Skeleton Loader - Exact Match to LaterOn App */
+
+.lateron-skeleton-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #e9eef6;
+  overflow: hidden;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.lateron-skeleton-container.fade-out {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Two-Tone Page Backdrop: Dark Navy Top Banner */
+.lateron-skel-backdrop-banner {
+  height: 110px;
+  background-color: #273344;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 10px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.lateron-skel-brand {
+  font-size: 19px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.2px;
+  display: flex;
+  align-items: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+.lateron-skel-brand-accent {
+  color: #22c55e;
+}
+
+/* Floating App Window Container */
+.lateron-skel-window-frame {
+  position: absolute;
+  top: 48px;
+  left: 54px;
+  right: 54px;
+  bottom: 30px;
+  max-width: 1180px;
+  margin: 0 auto;
+  background-color: #ffffff;
+  border-radius: 6px;
+  border: 1.5px solid #1e2638;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  display: flex;
+  overflow: hidden;
+  z-index: 2;
+}
+
+/* Left Sidebar within Window Frame */
+.lateron-skel-sidebar {
+  width: 310px;
+  min-width: 280px;
+  max-width: 320px;
+  background-color: #ffffff;
+  border-right: 1.5px solid #1e2638;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+/* Enclosed Profile Card Box */
+.lateron-skel-profile-box {
+  margin: 16px 14px 14px 14px;
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #ffffff;
+}
+
+.lateron-skel-profile-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lateron-skel-profile-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lateron-skel-profile-toggle {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #1e2638;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 2x2 Services Grid */
+.lateron-skel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0 14px 14px 14px;
+}
+
+.lateron-skel-service-card {
+  border-radius: 8px;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.lateron-skel-service-card.whatsapp {
+  background-color: #f0fdf4;
+  border: 1px solid #dcfce7;
+}
+
+.lateron-skel-service-card.email {
+  background-color: #fef2f2;
+  border: 1px solid #fee2e2;
+}
+
+.lateron-skel-service-card.meetings {
+  background-color: #eff6ff;
+  border: 1px solid #dbeafe;
+}
+
+.lateron-skel-service-card.reminders {
+  background-color: #fffbeb;
+  border: 1px solid #fef3c7;
+}
+
+.lateron-skel-icon-box {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.whatsapp .lateron-skel-icon-box {
+  background-color: rgba(34, 197, 94, 0.24);
+}
+
+.email .lateron-skel-icon-box {
+  background-color: rgba(239, 68, 68, 0.24);
+}
+
+.meetings .lateron-skel-icon-box {
+  background-color: rgba(59, 130, 246, 0.24);
+}
+
+.reminders .lateron-skel-icon-box {
+  background-color: rgba(245, 158, 11, 0.24);
+}
+
+/* Right Main Workspace within Window Frame */
+.lateron-skel-main {
+  flex: 1;
+  background-color: #e5edf7;
+  padding: 18px 28px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+/* Top Tabs Row */
+.lateron-skel-tabs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+.lateron-skel-tabs-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.lateron-skel-tab-active {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.lateron-skel-tab-indicator {
+  width: 100%;
+  height: 3px;
+  background-color: #0d9488;
+  border-radius: 2px;
+}
+
+.lateron-skel-tabs-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Center Content Column */
+.lateron-skel-center-wrap {
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Elevated No Upcoming Messages Card */
+.lateron-skel-empty-card {
+  width: 100%;
+  background-color: #ffffff;
+  border-radius: 8px;
+  padding: 30px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+}
+
+/* History Message Cards */
+.lateron-skel-history-card {
+  width: 100%;
+  background-color: #ffffff;
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+.lateron-skel-history-left {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.lateron-skel-history-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lateron-skel-history-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.lateron-skel-footer-link {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+/* Floating Bottom Right Gradient Widget */
+.lateron-skel-float-widget {
+  position: absolute;
+  bottom: 16px;
+  right: 22px;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #a855f7 0%, #06b6d4 100%);
+  box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  z-index: 20;
+}
+
+.lateron-skel-float-bar {
+  width: 4px;
+  height: 14px;
+  background-color: #ffffff;
+  border-radius: 2px;
+  opacity: 0.95;
+}

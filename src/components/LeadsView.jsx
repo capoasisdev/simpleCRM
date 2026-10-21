@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, UserCheck, CalendarClock, RotateCcw, Download, GitFork, FolderInput } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getLeadScope, getFollowUpScope, canDeleteFollowUp, isLeadAssignedToUser, isUserAssignedToPipeline } from '../lib/permissions';
@@ -118,7 +119,7 @@ const formatPhoneNumber = (phone) => {
   return trimmed;
 };
 
-export default function LeadsView({ currentUser, onNavigate }) {
+export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }) {
   const [leads, setLeads] = useState(() => {
     try {
       const cached = localStorage.getItem('crm_cached_leads');
@@ -152,6 +153,50 @@ export default function LeadsView({ currentUser, onNavigate }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
   const filterDropdownRef = useRef(null);
+
+  // LaterOn Context Menu & Prefill Scheduling
+  const [contextMenu, setContextMenu] = useState(null);
+
+  const handleScheduleWithLaterOn = (lead, channel = 'whatsapp') => {
+    if (!lead) return;
+    const prefillPayload = {
+      channel,
+      phone: lead.phone || '',
+      email: lead.email || '',
+      name: lead.name || '',
+      subject: channel === 'email' ? `Follow-up: ${lead.name || 'Discussion'}` : undefined,
+      message: channel === 'email'
+        ? `Hi ${lead.name || 'there'},\n\nI wanted to follow up regarding our recent discussion.`
+        : `Hi ${lead.name || 'there'}, `
+    };
+
+    try {
+      sessionStorage.setItem('lateron_prefill', JSON.stringify(prefillPayload));
+    } catch (e) {}
+
+    if (onScheduleLaterOn) {
+      onScheduleLaterOn(lead, channel);
+    } else {
+      window.dispatchEvent(
+        new CustomEvent('crm-schedule-lateron', {
+          detail: { lead, channel }
+        })
+      );
+      if (onNavigate) {
+        onNavigate('LaterOn');
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handleCloseMenu = () => setContextMenu(null);
+    window.addEventListener('click', handleCloseMenu);
+    window.addEventListener('scroll', handleCloseMenu, true);
+    return () => {
+      window.removeEventListener('click', handleCloseMenu);
+      window.removeEventListener('scroll', handleCloseMenu, true);
+    };
+  }, []);
 
   const baseFilterOptions = canViewAllLeads
     ? [
@@ -1918,6 +1963,15 @@ export default function LeadsView({ currentUser, onNavigate }) {
         onDragStart={isFollowUpCol ? undefined : (e) => handleDragStart(e, lead)}
         onDragEnd={isFollowUpCol ? undefined : handleDragEnd}
         onClick={(e) => handleLeadClick(lead, e)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setContextMenu({
+            x: e.clientX,
+            y: e.clientY,
+            lead
+          });
+        }}
         style={{ cursor: 'pointer', ...(isOpen ? { zIndex: 100 } : {}) }}
       >
         <div
@@ -2900,6 +2954,20 @@ export default function LeadsView({ currentUser, onNavigate }) {
                       <span>WhatsApp</span>
                     </a>
                   )}
+                  {selectedLead.phone && (
+                    <button
+                      type="button"
+                      className="lead-prop-action-btn lateron-schedule-btn"
+                      onClick={() => {
+                        handleScheduleWithLaterOn(selectedLead);
+                        setSelectedLead(null);
+                      }}
+                      title="Schedule WhatsApp with LaterOn"
+                    >
+                      <CalendarClock size={12} strokeWidth={2} />
+                      <span>Schedule (LaterOn)</span>
+                    </button>
+                  )}
                   {selectedLead.email && (
                     <a
                       href={`mailto:${selectedLead.email}`}
@@ -2909,6 +2977,20 @@ export default function LeadsView({ currentUser, onNavigate }) {
                       <Mail size={12} strokeWidth={2} />
                       <span>Email</span>
                     </a>
+                  )}
+                  {selectedLead.email && (
+                    <button
+                      type="button"
+                      className="lead-prop-action-btn lateron-email-schedule-btn"
+                      onClick={() => {
+                        handleScheduleWithLaterOn(selectedLead, 'email');
+                        setSelectedLead(null);
+                      }}
+                      title="Schedule Email with LaterOn"
+                    >
+                      <CalendarClock size={12} strokeWidth={2} />
+                      <span>Schedule Email (LaterOn)</span>
+                    </button>
                   )}
                   {(!selectedLeadFollowUp || selectedLeadFollowUp.status === 'completed') && filterType !== 'followups' && (
                     <button
@@ -3638,6 +3720,64 @@ export default function LeadsView({ currentUser, onNavigate }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Right-Click Context Menu for Lead Cards */}
+      {contextMenu && createPortal(
+        <div
+          className="lead-card-context-menu"
+          style={{
+            position: 'fixed',
+            top: `${Math.max(10, Math.min(contextMenu.y, window.innerHeight - 130))}px`,
+            left: `${Math.max(10, Math.min(contextMenu.x, window.innerWidth - 270))}px`,
+            zIndex: 999999
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="lead-context-menu-header">
+            <span className="lead-context-menu-title">{contextMenu.lead.name}</span>
+            {contextMenu.lead.phone && (
+              <span className="lead-context-menu-sub">{formatPhoneNumber(contextMenu.lead.phone)}</span>
+            )}
+          </div>
+          <div className="lead-context-menu-divider" />
+          <button
+            type="button"
+            className="lead-context-menu-item"
+            onClick={() => {
+              const targetLead = contextMenu.lead;
+              setContextMenu(null);
+              handleScheduleWithLaterOn(targetLead, 'whatsapp');
+            }}
+          >
+            <div className="lead-context-menu-icon-wrap whatsapp">
+              <MessageSquare size={14} strokeWidth={2.2} />
+            </div>
+            <div className="lead-context-menu-text">
+              <span className="lead-context-menu-label">Schedule WhatsApp</span>
+              <span className="lead-context-menu-hint">via LaterOn Automation</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            className="lead-context-menu-item"
+            onClick={() => {
+              const targetLead = contextMenu.lead;
+              setContextMenu(null);
+              handleScheduleWithLaterOn(targetLead, 'email');
+            }}
+          >
+            <div className="lead-context-menu-icon-wrap email">
+              <Mail size={14} strokeWidth={2.2} />
+            </div>
+            <div className="lead-context-menu-text">
+              <span className="lead-context-menu-label">Schedule Email</span>
+              <span className="lead-context-menu-hint">via LaterOn Automation</span>
+            </div>
+          </button>
+        </div>,
+        document.body
       )}
     </div>
   );
