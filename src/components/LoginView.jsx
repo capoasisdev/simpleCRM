@@ -85,7 +85,7 @@ export default function LoginView({ onLoginSuccess }) {
                   inputMode="email"
                   className="input-field"
                   placeholder="Enter your work email"
-                  autoComplete="one-time-code"
+                  autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck="false"
@@ -108,7 +108,7 @@ export default function LoginView({ onLoginSuccess }) {
                   maxLength={4}
                   className="input-field password-input"
                   placeholder="Enter 4-digit PIN"
-                  autoComplete="one-time-code"
+                  autoComplete="off"
                   onKeyDown={handleKeyDown}
                   onInput={(e) => {
                     e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
