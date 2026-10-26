@@ -82,13 +82,14 @@ export default function LoginView({ onLoginSuccess }) {
                   id="login-identity-input"
                   name="login_account_id"
                   type="text"
-                  inputMode="email"
                   className="input-field"
                   placeholder="Enter your work email"
-                  autoComplete="off"
+                  autoComplete="new-password"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck="false"
+                  readOnly
+                  onFocus={(e) => e.target.removeAttribute('readOnly')}
                   onKeyDown={handleKeyDown}
                 />
               </div>
@@ -108,7 +109,9 @@ export default function LoginView({ onLoginSuccess }) {
                   maxLength={4}
                   className="input-field password-input"
                   placeholder="Enter 4-digit PIN"
-                  autoComplete="off"
+                  autoComplete="new-password"
+                  readOnly
+                  onFocus={(e) => e.target.removeAttribute('readOnly')}
                   onKeyDown={handleKeyDown}
                   onInput={(e) => {
                     e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
