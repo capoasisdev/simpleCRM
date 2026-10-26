@@ -14,7 +14,7 @@
     "StatusBar": {
       "style": "LIGHT",
       "backgroundColor": "#f3f4f4",
-      "overlaysWebView": false
+      "overlaysWebView": true
     },
     "Keyboard": {
       "resize": "body"

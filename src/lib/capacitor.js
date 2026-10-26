@@ -10,10 +10,10 @@ export const initCapacitor = async () => {
   }
 
   try {
-    // Configure Status Bar to match light chrome header and avoid cutout collisions
+    // Configure Status Bar to match light chrome header with edge-to-edge integration
     await StatusBar.setStyle({ style: Style.Light });
     await StatusBar.setBackgroundColor({ color: '#f3f4f4' });
-    await StatusBar.setOverlaysWebView({ overlay: false });
+    await StatusBar.setOverlaysWebView({ overlay: true });
   } catch (err) {
     console.warn('StatusBar initialization skipped:', err);
   }
