@@ -56,7 +56,7 @@ export default function LoginView({ onLoginSuccess }) {
         <div className="login-form-container">
           <h1 className="brand-heading">simplecrm</h1>
 
-          <form className="login-form" onSubmit={handleSubmit} noValidate>
+          <form className="login-form" onSubmit={handleSubmit} noValidate autoComplete="off">
             <div className="form-group">
               <label htmlFor="work-email" className="form-label">
                 WORK EMAIL
@@ -64,6 +64,7 @@ export default function LoginView({ onLoginSuccess }) {
               <div className="input-wrapper">
                 <input
                   id="work-email"
+                  name="email"
                   type="email"
                   className="input-field"
                   placeholder="name@company.com"
@@ -72,8 +73,10 @@ export default function LoginView({ onLoginSuccess }) {
                     setEmail(e.target.value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  autoComplete="email"
-                  autoFocus
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck="false"
                   required
                 />
               </div>
@@ -86,6 +89,7 @@ export default function LoginView({ onLoginSuccess }) {
               <div className="input-wrapper">
                 <input
                   id="user-pin"
+                  name="pin"
                   type={showPin ? 'text' : 'password'}
                   inputMode="numeric"
                   maxLength={4}
@@ -96,7 +100,7 @@ export default function LoginView({ onLoginSuccess }) {
                     setPin(e.target.value.replace(/\D/g, '').slice(0, 4));
                     if (errorMessage) setErrorMessage('');
                   }}
-                  autoComplete="current-password"
+                  autoComplete="off"
                   required
                 />
                 <button
