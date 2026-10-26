@@ -3048,12 +3048,24 @@
 
   .leads-board {
     touch-action: pan-x pan-y !important;
-    -webkit-overflow-scrolling: touch;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+  }
+
+  .leads-column {
+    flex: 0 0 85vw !important;
+    min-width: 85vw !important;
+    max-width: 85vw !important;
+    scroll-snap-align: start;
+    scroll-snap-stop: normal;
   }
 
   .leads-column-cards {
-    touch-action: pan-y !important;
-    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y !important;
+    -webkit-overflow-scrolling: touch !important;
     padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
@@ -3401,6 +3413,10 @@
     z-index: 1006 !important;
     animation: sheetSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
     padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+    overflow-x: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    box-sizing: border-box !important;
   }
 
   .lead-modal-sheet-handle {
@@ -3419,11 +3435,16 @@
     display: flex !important;
     align-items: center !important;
     justify-content: space-between !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
   }
 
   .lead-properties-header-content {
     padding: 8px 14px !important;
     flex: 1 !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
   }
 
   .lead-properties-close-wrap {
@@ -3433,12 +3454,57 @@
   .lead-properties-body {
     flex: 1 !important;
     overflow-y: auto !important;
+    overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch;
-    padding: 14px 16px !important;
+    padding: 12px 14px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
   }
 
-  .lead-prop-custom-input {
+  .lead-properties-table {
+    width: 100% !important;
     max-width: 100% !important;
+    table-layout: fixed !important;
+    box-sizing: border-box !important;
+  }
+
+  .lead-prop-label {
+    width: 110px !important;
+    max-width: 110px !important;
+    padding: 10px 8px !important;
+    font-size: 12px !important;
+    word-break: break-word !important;
+    box-sizing: border-box !important;
+  }
+
+  .lead-prop-value {
+    padding: 10px 8px !important;
+    font-size: 13px !important;
+    word-break: break-word !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  .lead-prop-select {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    font-size: 12.5px !important;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .lead-prop-custom-input,
+  .lead-prop-notes-textarea {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .lead-footer-segmented-toggle {
+    display: none !important;
   }
 }
 
