@@ -123,7 +123,16 @@ export default function DashboardView({ currentUser, onLogout }) {
 
   const parseLocation = () => {
     const path = window.location.pathname.toLowerCase().replace(/\/$/, '') || '/';
-    if (path === '' || path === '/' || path === '/dashboard') {
+    if (path === '' || path === '/' || path === '/dashboard' || path === '/index.html') {
+      try {
+        const savedRaw = localStorage.getItem('simplecrm_last_active_tab');
+        if (savedRaw) {
+          const saved = JSON.parse(savedRaw);
+          if (saved && saved.tab) {
+            return { tab: saved.tab, adminSub: saved.adminSub || 'users' };
+          }
+        }
+      } catch {}
       return { tab: 'Dashboard', adminSub: 'users' };
     }
     if (path === '/dashboard/analytics' || path === '/analytics') {
@@ -221,13 +230,19 @@ export default function DashboardView({ currentUser, onLogout }) {
     if (window.location.pathname !== path) {
       window.history.pushState({ tab: tabName, adminSub: subTab }, '', path);
     }
+    try {
+      localStorage.setItem('simplecrm_last_active_tab', JSON.stringify({ tab: tabName, adminSub: subTab }));
+    } catch {}
   };
 
   useEffect(() => {
-    // If on root, set URL to /dashboard cleanly
-    if (window.location.pathname === '/' || window.location.pathname === '') {
-      window.history.replaceState({ tab: 'Dashboard', adminSub: 'users' }, '', '/dashboard');
+    const initialPath = getRouteForTab(validInitialTab, adminSubTab);
+    if (window.location.pathname === '/' || window.location.pathname === '' || window.location.pathname === '/index.html') {
+      window.history.replaceState({ tab: validInitialTab, adminSub: adminSubTab }, '', initialPath);
     }
+    try {
+      localStorage.setItem('simplecrm_last_active_tab', JSON.stringify({ tab: validInitialTab, adminSub: adminSubTab }));
+    } catch {}
 
     const handlePopState = () => {
       const current = parseLocation();
@@ -236,6 +251,9 @@ export default function DashboardView({ currentUser, onLogout }) {
         setHasVisitedLaterOn(true);
       }
       setAdminSubTab(current.adminSub);
+      try {
+        localStorage.setItem('simplecrm_last_active_tab', JSON.stringify({ tab: current.tab, adminSub: current.adminSub }));
+      } catch {}
     };
 
     const handleScheduleEvent = (e) => {
