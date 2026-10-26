@@ -9,13 +9,34 @@ export const initCapacitor = async () => {
     return;
   }
 
-  try {
-    // Configure Status Bar to match light chrome header with edge-to-edge integration
-    await StatusBar.setStyle({ style: Style.Light });
-    await StatusBar.setBackgroundColor({ color: '#f3f4f4' });
-    await StatusBar.setOverlaysWebView({ overlay: true });
-  } catch (err) {
-    console.warn('StatusBar initialization skipped:', err);
+  const applyStatusBarTheme = async () => {
+    try {
+      const isDark = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      await StatusBar.setOverlaysWebView({ overlay: false });
+      if (isDark) {
+        // Device is in Dark Mode: Dark bar with crisp white icons
+        await StatusBar.setStyle({ style: Style.Dark });
+        await StatusBar.setBackgroundColor({ color: '#18181b' });
+      } else {
+        // Device is in Light Mode: Light chrome bar with dark icons
+        await StatusBar.setStyle({ style: Style.Light });
+        await StatusBar.setBackgroundColor({ color: '#f3f4f4' });
+      }
+    } catch (err) {
+      console.warn('StatusBar theme update error:', err);
+    }
+  };
+
+  await applyStatusBarTheme();
+
+  // Listen for dynamic changes in OS theme (e.g. auto day/night switch)
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    const darkMatcher = window.matchMedia('(prefers-color-scheme: dark)');
+    if (darkMatcher.addEventListener) {
+      darkMatcher.addEventListener('change', applyStatusBarTheme);
+    } else if (darkMatcher.addListener) {
+      darkMatcher.addListener(applyStatusBarTheme);
+    }
   }
 
   try {
