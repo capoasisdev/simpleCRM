@@ -181,6 +181,10 @@
 @media (max-width: 900px) {
   .login-page {
     grid-template-columns: 1fr;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .login-visual-section {
@@ -188,6 +192,12 @@
   }
 
   .login-form-section {
-    padding: var(--spacing-xl) var(--spacing-lg);
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: calc(var(--spacing-xl) + 24px) var(--spacing-lg) var(--spacing-2xl);
   }
 }
