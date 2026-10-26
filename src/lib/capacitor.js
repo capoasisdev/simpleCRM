@@ -10,9 +10,10 @@ export const initCapacitor = async () => {
   }
 
   try {
-    // Configure Status Bar for modern dark theme
-    await StatusBar.setStyle({ style: Style.Dark });
-    await StatusBar.setBackgroundColor({ color: '#09090b' });
+    // Configure Status Bar to match light chrome header and avoid cutout collisions
+    await StatusBar.setStyle({ style: Style.Light });
+    await StatusBar.setBackgroundColor({ color: '#f3f4f4' });
+    await StatusBar.setOverlaysWebView({ overlay: false });
   } catch (err) {
     console.warn('StatusBar initialization skipped:', err);
   }
