@@ -252,6 +252,16 @@ export default function DashboardView({ currentUser, onLogout }) {
     };
   }, []);
 
+  const [dealFilter, setDealFilter] = useState('Today');
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
+  const [isMobileActivityOpen, setIsMobileActivityOpen] = useState(false);
+  const userMenuRef = useRef(null);
+
+  // In-app Notifications State
+  const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
+  const [notifications, setNotifications] = useState(() => getStoredNotifications());
+
   // Handle in-app back navigation event dispatched by hardware/gesture back button
   useEffect(() => {
     const handleInAppBack = (e) => {
@@ -341,16 +351,6 @@ export default function DashboardView({ currentUser, onLogout }) {
       });
     }
   }, [showUserMenu]);
-
-  const [dealFilter, setDealFilter] = useState('Today');
-  const [showUserMenu, setShowUserMenu] = useState(false);
-  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
-  const [isMobileActivityOpen, setIsMobileActivityOpen] = useState(false);
-  const userMenuRef = useRef(null);
-
-  // In-app Notifications State
-  const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
-  const [notifications, setNotifications] = useState(() => getStoredNotifications());
 
   useEffect(() => {
     const handleNotifAdded = (e) => {
