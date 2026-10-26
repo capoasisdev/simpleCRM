@@ -22,6 +22,19 @@
   pointer-events: none;
 }
 
+/* Default Desktop/Mobile view toggling */
+.lateron-skel-mobile-view {
+  display: none;
+}
+
+.lateron-skel-desktop-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
 /* Two-Tone Page Backdrop: Dark Navy Top Banner */
 .lateron-skel-backdrop-banner {
   height: 110px;
@@ -306,4 +319,168 @@
   background-color: #ffffff;
   border-radius: 2px;
   opacity: 0.95;
+}
+
+/* ==========================================================================
+   Mobile Responsive Skeleton View (<= 768px)
+   Matches the LaterOn live mobile app layout & colors exactly
+   ========================================================================== */
+@media (max-width: 768px) {
+  .lateron-skeleton-container {
+    background-color: #ffffff;
+  }
+
+  .lateron-skel-desktop-view {
+    display: none !important;
+  }
+
+  .lateron-skel-mobile-view {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    height: 100% !important;
+    background-color: #ffffff !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Profile Header Bar */
+  .lateron-skel-mobile-header {
+    padding: 10px 16px;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: #ffffff;
+    flex-shrink: 0;
+  }
+
+  .lateron-skel-mobile-profile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .lateron-skel-mobile-profile-text {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .lateron-skel-mobile-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    background-color: #f1f5f9;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+  }
+
+  .lateron-skel-toggle-inner {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2.5px solid #1e2638;
+  }
+
+  /* Main Body */
+  .lateron-skel-mobile-body {
+    padding: 32px 20px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+    flex: 1;
+  }
+
+  .lateron-skel-mobile-title-wrap {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  /* 2x2 Service Cards Grid */
+  .lateron-skel-mobile-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    width: 100%;
+    max-width: 440px;
+  }
+
+  .lateron-skel-mobile-card {
+    border-radius: 18px;
+    padding: 28px 16px 24px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 10px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  }
+
+  .lateron-skel-mobile-card.whatsapp {
+    background-color: #f0fdf4;
+    border: 1px solid #dcfce7;
+  }
+
+  .lateron-skel-mobile-card.email {
+    background-color: #fef2f2;
+    border: 1px solid #fee2e2;
+  }
+
+  .lateron-skel-mobile-card.meetings {
+    background-color: #eff6ff;
+    border: 1px solid #dbeafe;
+  }
+
+  .lateron-skel-mobile-card.reminders {
+    background-color: #fffbeb;
+    border: 1px solid #fef3c7;
+  }
+
+  /* Colored Icon Box */
+  .lateron-skel-mobile-icon-box {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 6px;
+  }
+
+  .lateron-skel-mobile-icon-box.whatsapp {
+    background-color: #22c55e;
+  }
+
+  .lateron-skel-mobile-icon-box.email {
+    background-color: #ef4444;
+  }
+
+  .lateron-skel-mobile-icon-box.meetings {
+    background-color: #3b82f6;
+  }
+
+  .lateron-skel-mobile-icon-box.reminders {
+    background-color: #f59e0b;
+  }
+
+  /* Semi-translucent shimmer icon inside colored box */
+  .lateron-skel-mobile-icon-box .skeleton-shimmer {
+    background-color: rgba(255, 255, 255, 0.45);
+  }
+
+  .lateron-skel-mobile-icon-box .skeleton-shimmer::after {
+    background-image: linear-gradient(
+      110deg,
+      rgba(255, 255, 255, 0) 15%,
+      rgba(255, 255, 255, 0.6) 38%,
+      rgba(255, 255, 255, 0.95) 50%,
+      rgba(255, 255, 255, 0.6) 62%,
+      rgba(255, 255, 255, 0) 85%
+    );
+  }
 }

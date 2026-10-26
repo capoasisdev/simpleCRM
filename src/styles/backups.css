@@ -46,9 +46,6 @@
   letter-spacing: -0.025em;
   margin: 0;
   line-height: 1.2;
-  background: #f5f5dc;
-  padding: 4px 8px;
-  width: fit-content;
 }
 
 .backups-master-count {
@@ -236,9 +233,6 @@
   font-size: 20px;
   font-weight: 600;
   color: #0f172a;
-  background: #f5f5dc;
-  padding: 4px 8px;
-  width: fit-content;
   margin: 0;
 }
 
@@ -722,3 +716,220 @@
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Mobile Overview Container (Hidden on Desktop > 900px) */
+.backups-mobile-overview-view {
+  display: none !important;
+}
+
+.backups-desktop-full-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* ==========================================================================
+   Backups Mobile Responsive Styles (<= 900px)
+   ========================================================================== */
+@media (max-width: 900px) {
+  /* 0. Hide Desktop-only Backups Interface on Mobile */
+  .backups-desktop-full-view {
+    display: none !important;
+  }
+
+  /* Clean Overview Table / Cards (Mobile <= 900px) */
+  .backups-mobile-overview-view {
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 16px 14px 48px 14px !important;
+    gap: 16px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .backups-mobile-overview-card {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 14px !important;
+    overflow: hidden !important;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .backups-mobile-overview-table-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 12px 16px !important;
+    background: #f8fafc !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    color: #64748b !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+  }
+
+  .backups-mobile-overview-table-body {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .backups-mobile-overview-row {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 14px 16px !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    gap: 12px !important;
+  }
+
+  .backups-mobile-overview-row:last-child {
+    border-bottom: none !important;
+  }
+
+  .backups-mobile-overview-left {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    min-width: 0 !important;
+    flex: 1 !important;
+  }
+
+  .backups-mobile-overview-icon-box {
+    width: 38px !important;
+    height: 38px !important;
+    border-radius: 10px !important;
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+  }
+
+  .backups-mobile-overview-info {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    gap: 3px !important;
+  }
+
+  .backups-mobile-overview-name {
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .backups-mobile-overview-sub {
+    font-size: 11.5px !important;
+    color: #64748b !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .backups-mobile-overview-right {
+    flex-shrink: 0 !important;
+  }
+
+  .backups-mobile-status-badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 3px 8px !important;
+    border-radius: 5px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+    white-space: nowrap !important;
+    background: #f0fdf4 !important;
+    color: #166534 !important;
+    border: 1px solid #bbf7d0 !important;
+  }
+
+  .backups-mobile-empty {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 32px 16px !important;
+    gap: 8px !important;
+    color: #64748b !important;
+    font-size: 13px !important;
+  }
+
+  .backups-mobile-desktop-notice {
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+    padding: 14px 16px !important;
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 12px !important;
+    color: #475569 !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+  }
+
+  .backups-notice-icon-box {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 8px !important;
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: #475569 !important;
+    flex-shrink: 0 !important;
+  }
+
+  .backups-notice-text-col {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 3px !important;
+  }
+
+  .backups-notice-title {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+  }
+
+  .backups-notice-desc {
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+    color: #64748b !important;
+  }
+
+  .backups-view-container {
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .backups-view-inner {
+    padding: 16px 14px 48px 14px !important;
+    gap: 16px !important;
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .backups-master-header {
+    flex-wrap: wrap !important;
+    gap: 12px !important;
+  }
+  .backups-header-actions {
+    width: 100% !important;
+    justify-content: flex-start !important;
+    flex-wrap: wrap !important;
+  }
+}
+

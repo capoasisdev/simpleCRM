@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { Capacitor } from '@capacitor/core';
 
 const EMAIL_SETTINGS_STORAGE_KEY = 'crm_email_settings';
 const EMAIL_TEMPLATES_STORAGE_KEY = 'crm_email_templates';
@@ -219,7 +220,9 @@ export async function deleteEmailTemplate(id) {
   }
 }
 
-export const RESEND_API_BASE = typeof window !== 'undefined' ? '/api/resend' : 'https://api.resend.com';
+export const RESEND_API_BASE = (typeof window !== 'undefined' && !Capacitor.isNativePlatform() && window.location.port === '5173')
+  ? '/api/resend'
+  : 'https://api.resend.com';
 
 /**
  * Verify Resend API Key (supports both Full Access and Sending-Only keys)

@@ -56,6 +56,23 @@ export default function AiAssistantWidget({
     }
   }, [isOpen]);
 
+  // Global events to allow opening/closing from menus (e.g. mobile Tools & More)
+  useEffect(() => {
+    const handleOpen = () => setIsOpen(true);
+    const handleClose = () => setIsOpen(false);
+    const handleToggle = () => setIsOpen((prev) => !prev);
+
+    window.addEventListener('crm-open-ai-assistant', handleOpen);
+    window.addEventListener('crm-close-ai-assistant', handleClose);
+    window.addEventListener('crm-toggle-ai-assistant', handleToggle);
+
+    return () => {
+      window.removeEventListener('crm-open-ai-assistant', handleOpen);
+      window.removeEventListener('crm-close-ai-assistant', handleClose);
+      window.removeEventListener('crm-toggle-ai-assistant', handleToggle);
+    };
+  }, []);
+
   // Auto-grow textarea with content up to max-height
   useEffect(() => {
     if (textareaRef.current) {
@@ -241,7 +258,15 @@ export default function AiAssistantWidget({
   };
 
   return (
-    <div className="crm-ai-floating-widget">
+    <>
+      {isOpen && (
+        <div
+          className="crm-ai-mobile-backdrop"
+          onClick={() => setIsOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <div className={`crm-ai-floating-widget ${isOpen ? 'has-open-chat' : ''}`}>
       {/* 1. Collapsed State: 3D Mascot CTA */}
       {!isOpen && (
         <button
@@ -472,6 +497,7 @@ export default function AiAssistantWidget({
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

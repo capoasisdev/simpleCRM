@@ -27,7 +27,8 @@ import {
   ListFilter,
   CreditCard,
   Pin,
-  Info
+  Info,
+  Monitor
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission } from '../lib/permissions';
@@ -1194,10 +1195,71 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
   return (
     <div className="pipeline-view-container">
-      {/* ==============================================================
-          STATE A: MASTER VIEW (NO STAGES DIRECTLY SHOWN ON OPEN)
-          ============================================================== */}
-      {editingPipelineId === null ? (
+      {/* Mobile Overview View (Strictly visible on mobile <= 900px) */}
+      <div className="pipeline-mobile-overview-view">
+        <div className="pipeline-mobile-overview-card">
+          <div className="pipeline-mobile-overview-table-header">
+            <span className="pipeline-overview-th-left">Pipeline</span>
+            <span className="pipeline-overview-th-right">Stages</span>
+          </div>
+
+          <div className="pipeline-mobile-overview-table-body">
+            {pipelines.map((pipe) => {
+              const pipeStages = Array.isArray(pipe.stages) ? pipe.stages : [];
+              const pipeLeads = allLeads.filter(l => l.pipeline_id === pipe.id || (!l.pipeline_id && pipe.is_default));
+              const form = connectedForms.find(f => f.pipeline_id === pipe.id);
+
+              return (
+                <div key={pipe.id} className="pipeline-mobile-overview-row">
+                  <div className="pipeline-mobile-overview-left">
+                    <div className="pipeline-mobile-overview-icon-box">
+                      <GitFork size={18} style={{ color: '#0f172a' }} />
+                    </div>
+                    <div className="pipeline-mobile-overview-info">
+                      <div className="pipeline-mobile-overview-name-row">
+                        <span className="pipeline-mobile-overview-name">{pipe.name}</span>
+                        {pipe.is_default && (
+                          <span className="pipeline-mobile-default-tag">Default</span>
+                        )}
+                      </div>
+                      <span className="pipeline-mobile-overview-sub">
+                        {pipeLeads.length} {pipeLeads.length === 1 ? 'lead' : 'leads'}
+                        {form ? ` · ${form.form_name || `Form ${form.form_id}`}` : ''}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pipeline-mobile-overview-right">
+                    <span className="pipeline-mobile-stages-badge">
+                      {pipeStages.length} {pipeStages.length === 1 ? 'Stage' : 'Stages'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Clean Desktop Notice Banner */}
+        <div className="pipeline-mobile-desktop-notice">
+          <div className="pipeline-notice-icon-box">
+            <Monitor size={17} strokeWidth={1.75} />
+          </div>
+          <div className="pipeline-notice-text-col">
+            <span className="pipeline-notice-title">Desktop Management</span>
+            <span className="pipeline-notice-desc">
+              To create pipelines, customize stages, or set up lead distribution rules, open simplecrm on your computer.
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop Full-Featured View (Hidden on mobile <= 900px) */}
+      <div className="pipeline-desktop-full-view">
+        {/* ==============================================================
+            STATE A: MASTER VIEW (NO STAGES DIRECTLY SHOWN ON OPEN)
+            ============================================================== */}
+        {editingPipelineId === null ? (
         <div className="pipeline-view-inner">
           <div className="pipeline-master-header">
             <div className="pipeline-master-title-group">
@@ -2185,6 +2247,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
           </div>
         </div>
       )}
+      </div>
 
 
 

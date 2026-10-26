@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Users,
   Plus,
@@ -12,7 +13,8 @@ import {
   EyeOff,
   UserCheck,
   Edit2,
-  Sliders
+  Sliders,
+  ChevronRight
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import PermissionsEditor from './PermissionsEditor';
@@ -23,6 +25,8 @@ import {
 } from '../lib/permissions';
 import Skeleton from './common/Skeleton';
 import CustomSelect from './common/CustomSelect';
+import { haptic } from '../lib/haptics';
+import { registerBackHandler } from '../lib/backButton';
 import '../styles/admin.css';
 import '../styles/pipeline.css';
 
@@ -45,6 +49,7 @@ export default function AdminUsersView({ currentUser, onLogout }) {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showPins, setShowPins] = useState({}); // { [userId]: boolean }
+  const [activeMobileUser, setActiveMobileUser] = useState(null);
 
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -69,6 +74,52 @@ export default function AdminUsersView({ currentUser, onLogout }) {
   // Delete User Confirmation state
   const [deletePin, setDeletePin] = useState('');
   const [deletePinError, setDeletePinError] = useState('');
+
+  // Native back button handling for modals & mobile sheet
+  useEffect(() => {
+    if (activeMobileUser) {
+      return registerBackHandler(() => {
+        setActiveMobileUser(null);
+        return true;
+      });
+    }
+  }, [activeMobileUser]);
+
+  useEffect(() => {
+    if (isAddModalOpen) {
+      return registerBackHandler(() => {
+        setIsAddModalOpen(false);
+        return true;
+      });
+    }
+  }, [isAddModalOpen]);
+
+  useEffect(() => {
+    if (isEditModalOpen) {
+      return registerBackHandler(() => {
+        setIsEditModalOpen(false);
+        return true;
+      });
+    }
+  }, [isEditModalOpen]);
+
+  useEffect(() => {
+    if (isPinModalOpen) {
+      return registerBackHandler(() => {
+        setIsPinModalOpen(false);
+        return true;
+      });
+    }
+  }, [isPinModalOpen]);
+
+  useEffect(() => {
+    if (isDeleteModalOpen) {
+      return registerBackHandler(() => {
+        setIsDeleteModalOpen(false);
+        return true;
+      });
+    }
+  }, [isDeleteModalOpen]);
 
   // Fetch users & setup realtime
   useEffect(() => {
@@ -419,6 +470,7 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                   <Skeleton width="28px" height="28px" borderRadius="6px" />
                   <Skeleton width="28px" height="28px" borderRadius="6px" />
                 </div>
+                <ChevronRight size={18} strokeWidth={1.75} className="admin-mobile-chevron" />
               </div>
             ))
           ) : filteredUsers.length > 0 ? (
@@ -434,7 +486,14 @@ export default function AdminUsersView({ currentUser, onLogout }) {
               ].filter(Boolean);
 
               return (
-                <div key={user.id} className="admin-user-numbered-item">
+                <div
+                  key={user.id}
+                  className="admin-user-numbered-item"
+                  onClick={() => {
+                    haptic.light();
+                    setActiveMobileUser(user);
+                  }}
+                >
                   {/* Col 1: Index Number */}
                   <span className="pipeline-number-index">{idx + 1}</span>
 
@@ -456,7 +515,8 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                     <div className="admin-pin-pill" title="4-digit Login PIN">
                       <span
                         className="admin-pin-text"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedUser(user);
                           setNewPin('');
                           setFormError('');
@@ -469,7 +529,10 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                       <button
                         type="button"
                         className="admin-pin-toggle-btn"
-                        onClick={() => toggleShowPin(user.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleShowPin(user.id);
+                        }}
                         data-tooltip={isMasked ? 'Reveal PIN' : 'Hide PIN'}
                         aria-label={isMasked ? 'Reveal PIN' : 'Hide PIN'}
                       >
@@ -490,7 +553,8 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                       <button
                         type="button"
                         className="admin-perm-pill member"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedUser({
                             ...user,
                             permissions: p
@@ -511,7 +575,8 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                         type="button"
                         className="btn-admin-action"
                         data-tooltip="Change PIN"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedUser(user);
                           setNewPin('');
                           setFormError('');
@@ -526,7 +591,8 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                         type="button"
                         className="btn-admin-action"
                         data-tooltip="Edit Permissions"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedUser({
                             ...user,
                             permissions: p
@@ -543,7 +609,10 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                           type="button"
                           className="btn-admin-action danger"
                           data-tooltip="Delete User"
-                          onClick={() => handlePromptDelete(user)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePromptDelete(user);
+                          }}
                           aria-label="Delete User"
                         >
                           <Trash2 size={15} strokeWidth={1.75} />
@@ -551,6 +620,9 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                       )}
                     </div>
                   </div>
+
+                  {/* Mobile Chevron */}
+                  <ChevronRight size={18} strokeWidth={1.75} className="admin-mobile-chevron" />
                 </div>
               );
             })
@@ -563,7 +635,7 @@ export default function AdminUsersView({ currentUser, onLogout }) {
       </div>
 
       {/* 1. Modal: Add User */}
-      {isAddModalOpen && (
+      {isAddModalOpen && createPortal(
         <div className="admin-modal-backdrop" onClick={() => setIsAddModalOpen(false)}>
           <div
             className="admin-modal-card admin-modal-perms"
@@ -688,11 +760,12 @@ export default function AdminUsersView({ currentUser, onLogout }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* 2. Modal: Change PIN */}
-      {isPinModalOpen && selectedUser && (
+      {isPinModalOpen && selectedUser && createPortal(
         <div className="admin-modal-backdrop" onClick={() => setIsPinModalOpen(false)}>
           <div
             className="admin-modal-card admin-modal-pin"
@@ -767,11 +840,12 @@ export default function AdminUsersView({ currentUser, onLogout }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* 3. Modal: Edit Permissions */}
-      {isEditModalOpen && selectedUser && (
+      {isEditModalOpen && selectedUser && createPortal(
         <div className="admin-modal-backdrop" onClick={() => setIsEditModalOpen(false)}>
           <div
             className="admin-modal-card admin-modal-perms"
@@ -849,11 +923,12 @@ export default function AdminUsersView({ currentUser, onLogout }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* 4. Modal: Delete User Confirmation */}
-      {isDeleteModalOpen && userToDelete && (
+      {isDeleteModalOpen && userToDelete && createPortal(
         <div
           className="admin-modal-backdrop"
           onClick={handleCloseDeleteModal}
@@ -958,8 +1033,144 @@ export default function AdminUsersView({ currentUser, onLogout }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
+
+      {/* 5. Mobile Bottom Sheet: Member Details & Quick Management */}
+      {activeMobileUser && (() => {
+        const currentUserData = users.find((u) => u.id === activeMobileUser.id) || activeMobileUser;
+        const isMasked = !showPins[currentUserData.id];
+        const p = normalizePermissions(currentUserData);
+        const activeModules = [
+          p.leads?.view && `Leads (${p.leads?.scope === 'all' ? 'All' : 'Assigned'})`,
+          p.pipeline?.view && 'Pipeline',
+          p.dashboard?.view && `Dashboard (${p.dashboard?.scope === 'all' ? 'All' : 'Assigned'})`,
+          p.analytics?.view !== false && `Analytics (${p.analytics?.scope === 'all' ? 'All' : 'Assigned'})`,
+          (p.admin?.manage_users || p.admin?.manage_routing || p.admin?.manage_meta) && 'Admin'
+        ].filter(Boolean);
+
+        return createPortal(
+          <div className="admin-mobile-sheet-backdrop" onClick={() => setActiveMobileUser(null)}>
+            <div
+              className="admin-mobile-sheet-card"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="admin-sheet-handle-bar">
+                <div className="admin-sheet-handle" />
+              </div>
+
+              <div className="admin-sheet-header">
+                <div className="admin-sheet-user-info">
+                  <div className="admin-sheet-title-row">
+                    <h3 className="admin-sheet-user-name">{currentUserData.name}</h3>
+                    <span className={`admin-role-pill ${currentUserData.role || 'member'}`}>
+                      {currentUserData.role === 'admin' ? 'Admin' : 'Member'}
+                    </span>
+                  </div>
+                  <p className="admin-sheet-user-email">{currentUserData.email}</p>
+                </div>
+                <button
+                  type="button"
+                  className="admin-sheet-close-btn"
+                  onClick={() => setActiveMobileUser(null)}
+                  aria-label="Close sheet"
+                >
+                  <X size={18} strokeWidth={2} />
+                </button>
+              </div>
+
+              <div className="admin-sheet-body">
+                {/* Login PIN Card */}
+                <div className="admin-sheet-tile">
+                  <div className="admin-sheet-tile-left">
+                    <span className="admin-sheet-tile-label">Login PIN</span>
+                    <div className="admin-sheet-pin-display">
+                      <span className="admin-sheet-pin-value">
+                        {isMasked ? '••••' : currentUserData.pin}
+                      </span>
+                      <button
+                        type="button"
+                        className="admin-pin-toggle-btn"
+                        onClick={() => toggleShowPin(currentUserData.id)}
+                        aria-label={isMasked ? 'Reveal PIN' : 'Hide PIN'}
+                      >
+                        {isMasked ? <Eye size={14} /> : <EyeOff size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="admin-sheet-tile-btn"
+                    onClick={() => {
+                      setSelectedUser(currentUserData);
+                      setNewPin('');
+                      setFormError('');
+                      setIsPinModalOpen(true);
+                      setActiveMobileUser(null);
+                    }}
+                  >
+                    <Key size={14} strokeWidth={2} />
+                    <span>Change PIN</span>
+                  </button>
+                </div>
+
+                {/* Access Level Card */}
+                <div className="admin-sheet-tile">
+                  <div className="admin-sheet-tile-left">
+                    <span className="admin-sheet-tile-label">Access Level</span>
+                    <span className="admin-sheet-perm-status">
+                      {currentUserData.role === 'admin'
+                        ? 'Full Administrator Access'
+                        : activeModules.length > 0
+                        ? activeModules.join(' · ')
+                        : 'Restricted Access'}
+                    </span>
+                  </div>
+                  {currentUserData.role !== 'admin' && (
+                    <button
+                      type="button"
+                      className="admin-sheet-tile-btn"
+                      onClick={() => {
+                        setSelectedUser({
+                          ...currentUserData,
+                          permissions: p
+                        });
+                        setIsEditModalOpen(true);
+                        setActiveMobileUser(null);
+                      }}
+                    >
+                      <Sliders size={14} strokeWidth={2} />
+                      <span>Configure</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Delete Member Option */}
+                {users.length > 1 && (
+                  <div className="admin-sheet-danger-section">
+                    <button
+                      type="button"
+                      className="admin-sheet-delete-btn"
+                      onClick={() => {
+                        const userToDel = currentUserData;
+                        setActiveMobileUser(null);
+                        handlePromptDelete(userToDel);
+                      }}
+                    >
+                      <Trash2 size={16} strokeWidth={1.8} />
+                      <span>Delete Member</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        );
+      })()}
     </div>
   );
 }

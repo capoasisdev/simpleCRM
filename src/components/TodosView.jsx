@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StickyNote,
   Plus,
@@ -10,7 +10,9 @@ import {
   AlignLeft,
   X,
   Palette,
-  Check
+  Check,
+  Filter,
+  ChevronDown
 } from 'lucide-react';
 import {
   fetchStickyNotes,
@@ -49,6 +51,32 @@ export default function TodosView({ currentUser }) {
   const [onlyPinned, setOnlyPinned] = useState(false);
   const [openColorDropdownId, setOpenColorDropdownId] = useState(null);
   const [newlyAddedNoteId, setNewlyAddedNoteId] = useState(null);
+
+  // Mobile specific search bar toggle & filter dropdown states
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+  const filterDropdownRef = useRef(null);
+  const mobileSearchInputRef = useRef(null);
+
+  // Auto-focus mobile search input when opened
+  useEffect(() => {
+    if (isMobileSearchOpen && mobileSearchInputRef.current) {
+      mobileSearchInputRef.current.focus();
+    }
+  }, [isMobileSearchOpen]);
+
+  // Close filter dropdown on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (filterDropdownRef.current && !filterDropdownRef.current.contains(e.target)) {
+        setIsFilterDropdownOpen(false);
+      }
+    };
+    if (isFilterDropdownOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isFilterDropdownOpen]);
 
   // Close color dropdown when clicking outside
   useEffect(() => {
@@ -251,76 +279,231 @@ export default function TodosView({ currentUser }) {
   return (
     <div className="sticky-board-root">
       {/* Top Controls Toolbar */}
-      <header className="sticky-board-header">
-        <div className="sticky-header-left">
-          <div className="sticky-title-wrap">
-            <h1 className="sticky-title">Sticky Notes</h1>
-            <span className="sticky-count-badge">
-              {notes.length}
-            </span>
-          </div>
-
-          <div className="sticky-search-wrap">
-            <Search size={15} className="sticky-search-icon" />
+      <header className={`sticky-board-header ${isMobileSearchOpen ? 'is-searching' : ''}`}>
+        {isMobileSearchOpen ? (
+          <div className="sticky-mobile-search-bar">
+            <Search size={16} className="sticky-mobile-search-icon" />
             <input
+              ref={mobileSearchInputRef}
               type="text"
               placeholder="Search notes..."
-              className="sticky-search-input"
+              className="sticky-mobile-search-input"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setIsMobileSearchOpen(false);
+                }
+              }}
             />
-            {searchQuery && (
+            <button
+              type="button"
+              className="sticky-mobile-search-close"
+              onClick={() => {
+                setSearchQuery('');
+                setIsMobileSearchOpen(false);
+              }}
+              aria-label="Close search"
+              title="Close search"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="sticky-header-left">
+              <div className="sticky-title-wrap">
+                <h1 className="sticky-title">Sticky Notes</h1>
+                <span className="sticky-count-badge">
+                  {notes.length}
+                </span>
+              </div>
+
+              {/* Desktop Search input */}
+              <div className="sticky-search-wrap desktop-only">
+                <Search size={15} className="sticky-search-icon" />
+                <input
+                  type="text"
+                  placeholder="Search notes..."
+                  className="sticky-search-input"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    className="sticky-search-clear"
+                    onClick={() => setSearchQuery('')}
+                    aria-label="Clear search"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="sticky-header-right">
+              {/* Desktop Filter Pills */}
+              <div className="sticky-filter-chips desktop-only">
+                <button
+                  type="button"
+                  className={`sticky-chip ${activeColorFilter === 'all' && !onlyPinned ? 'active' : ''}`}
+                  onClick={() => {
+                    setActiveColorFilter('all');
+                    setOnlyPinned(false);
+                  }}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  className={`sticky-chip ${onlyPinned ? 'active' : ''}`}
+                  onClick={() => setOnlyPinned(!onlyPinned)}
+                >
+                  <Pin size={12} className={onlyPinned ? 'fill-icon' : ''} />
+                  <span>Pinned</span>
+                </button>
+
+                {/* Color Swatch Filters */}
+                <div className="sticky-swatch-filters">
+                  {STICKY_COLORS.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={`sticky-swatch-btn ${activeColorFilter === c.id ? 'selected' : ''}`}
+                      style={{ backgroundColor: c.bg, borderColor: c.border }}
+                      onClick={() => {
+                        setActiveColorFilter(activeColorFilter === c.id ? 'all' : c.id);
+                      }}
+                      title={`Filter ${c.name} notes`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Mobile Filter Dropdown */}
+              <div className="sticky-filter-dropdown-wrap mobile-only" ref={filterDropdownRef}>
+                <button
+                  type="button"
+                  className={`sticky-filter-dropdown-trigger ${activeColorFilter !== 'all' || onlyPinned ? 'has-filter' : ''}`}
+                  onClick={() => setIsFilterDropdownOpen((prev) => !prev)}
+                  aria-expanded={isFilterDropdownOpen}
+                  aria-label="Filter notes"
+                  title="Filter notes"
+                >
+                  {onlyPinned ? (
+                    <Pin size={12} className="fill-icon" />
+                  ) : activeColorFilter !== 'all' ? (
+                    (() => {
+                      const c = STICKY_COLORS.find((col) => col.id === activeColorFilter);
+                      return c ? (
+                        <span
+                          className="sticky-filter-swatch-dot"
+                          style={{ backgroundColor: c.bg, borderColor: c.border }}
+                        />
+                      ) : (
+                        <Filter size={13} />
+                      );
+                    })()
+                  ) : (
+                    <Filter size={13} />
+                  )}
+                  <span className="sticky-filter-current-label">
+                    {onlyPinned
+                      ? 'Pinned'
+                      : activeColorFilter !== 'all'
+                      ? STICKY_COLORS.find((c) => c.id === activeColorFilter)?.name || 'Filter'
+                      : 'All'}
+                  </span>
+                  <ChevronDown
+                    size={12}
+                    strokeWidth={2}
+                    className={`sticky-filter-chevron ${isFilterDropdownOpen ? 'open' : ''}`}
+                  />
+                </button>
+
+                {isFilterDropdownOpen && (
+                  <div className="sticky-filter-menu" role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={`sticky-filter-menu-item ${activeColorFilter === 'all' && !onlyPinned ? 'selected' : ''}`}
+                      onClick={() => {
+                        setActiveColorFilter('all');
+                        setOnlyPinned(false);
+                        setIsFilterDropdownOpen(false);
+                      }}
+                    >
+                      <div className="sticky-filter-menu-item-left">
+                        <Filter size={13} />
+                        <span>All Notes</span>
+                      </div>
+                      {activeColorFilter === 'all' && !onlyPinned && <Check size={14} strokeWidth={2.5} />}
+                    </button>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={`sticky-filter-menu-item ${onlyPinned ? 'selected' : ''}`}
+                      onClick={() => {
+                        setOnlyPinned(true);
+                        setActiveColorFilter('all');
+                        setIsFilterDropdownOpen(false);
+                      }}
+                    >
+                      <div className="sticky-filter-menu-item-left">
+                        <Pin size={13} className="fill-icon" />
+                        <span>Pinned Only</span>
+                      </div>
+                      {onlyPinned && <Check size={14} strokeWidth={2.5} />}
+                    </button>
+
+                    <div className="sticky-filter-menu-divider" />
+                    <div className="sticky-filter-menu-section-label">Filter by color</div>
+
+                    {STICKY_COLORS.map((c) => {
+                      const isSelected = activeColorFilter === c.id && !onlyPinned;
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          role="menuitem"
+                          className={`sticky-filter-menu-item ${isSelected ? 'selected' : ''}`}
+                          onClick={() => {
+                            setActiveColorFilter(c.id);
+                            setOnlyPinned(false);
+                            setIsFilterDropdownOpen(false);
+                          }}
+                        >
+                          <div className="sticky-filter-menu-item-left">
+                            <span
+                              className="sticky-filter-swatch-dot"
+                              style={{ backgroundColor: c.bg, borderColor: c.border }}
+                            />
+                            <span>{c.name}</span>
+                          </div>
+                          {isSelected && <Check size={14} strokeWidth={2.5} />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Mobile Search Icon Button */}
               <button
                 type="button"
-                className="sticky-search-clear"
-                onClick={() => setSearchQuery('')}
-                aria-label="Clear search"
+                className={`sticky-mobile-search-btn mobile-only ${searchQuery ? 'has-query' : ''}`}
+                onClick={() => setIsMobileSearchOpen(true)}
+                aria-label="Search notes"
+                title="Search notes"
               >
-                <X size={13} />
+                <Search size={16} strokeWidth={2} />
+                {searchQuery && <span className="sticky-search-query-dot" />}
               </button>
-            )}
-          </div>
-        </div>
-
-        <div className="sticky-header-right">
-          {/* Filter Pills */}
-          <div className="sticky-filter-chips">
-            <button
-              type="button"
-              className={`sticky-chip ${activeColorFilter === 'all' && !onlyPinned ? 'active' : ''}`}
-              onClick={() => {
-                setActiveColorFilter('all');
-                setOnlyPinned(false);
-              }}
-            >
-              All
-            </button>
-            <button
-              type="button"
-              className={`sticky-chip ${onlyPinned ? 'active' : ''}`}
-              onClick={() => setOnlyPinned(!onlyPinned)}
-            >
-              <Pin size={12} className={onlyPinned ? 'fill-icon' : ''} />
-              <span>Pinned</span>
-            </button>
-
-            {/* Color Swatch Filters */}
-            <div className="sticky-swatch-filters">
-              {STICKY_COLORS.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className={`sticky-swatch-btn ${activeColorFilter === c.id ? 'selected' : ''}`}
-                  style={{ backgroundColor: c.bg, borderColor: c.border }}
-                  onClick={() => {
-                    setActiveColorFilter(activeColorFilter === c.id ? 'all' : c.id);
-                  }}
-                  title={`Filter ${c.name} notes`}
-                />
-              ))}
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </header>
 
       {/* Main Canvas Area */}
@@ -541,19 +724,30 @@ export default function TodosView({ currentUser }) {
               </div>
             );
           })}
-
-          {/* In-Grid Ultra-Minimal New Note CTA Card */}
-          <button
-            type="button"
-            className="sticky-add-note-card"
-            onClick={() => handleAddNewNote('note')}
-            title="Add a note"
-          >
-            <Plus size={26} strokeWidth={2} className="sticky-add-icon" />
-            <span className="sticky-add-title">Add note</span>
-          </button>
         </div>
+
+        {/* Empty state when there are no notes */}
+        {notes.length === 0 && (
+          <div className="sticky-empty-board">
+            <div className="sticky-empty-icon-wrap">
+              <StickyNote size={32} strokeWidth={1.5} />
+            </div>
+            <h3>No sticky notes</h3>
+            <p>Tap the + button below to create your first note.</p>
+          </div>
+        )}
       </div>
+
+      {/* Floating Action Button (FAB) at Bottom Right */}
+      <button
+        type="button"
+        className="sticky-fab-add"
+        onClick={() => handleAddNewNote('note')}
+        aria-label="Add new note"
+        title="Add note"
+      >
+        <Plus size={24} strokeWidth={2.4} />
+      </button>
     </div>
   );
 }

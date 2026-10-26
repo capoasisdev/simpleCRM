@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Globe,
   Plus,
@@ -381,7 +382,7 @@ export default function WebsiteFormsView({ currentUser }) {
 
 
       {/* Universal Script Modal */}
-      {selectedScriptForm && (
+      {selectedScriptForm && createPortal(
         <div className="meta-modal-backdrop" onClick={() => setSelectedScriptForm(null)}>
           <div className="meta-modal" style={{ maxWidth: '660px' }} onClick={(e) => e.stopPropagation()}>
             <div className="meta-modal-header">
@@ -485,11 +486,12 @@ export default function WebsiteFormsView({ currentUser }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Clean Create Modal */}
-      {isModalOpen && (
+      {isModalOpen && createPortal(
         <div className="meta-modal-backdrop" onClick={() => !isCreating && setIsModalOpen(false)}>
           <div className="meta-modal" style={{ maxWidth: '440px' }} onClick={(e) => e.stopPropagation()}>
             <div className="meta-modal-header">
@@ -549,7 +551,8 @@ export default function WebsiteFormsView({ currentUser }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

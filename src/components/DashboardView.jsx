@@ -32,7 +32,9 @@ import {
   ListTodo,
   MessageSquare,
   Layers,
-  CalendarClock
+  CalendarClock,
+  MoreHorizontal,
+  Sparkles
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getDashboardScope, getAnalyticsScope } from '../lib/permissions';
@@ -51,6 +53,8 @@ import NotificationDrawer from './NotificationDrawer';
 import AiAssistantWidget from './AiAssistantWidget';
 import { getStoredNotifications, clearAllNotifications, markAllNotificationsRead } from '../lib/notifications';
 import { checkAndRunDailyAutoBackup } from '../lib/backups';
+import { haptic } from '../lib/haptics';
+import { registerBackHandler } from '../lib/backButton';
 import Skeleton from './common/Skeleton';
 import '../styles/dashboard.css';
 import '../styles/analytics.css';
@@ -78,6 +82,10 @@ export default function DashboardView({ currentUser, onLogout }) {
   const canManageRouting = hasPermission(user, 'admin', 'manage_routing');
   const canManageMeta = hasPermission(user, 'admin', 'manage_meta');
   const hasAdminAccess = user.role === 'admin' || canManageUsers || canManageRouting || canManageMeta;
+  const toolsList = [
+    { name: 'LaterOn', label: 'LaterOn', icon: CalendarClock }
+  ];
+  const showMobileThreeDots = true; // LaterOn + AI Assistant (+ Admin if permitted)
 
   // URL Routing Helpers
   const TAB_ROUTES = {
@@ -196,6 +204,7 @@ export default function DashboardView({ currentUser, onLogout }) {
   };
 
   const navigateTo = (tabName, subTab = 'users') => {
+    haptic.selection();
     setActiveTab(tabName);
     if (tabName === 'LaterOn') {
       setHasVisitedLaterOn(true);
@@ -243,8 +252,100 @@ export default function DashboardView({ currentUser, onLogout }) {
     };
   }, []);
 
+  // Handle in-app back navigation event dispatched by hardware/gesture back button
+  useEffect(() => {
+    const handleInAppBack = (e) => {
+      // 1. Close open mobile more sheet
+      if (isMobileMoreOpen) {
+        setIsMobileMoreOpen(false);
+        e.detail?.handled?.();
+        return;
+      }
+      // 2. Close open mobile activity drawer
+      if (isMobileActivityOpen) {
+        setIsMobileActivityOpen(false);
+        e.detail?.handled?.();
+        return;
+      }
+      // 3. Close open notifications drawer
+      if (isNotifDrawerOpen) {
+        setIsNotifDrawerOpen(false);
+        e.detail?.handled?.();
+        return;
+      }
+      // 4. Close user dropdown menu
+      if (showUserMenu) {
+        setShowUserMenu(false);
+        e.detail?.handled?.();
+        return;
+      }
+      // 5. If pipeline configuring sub-screen is open in Admin
+      if (activeTab === 'Admin' && isPipelineConfiguring) {
+        setIsPipelineConfiguring(false);
+        e.detail?.handled?.();
+        return;
+      }
+      // 6. If inside an Admin sub-tab other than default 'users'
+      if (activeTab === 'Admin' && adminSubTab !== 'users') {
+        navigateTo('Admin', 'users');
+        e.detail?.handled?.();
+        return;
+      }
+      // 7. If on any other tab than Dashboard, navigate back to Dashboard
+      if (activeTab !== 'Dashboard') {
+        navigateTo('Dashboard');
+        e.detail?.handled?.();
+        return;
+      }
+    };
+
+    window.addEventListener('crm-in-app-back', handleInAppBack);
+    return () => {
+      window.removeEventListener('crm-in-app-back', handleInAppBack);
+    };
+  }, [activeTab, adminSubTab, isPipelineConfiguring, isMobileMoreOpen, isMobileActivityOpen, isNotifDrawerOpen, showUserMenu]);
+
+  // Register specific back handlers when sheets/drawers are open
+  useEffect(() => {
+    if (isMobileMoreOpen) {
+      return registerBackHandler(() => {
+        setIsMobileMoreOpen(false);
+        return true;
+      });
+    }
+  }, [isMobileMoreOpen]);
+
+  useEffect(() => {
+    if (isMobileActivityOpen) {
+      return registerBackHandler(() => {
+        setIsMobileActivityOpen(false);
+        return true;
+      });
+    }
+  }, [isMobileActivityOpen]);
+
+  useEffect(() => {
+    if (isNotifDrawerOpen) {
+      return registerBackHandler(() => {
+        setIsNotifDrawerOpen(false);
+        return true;
+      });
+    }
+  }, [isNotifDrawerOpen]);
+
+  useEffect(() => {
+    if (showUserMenu) {
+      return registerBackHandler(() => {
+        setShowUserMenu(false);
+        return true;
+      });
+    }
+  }, [showUserMenu]);
+
   const [dealFilter, setDealFilter] = useState('Today');
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
+  const [isMobileActivityOpen, setIsMobileActivityOpen] = useState(false);
   const userMenuRef = useRef(null);
 
   // In-app Notifications State
@@ -829,9 +930,7 @@ export default function DashboardView({ currentUser, onLogout }) {
             <div className="nav-section" style={{ marginBottom: 8 }}>
               <div className="nav-section-title">Tools</div>
               <ul className="nav-list">
-                {[
-                  { name: 'LaterOn', label: 'LaterOn', icon: CalendarClock }
-                ].map((tool) => {
+                {toolsList.map((tool) => {
                   const ToolIcon = tool.icon;
                   return (
                     <li key={tool.name}>
@@ -868,9 +967,60 @@ export default function DashboardView({ currentUser, onLogout }) {
 
         {/* Center Main Section */}
         <main
-          className={`dashboard-main-section ${activeTab !== 'Dashboard' && activeTab !== 'Analytics' ? 'full-width' : ''}`}
+          className={`dashboard-main-section ${activeTab === 'Dashboard' ? 'is-dashboard' : 'is-other-section'} ${activeTab !== 'Dashboard' && activeTab !== 'Analytics' ? 'full-width' : ''}`}
           aria-label="Dashboard Content Area"
         >
+          {/* Mobile Section Tabs (Dashboard, Analytics, Activity) */}
+          {(canViewDashboard || canViewAnalytics || canViewDashboardActivity) && (activeTab === 'Dashboard' || activeTab === 'Analytics') && (
+            <div className="mobile-section-tabs-bar" role="tablist" aria-label="Dashboard Section Tabs">
+              {canViewDashboard && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === 'Dashboard' && !isMobileActivityOpen}
+                  className={`mobile-section-tab-btn ${activeTab === 'Dashboard' && !isMobileActivityOpen ? 'active' : ''}`}
+                  onClick={() => {
+                    setIsMobileActivityOpen(false);
+                    navigateTo('Dashboard');
+                  }}
+                >
+                  <LayoutDashboard size={16} strokeWidth={1.75} />
+                  <span>Dashboard</span>
+                </button>
+              )}
+              {canViewAnalytics && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === 'Analytics' && !isMobileActivityOpen}
+                  className={`mobile-section-tab-btn ${activeTab === 'Analytics' && !isMobileActivityOpen ? 'active' : ''}`}
+                  onClick={() => {
+                    setIsMobileActivityOpen(false);
+                    navigateTo('Analytics');
+                  }}
+                >
+                  <BarChart3 size={16} strokeWidth={1.75} />
+                  <span>Analytics</span>
+                </button>
+              )}
+              {canViewDashboardActivity && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={isMobileActivityOpen}
+                  className={`mobile-section-tab-btn ${isMobileActivityOpen ? 'active' : ''}`}
+                  onClick={() => {
+                    haptic.selection();
+                    setIsMobileActivityOpen((prev) => !prev);
+                  }}
+                >
+                  <Activity size={16} strokeWidth={1.75} />
+                  <span>Activity</span>
+                </button>
+              )}
+            </div>
+          )}
+
           {activeTab !== 'LaterOn' && (
             <div key={activeTab} className="tab-pane-animated">
             {activeTab === 'Dashboard' && (
@@ -1287,17 +1437,6 @@ export default function DashboardView({ currentUser, onLogout }) {
                 </div>
               )}
             </div>
-
-            <div className="right-quick-actions">
-              <button
-                type="button"
-                className="quick-action-btn"
-                onClick={() => setIsDealModalOpen(true)}
-              >
-                <Plus size={14} strokeWidth={1.5} />
-                <span>Quick Add Deal</span>
-              </button>
-            </div>
           </aside>
         )}
       </div>
@@ -1434,6 +1573,246 @@ export default function DashboardView({ currentUser, onLogout }) {
         activities={activities}
         onNavigate={navigateTo}
       />
+
+      {/* Mobile Activity Bottom Sheet (Up to 70% of screen) */}
+      {isMobileActivityOpen && (
+        <>
+          <div
+            className="mobile-activity-backdrop"
+            onClick={() => setIsMobileActivityOpen(false)}
+          />
+          <div className="mobile-activity-sheet" role="dialog" aria-modal="true" aria-label="Recent CRM Activity">
+            <div className="mobile-activity-sheet-handle" />
+            <div className="mobile-activity-sheet-header">
+              <div className="mobile-activity-sheet-title">
+                <Activity size={18} strokeWidth={1.75} />
+                <span>Recent Activity</span>
+              </div>
+              <button
+                type="button"
+                className="mobile-activity-sheet-close"
+                onClick={() => setIsMobileActivityOpen(false)}
+                aria-label="Close activity panel"
+              >
+                <X size={18} strokeWidth={1.75} />
+              </button>
+            </div>
+
+            <div className="mobile-activity-sheet-body">
+              <div className="activity-feed-list" style={{ maxHeight: 'none' }}>
+                {isLoadingData ? (
+                  [1, 2, 3, 4].map((i) => (
+                    <div key={i} className="activity-item-skeleton">
+                      <Skeleton width="28px" height="28px" circle />
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <Skeleton width="85%" height="13px" />
+                        <Skeleton width="45%" height="10px" />
+                      </div>
+                    </div>
+                  ))
+                ) : dynamicActivities.length > 0 ? (
+                  dynamicActivities.map((act) => {
+                    const Icon = act.icon;
+                    return (
+                      <div key={act.id} className="activity-item fade-in-item">
+                        <div className="activity-icon-wrap">
+                          <Icon size={14} strokeWidth={1.5} />
+                        </div>
+                        <div className="activity-content">
+                          <p className="activity-text">{act.text}</p>
+                          <span className="activity-timestamp">{act.time}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="activity-empty-state">
+                    No recent activity recorded
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Mobile 3-Dots Popover Menu */}
+      {isMobileMoreOpen && (
+        <>
+          <div
+            className="mobile-more-backdrop"
+            onClick={() => setIsMobileMoreOpen(false)}
+          />
+          <div className="mobile-more-popover" role="menu">
+            <div className="mobile-more-header">Tools & More</div>
+            {toolsList.map((tool) => {
+              const ToolIcon = tool.icon;
+              return (
+                <button
+                  key={tool.name}
+                  type="button"
+                  className={`mobile-more-item ${activeTab === tool.name ? 'active' : ''}`}
+                  onClick={() => {
+                    setIsMobileMoreOpen(false);
+                    navigateTo(tool.name);
+                  }}
+                  role="menuitem"
+                >
+                  <div className="mobile-more-icon-wrap">
+                    <ToolIcon size={18} strokeWidth={1.75} />
+                  </div>
+                  <span>{tool.label}</span>
+                </button>
+              );
+            })}
+
+            {/* AI Assistant */}
+            <button
+              type="button"
+              className="mobile-more-item"
+              onClick={() => {
+                setIsMobileMoreOpen(false);
+                window.dispatchEvent(new CustomEvent('crm-open-ai-assistant'));
+              }}
+              role="menuitem"
+            >
+              <div className="mobile-more-icon-wrap">
+                <Sparkles size={18} strokeWidth={1.75} />
+              </div>
+              <span>AI Assistant</span>
+            </button>
+            {hasAdminAccess && (
+              <>
+                <div className="mobile-more-divider" />
+                <button
+                  type="button"
+                  className={`mobile-more-item ${activeTab === 'Admin' ? 'active' : ''}`}
+                  onClick={() => {
+                    setIsMobileMoreOpen(false);
+                    navigateTo('Admin', adminSubTab || 'users');
+                  }}
+                  role="menuitem"
+                >
+                  <div className="mobile-more-icon-wrap">
+                    <Settings size={18} strokeWidth={1.75} />
+                  </div>
+                  <span>Admin Settings</span>
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Fixed Mobile Bottom Navigation Bar (Icons Only, Full-Cell Hit Area) */}
+      <nav className="mobile-bottom-navbar" aria-label="Mobile Navigation">
+        {/* 1. Dashboard */}
+        <button
+          type="button"
+          aria-label="Dashboard"
+          className={`mobile-nav-cell ${activeTab === 'Dashboard' || activeTab === 'Analytics' ? 'active' : ''}`}
+          onClick={() => {
+            setIsMobileActivityOpen(false);
+            setIsMobileMoreOpen(false);
+            navigateTo('Dashboard');
+          }}
+        >
+          <div className="mobile-nav-icon-wrap">
+            <LayoutDashboard size={22} strokeWidth={1.75} fill={activeTab === 'Dashboard' || activeTab === 'Analytics' ? 'currentColor' : 'none'} />
+          </div>
+        </button>
+
+        {/* 2. Leads */}
+        {canViewLeads && (
+          <button
+            type="button"
+            aria-label="Leads"
+            className={`mobile-nav-cell ${activeTab === 'Leads' ? 'active' : ''}`}
+            onClick={() => {
+              setIsMobileActivityOpen(false);
+              setIsMobileMoreOpen(false);
+              navigateTo('Leads');
+            }}
+          >
+            <div className="mobile-nav-icon-wrap">
+              <UserCheck size={22} strokeWidth={1.75} fill={activeTab === 'Leads' ? 'currentColor' : 'none'} />
+            </div>
+          </button>
+        )}
+
+        {/* 3. Messages */}
+        {canViewMessages && (
+          <button
+            type="button"
+            aria-label="Messages"
+            className={`mobile-nav-cell ${activeTab === 'Messages' ? 'active' : ''}`}
+            onClick={() => {
+              setIsMobileActivityOpen(false);
+              setIsMobileMoreOpen(false);
+              navigateTo('Messages');
+            }}
+          >
+            <div className="mobile-nav-icon-wrap">
+              <MessageSquare size={22} strokeWidth={1.75} fill={activeTab === 'Messages' ? 'currentColor' : 'none'} />
+            </div>
+          </button>
+        )}
+
+        {/* 4. To-Do's */}
+        <button
+          type="button"
+          aria-label="To-Do's"
+          className={`mobile-nav-cell ${activeTab === 'Todos' ? 'active' : ''}`}
+          onClick={() => {
+            setIsMobileActivityOpen(false);
+            setIsMobileMoreOpen(false);
+            navigateTo('Todos');
+          }}
+        >
+          <div className="mobile-nav-icon-wrap">
+            <StickyNote size={22} strokeWidth={1.75} fill={activeTab === 'Todos' ? 'currentColor' : 'none'} />
+          </div>
+        </button>
+
+        {/* 5. Tools / Three Dots / Admin */}
+        {showMobileThreeDots ? (
+          <button
+            type="button"
+            aria-label="More Tools & Admin"
+            className={`mobile-nav-cell ${isMobileMoreOpen || activeTab === 'Admin' || toolsList.some((t) => t.name === activeTab) ? 'active' : ''}`}
+            onClick={() => {
+              haptic.selection();
+              setIsMobileActivityOpen(false);
+              setIsMobileMoreOpen((prev) => !prev);
+            }}
+          >
+            <div className="mobile-nav-icon-wrap">
+              <MoreHorizontal size={22} strokeWidth={1.75} fill={isMobileMoreOpen || activeTab === 'Admin' || toolsList.some((t) => t.name === activeTab) ? 'currentColor' : 'none'} />
+            </div>
+          </button>
+        ) : toolsList.length === 1 ? (
+          (() => {
+            const singleTool = toolsList[0];
+            const SingleToolIcon = singleTool.icon;
+            return (
+              <button
+                type="button"
+                aria-label={singleTool.label}
+                className={`mobile-nav-cell ${activeTab === singleTool.name ? 'active' : ''}`}
+                onClick={() => {
+                  setIsMobileActivityOpen(false);
+                  setIsMobileMoreOpen(false);
+                  navigateTo(singleTool.name);
+                }}
+              >
+                <div className="mobile-nav-icon-wrap">
+                  <SingleToolIcon size={22} strokeWidth={1.75} fill={activeTab === singleTool.name ? 'currentColor' : 'none'} />
+                </div>
+              </button>
+            );
+          })()
+        ) : null}
+      </nav>
     </div>
   );
 }

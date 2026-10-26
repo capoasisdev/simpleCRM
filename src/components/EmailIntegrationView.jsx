@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Mail,
   CheckCircle2,
@@ -754,7 +755,7 @@ export default function EmailIntegrationView({ currentUser }) {
       </div>
 
       {/* MODAL 1: TEST EMAIL MODAL */}
-      {isTestModalOpen && (
+      {isTestModalOpen && createPortal(
         <div className="email-modal-backdrop" onClick={() => setIsTestModalOpen(false)}>
           <div className="email-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px' }}>
             <div className="email-modal-header">
@@ -820,11 +821,12 @@ export default function EmailIntegrationView({ currentUser }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* MODAL 2: CREATE / EDIT TEMPLATE MODAL */}
-      {isTemplateModalOpen && (
+      {isTemplateModalOpen && createPortal(
         <div className="email-modal-backdrop" onClick={() => setIsTemplateModalOpen(false)}>
           <div className="email-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '620px' }}>
             <div className="email-modal-header">
@@ -986,7 +988,8 @@ export default function EmailIntegrationView({ currentUser }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

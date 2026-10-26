@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, UserCheck, CalendarClock, RotateCcw, Download, GitFork, FolderInput } from 'lucide-react';
+import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, UserCheck, CalendarClock, RotateCcw, Download, GitFork, FolderInput, Menu } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getLeadScope, getFollowUpScope, canDeleteFollowUp, isLeadAssignedToUser, isUserAssignedToPipeline } from '../lib/permissions';
 import { recordActivity, fetchLeadActivities } from '../lib/activities';
@@ -11,6 +11,8 @@ import { sendEmailViaResend, fetchEmailTemplates } from '../lib/email';
 import ScheduleFollowUpModal from './common/ScheduleFollowUpModal';
 import Skeleton from './common/Skeleton';
 import { getPipelineFields, getLeadFieldValue } from '../lib/pipelineFields';
+import { haptic } from '../lib/haptics';
+import { registerBackHandler } from '../lib/backButton';
 import '../styles/leads.css';
 
 
@@ -152,7 +154,24 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   const [filterType, setFilterType] = useState(canViewAllLeads ? 'all' : 'my'); // 'all' | 'my' | 'unassigned'
   const [searchQuery, setSearchQuery] = useState('');
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const filterDropdownRef = useRef(null);
+
+  // Screen size tracking to disable card drag-and-drop on mobile/touch devices
+  const [isMobileScreen, setIsMobileScreen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth <= 768 || ('ontouchstart' in window && window.innerWidth <= 1024);
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileScreen(window.innerWidth <= 768 || ('ontouchstart' in window && window.innerWidth <= 1024));
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // LaterOn Context Menu & Prefill Scheduling
   const [contextMenu, setContextMenu] = useState(null);
@@ -310,6 +329,43 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
     window.addEventListener('crm-open-lead-detail', handleOpenDetail);
     return () => window.removeEventListener('crm-open-lead-detail', handleOpenDetail);
   }, [leads]);
+
+  // Native back button integration: close sheets/modals when Android back is pressed
+  useEffect(() => {
+    if (isDetailOpen) {
+      return registerBackHandler(() => {
+        setIsDetailOpen(false);
+        return true;
+      });
+    }
+  }, [isDetailOpen]);
+
+  useEffect(() => {
+    if (selectedLead && !isDetailOpen) {
+      return registerBackHandler(() => {
+        setSelectedLead(null);
+        return true;
+      });
+    }
+  }, [selectedLead, isDetailOpen]);
+
+  useEffect(() => {
+    if (isMobileDrawerOpen) {
+      return registerBackHandler(() => {
+        setIsMobileDrawerOpen(false);
+        return true;
+      });
+    }
+  }, [isMobileDrawerOpen]);
+
+  useEffect(() => {
+    if (isModalOpen) {
+      return registerBackHandler(() => {
+        setIsModalOpen(false);
+        return true;
+      });
+    }
+  }, [isModalOpen]);
 
   useEffect(() => {
     let isMounted = true;
@@ -624,6 +680,10 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   }, [isModalOpen, isDetailOpen]);
 
   const handleDragStart = (e, lead) => {
+    if (isMobileScreen) {
+      e.preventDefault();
+      return;
+    }
     if (e.target.closest('button, input, select, .lead-card-assign-wrap, .stage-custom-trigger, .lead-card-delete-btn')) {
       e.preventDefault();
       return;
@@ -656,6 +716,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   };
 
   const handleBoardDragOver = (e) => {
+    if (isMobileScreen) return;
     e.preventDefault();
     if (!boardRef.current) return;
     const rect = boardRef.current.getBoundingClientRect();
@@ -694,6 +755,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   };
 
   const handleColumnDragOver = (e, columnId) => {
+    if (isMobileScreen) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     if (dragOverColumnId !== columnId) {
@@ -702,6 +764,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   };
 
   const handleColumnDrop = async (e, targetColumnId) => {
+    if (isMobileScreen) return;
     e.preventDefault();
     e.stopPropagation();
     stopAutoScroll();
@@ -1800,6 +1863,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
     }
 
     // Normal click without selection active: open lead details
+    haptic.light();
     setSelectedLead(lead);
     setLeadDetailTab('details');
     setIsDetailOpen(true);
@@ -1958,10 +2022,10 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
     return (
       <div
         key={lead.id}
-        className={`lead-card-item ${animClass} ${isOpen ? 'has-open-dropdown' : ''} ${draggedLeadId === lead.id ? 'is-dragging' : ''} ${isFollowUpCol ? 'no-drag' : ''} ${isCardSelected ? 'is-selected' : ''}`}
-        draggable={!isFollowUpCol}
-        onDragStart={isFollowUpCol ? undefined : (e) => handleDragStart(e, lead)}
-        onDragEnd={isFollowUpCol ? undefined : handleDragEnd}
+        className={`lead-card-item ${animClass} ${isOpen ? 'has-open-dropdown' : ''} ${draggedLeadId === lead.id ? 'is-dragging' : ''} ${isFollowUpCol || isMobileScreen ? 'no-drag' : ''} ${isCardSelected ? 'is-selected' : ''}`}
+        draggable={!isFollowUpCol && !isMobileScreen}
+        onDragStart={isFollowUpCol || isMobileScreen ? undefined : (e) => handleDragStart(e, lead)}
+        onDragEnd={isFollowUpCol || isMobileScreen ? undefined : handleDragEnd}
         onClick={(e) => handleLeadClick(lead, e)}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -1976,7 +2040,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
       >
         <div
           className="lead-card-header-handle"
-          title={isFollowUpCol ? undefined : "Drag to move card to another column"}
+          title={isFollowUpCol || isMobileScreen ? undefined : "Drag to move card to another column"}
         >
           <span className="lead-card-name" title={lead.name}>{lead.name}</span>
 
@@ -2543,7 +2607,224 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
             )
           )}
         </div>
+
+        {/* Mobile Toolbar Actions (Right aligned hamburger) */}
+        <div className="leads-mobile-toolbar-actions">
+          <button
+            type="button"
+            className={`leads-mobile-menu-btn ${isMobileDrawerOpen ? 'active' : ''}`}
+            onClick={() => {
+              haptic.light();
+              setIsMobileDrawerOpen((prev) => !prev);
+            }}
+            aria-label={isMobileDrawerOpen ? 'Close filters and actions' : 'Open filters and actions'}
+            title="Filters & Actions"
+          >
+            {isMobileDrawerOpen ? <X size={18} strokeWidth={2} /> : <Menu size={18} strokeWidth={2} />}
+          </button>
+        </div>
       </div>
+
+      {/* Main Content Area: Board + Slide-Out Drawer bounded together */}
+      <div className="leads-content-area">
+        {/* Mobile Slide-Out Actions & Filters Drawer (Slides from Right) */}
+        {isMobileDrawerOpen && (
+        <>
+          <div
+            className="leads-mobile-drawer-backdrop"
+            onClick={() => setIsMobileDrawerOpen(false)}
+            aria-hidden="true"
+          />
+          <aside
+            className="leads-mobile-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Leads Controls and Filters"
+          >
+            <div className="leads-drawer-header">
+              <div className="leads-drawer-title-wrap">
+                <GitFork size={16} strokeWidth={2} style={{ color: '#2563eb' }} />
+                <span className="leads-drawer-title">Leads & Filters</span>
+              </div>
+            </div>
+
+            <div className="leads-drawer-body">
+              {/* Search Bar */}
+              <div className="leads-drawer-section">
+                <div className="leads-drawer-section-title">Search</div>
+                <div className="leads-drawer-search-wrap">
+                  <Search size={15} strokeWidth={1.75} className="leads-drawer-search-icon" />
+                  <input
+                    type="text"
+                    className="leads-drawer-search-input"
+                    placeholder={filterType === 'followups' ? 'Search follow-ups...' : 'Search leads...'}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      className="leads-drawer-search-clear"
+                      onClick={() => setSearchQuery('')}
+                      aria-label="Clear search"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* View / Filter Scope */}
+              <div className="leads-drawer-section">
+                <div className="leads-drawer-section-title">View Scope</div>
+                <div className="leads-drawer-filter-list">
+                  {userFilterOptions.map((opt) => {
+                    const isSelected = filterType === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={`leads-drawer-filter-item ${isSelected ? 'active' : ''}`}
+                        onClick={() => {
+                          setFilterType(opt.value);
+                          setIsMobileDrawerOpen(false);
+                        }}
+                      >
+                        <span>{opt.label}</span>
+                        {isSelected && <Check size={15} strokeWidth={2.5} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Date Filter */}
+              <div className="leads-drawer-section">
+                <div className="leads-drawer-section-title">
+                  <span>Creation Date</span>
+                  {dateFilter !== 'all' && (
+                    <button
+                      type="button"
+                      className="leads-drawer-reset-date-btn"
+                      onClick={() => {
+                        setDateFilter('all');
+                        setCustomStartDate('');
+                        setCustomEndDate('');
+                      }}
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                <div className="leads-drawer-date-presets">
+                  {[
+                    { id: 'all', label: 'All Time' },
+                    { id: 'today', label: 'Today' },
+                    { id: 'yesterday', label: 'Yesterday' },
+                    { id: '7days', label: '7 Days' },
+                    { id: '30days', label: '30 Days' },
+                    { id: 'this_month', label: 'This Month' },
+                    { id: 'custom', label: 'Custom' }
+                  ].map((item) => {
+                    const isSelected = dateFilter === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`leads-drawer-date-chip ${isSelected ? 'active' : ''}`}
+                        onClick={() => setDateFilter(item.id)}
+                      >
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {dateFilter === 'custom' && (
+                  <div className="leads-drawer-custom-date-box">
+                    <div className="leads-drawer-custom-row">
+                      <input
+                        type="date"
+                        className="leads-drawer-date-input"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                      />
+                      <span>to</span>
+                      <input
+                        type="date"
+                        className="leads-drawer-date-input"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Tools & Export */}
+              <div className="leads-drawer-section" style={{ borderBottom: 'none' }}>
+                <div className="leads-drawer-section-title">Actions & Tools</div>
+                <div className="leads-drawer-actions-col">
+                  {filterType === 'followups' ? (
+                    <button
+                      type="button"
+                      className="leads-drawer-action-btn"
+                      onClick={() => {
+                        setIsMobileDrawerOpen(false);
+                        setFollowUpTargetLead(null);
+                        setIsScheduleFollowUpOpen(true);
+                      }}
+                    >
+                      <Plus size={15} strokeWidth={1.8} />
+                      <span>New Follow-up</span>
+                    </button>
+                  ) : (
+                    canEditLead && (
+                      <button
+                        type="button"
+                        className="leads-drawer-action-btn"
+                        onClick={() => {
+                          setIsMobileDrawerOpen(false);
+                          setIsModalOpen(true);
+                        }}
+                      >
+                        <Plus size={15} strokeWidth={1.8} />
+                        <span>New Lead</span>
+                      </button>
+                    )
+                  )}
+
+                  <button
+                    type="button"
+                    className="leads-drawer-action-btn"
+                    onClick={() => {
+                      setIsMobileDrawerOpen(false);
+                      handleExportCSV();
+                    }}
+                  >
+                    <Download size={15} strokeWidth={1.8} />
+                    <span>Export Leads to CSV</span>
+                  </button>
+
+                  {currentUser?.role === 'admin' && onNavigate && (
+                    <button
+                      type="button"
+                      className="leads-drawer-action-btn"
+                      onClick={() => {
+                        setIsMobileDrawerOpen(false);
+                        onNavigate('Admin', 'import');
+                      }}
+                    >
+                      <UploadCloud size={15} strokeWidth={1.8} />
+                      <span>Bulk Import CSV</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </aside>
+        </>
+      )}
 
       {/* Board Container with Common Separators */}
       <div
@@ -2759,6 +3040,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
             );
           })
         )}
+        </div>
       </div>
 
       {/* Quick New Lead Modal */}
@@ -2927,21 +3209,21 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
 
       {/* Full Lead Details & Form Questionnaire Modal */}
       {/* Centered Lead Details Properties Table Modal */}
-      {isDetailOpen && selectedLead && (
-        <div className="lead-modal-backdrop" onClick={() => setIsDetailOpen(false)}>
+      {isDetailOpen && selectedLead && createPortal(
+        <div className="lead-modal-backdrop lead-properties-backdrop" onClick={() => setIsDetailOpen(false)}>
           <div
             className="lead-modal-container lead-properties-modal"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
           >
+            {/* Grab handle for mobile bottom sheet */}
+            <div className="lead-modal-sheet-handle" />
+
             {/* Modal Header */}
             <div className="lead-modal-header lead-properties-header">
               <div className="lead-properties-header-content">
-                <div className="lead-properties-header-left">
-                  <span className="lead-properties-modal-title">{selectedLead.name}</span>
-                </div>
-                <div className="lead-properties-header-right">
+                <div className="lead-properties-header-actions">
                   {selectedLead.phone && (
                     <a
                       href={`https://wa.me/${selectedLead.phone.replace(/[^0-9]/g, '')}`}
@@ -2954,20 +3236,6 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                       <span>WhatsApp</span>
                     </a>
                   )}
-                  {selectedLead.phone && (
-                    <button
-                      type="button"
-                      className="lead-prop-action-btn lateron-schedule-btn"
-                      onClick={() => {
-                        handleScheduleWithLaterOn(selectedLead);
-                        setSelectedLead(null);
-                      }}
-                      title="Schedule WhatsApp with LaterOn"
-                    >
-                      <CalendarClock size={12} strokeWidth={2} />
-                      <span>Schedule (LaterOn)</span>
-                    </button>
-                  )}
                   {selectedLead.email && (
                     <a
                       href={`mailto:${selectedLead.email}`}
@@ -2977,20 +3245,6 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                       <Mail size={12} strokeWidth={2} />
                       <span>Email</span>
                     </a>
-                  )}
-                  {selectedLead.email && (
-                    <button
-                      type="button"
-                      className="lead-prop-action-btn lateron-email-schedule-btn"
-                      onClick={() => {
-                        handleScheduleWithLaterOn(selectedLead, 'email');
-                        setSelectedLead(null);
-                      }}
-                      title="Schedule Email with LaterOn"
-                    >
-                      <CalendarClock size={12} strokeWidth={2} />
-                      <span>Schedule Email (LaterOn)</span>
-                    </button>
                   )}
                   {(!selectedLeadFollowUp || selectedLeadFollowUp.status === 'completed') && filterType !== 'followups' && (
                     <button
@@ -3111,7 +3365,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
 
                     <tr>
                       <td className="lead-prop-label">City / Location</td>
-                      <td className="lead-prop-value">{selectedLead.city || '—'}</td>
+                      <td className="lead-prop-value">{selectedLead.city || getLeadFieldValue(selectedLead, { key: 'city', mapped_question: 'city' }) || '—'}</td>
                     </tr>
 
                     <tr>
@@ -3166,7 +3420,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                     </tr>
 
                     {/* PIPELINE CONFIGURED FIELDS SECTION */}
-                    {activePipelineFields.filter((f) => !['name', 'phone', 'email'].includes(f.key)).map((field) => {
+                    {activePipelineFields.filter((f) => !['name', 'phone', 'email', 'city'].includes(f.key?.toLowerCase())).map((field) => {
                       const currentVal = getLeadFieldValue(selectedLead, field);
                       const targetKey = field.mapped_question || field.key;
 
@@ -3442,7 +3696,8 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Custom Delete Confirmation Modal */}

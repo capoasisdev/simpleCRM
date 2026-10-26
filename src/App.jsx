@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react';
 import LoginView from './components/LoginView';
 import DashboardView from './components/DashboardView';
+import DownloadView from './components/DownloadView';
 import { supabase } from './lib/supabase';
 
 const SESSION_STORAGE_KEY = 'simplecrm_user_session';
 
 export default function App() {
+  const [isDownloadPage, setIsDownloadPage] = useState(() => {
+    return window.location.pathname === '/download' || window.location.pathname === '/download/';
+  });
+
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem(SESSION_STORAGE_KEY);
@@ -14,6 +19,14 @@ export default function App() {
       return null;
     }
   });
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      setIsDownloadPage(window.location.pathname === '/download' || window.location.pathname === '/download/');
+    };
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
 
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
@@ -82,6 +95,18 @@ export default function App() {
       isMounted = false;
     };
   }, [currentUser?.id, currentUser?.email]);
+
+  if (isDownloadPage) {
+    return (
+      <DownloadView
+        onGoToWeb={() => {
+          setIsDownloadPage(false);
+          const target = currentUser ? '/dashboard' : '/login';
+          window.history.pushState({}, '', target);
+        }}
+      />
+    );
+  }
 
   return (
     <>

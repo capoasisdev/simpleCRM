@@ -46,9 +46,6 @@
   letter-spacing: -0.025em;
   margin: 0;
   line-height: 1.2;
-  background: #f5f5dc;
-  padding: 4px 8px;
-  width: fit-content;
 }
 
 .csv-template-btn {
@@ -281,9 +278,6 @@
   font-size: 20px;
   font-weight: 600;
   color: #0f172a;
-  background: #f5f5dc;
-  padding: 4px 8px;
-  width: fit-content;
   margin: 0;
   display: inline-flex;
   align-items: center;
@@ -751,3 +745,120 @@
   align-items: center;
   gap: 10px;
 }
+
+/* ==========================================================================
+   CSV Import Mobile Responsive Styles (<= 768px)
+   ========================================================================== */
+@media (max-width: 768px) {
+  .csv-import-container {
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .csv-view-inner {
+    padding: 16px 14px 48px 14px !important;
+    gap: 16px !important;
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .csv-master-header {
+    order: 1 !important;
+    flex-wrap: wrap !important;
+    gap: 12px !important;
+  }
+
+  .csv-step-container {
+    order: 2 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .csv-steps-bar {
+    order: 3 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    background-color: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 12px !important;
+    padding: 16px 18px !important;
+    margin-top: 4px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+  }
+
+  .csv-steps-bar::before {
+    content: "Process Steps";
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #94a3b8;
+    margin-bottom: 10px;
+  }
+
+  .csv-step-item {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    padding: 4px 0 !important;
+    font-size: 13.5px !important;
+    font-weight: 500 !important;
+    color: #64748b !important;
+    white-space: normal !important;
+  }
+
+  .csv-step-item.active {
+    color: #0f172a !important;
+    font-weight: 600 !important;
+  }
+
+  .csv-step-item.completed {
+    color: #059669 !important;
+    font-weight: 500 !important;
+  }
+
+  .csv-step-num {
+    width: 26px !important;
+    height: 26px !important;
+    min-width: 26px !important;
+    border-radius: 50% !important;
+    background-color: #e2e8f0 !important;
+    color: #64748b !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    flex-shrink: 0 !important;
+  }
+
+  .csv-step-item.active .csv-step-num {
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2) !important;
+  }
+
+  .csv-step-item.completed .csv-step-num {
+    background-color: #059669 !important;
+    color: #ffffff !important;
+  }
+
+  .csv-step-divider {
+    width: 2px !important;
+    height: 14px !important;
+    background-color: #e2e8f0 !important;
+    margin: 0 0 0 12px !important;
+    flex-shrink: 0 !important;
+  }
+}
+

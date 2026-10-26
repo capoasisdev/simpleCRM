@@ -17,7 +17,8 @@ import {
   Loader2,
   MoreVertical,
   Eye,
-  X
+  X,
+  Monitor
 } from 'lucide-react';
 import {
   fetchBackups,
@@ -193,7 +194,86 @@ export default function BackupsView({ currentUser }) {
 
   return (
     <div className="backups-view-container">
-      <div className="backups-view-inner">
+      {/* Mobile Overview View (Strictly visible on mobile <= 900px) */}
+      <div className="backups-mobile-overview-view">
+        <div className="backups-mobile-overview-card">
+          <div className="backups-mobile-overview-table-header">
+            <span className="backups-overview-th-left">Snapshot</span>
+            <span className="backups-overview-th-right">Status</span>
+          </div>
+
+          <div className="backups-mobile-overview-table-body">
+            {isLoading ? (
+              [1, 2, 3].map((i) => (
+                <div key={i} className="backups-mobile-overview-row">
+                  <div className="backups-mobile-overview-left">
+                    <Skeleton width="38px" height="38px" borderRadius="10px" />
+                    <div className="backups-mobile-overview-info">
+                      <Skeleton width="130px" height="15px" borderRadius="4px" />
+                      <Skeleton width="90px" height="11px" borderRadius="3px" />
+                    </div>
+                  </div>
+                  <div className="backups-mobile-overview-right">
+                    <Skeleton width="48px" height="20px" borderRadius="5px" />
+                  </div>
+                </div>
+              ))
+            ) : backups.length === 0 ? (
+              <div className="backups-mobile-empty">
+                <Database size={28} strokeWidth={1.5} color="#94a3b8" />
+                <span>No snapshots available</span>
+              </div>
+            ) : (
+              backups.map((b) => {
+                const dateFormatted = new Date(b.created_at).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric'
+                });
+
+                return (
+                  <div key={b.id || b.created_at} className="backups-mobile-overview-row">
+                    <div className="backups-mobile-overview-left">
+                      <div className="backups-mobile-overview-icon-box">
+                        <Database size={18} style={{ color: '#0f172a' }} />
+                      </div>
+                      <div className="backups-mobile-overview-info">
+                        <span className="backups-mobile-overview-name">{getCleanBackupName(b)}</span>
+                        <span className="backups-mobile-overview-sub">
+                          {dateFormatted} · {formatFileSize(b.file_size_bytes)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="backups-mobile-overview-right">
+                      <span className="backups-mobile-status-badge">
+                        READY
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Clean Desktop Notice Banner */}
+        <div className="backups-mobile-desktop-notice">
+          <div className="backups-notice-icon-box">
+            <Monitor size={17} strokeWidth={1.75} />
+          </div>
+          <div className="backups-notice-text-col">
+            <span className="backups-notice-title">Desktop Management</span>
+            <span className="backups-notice-desc">
+              To create manual snapshots, download backups, or restore database files, open simplecrm on your computer.
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop Full-Featured View (Hidden on mobile <= 900px) */}
+      <div className="backups-desktop-full-view">
+        <div className="backups-view-inner">
         {/* Master Header */}
         <div className="backups-master-header">
           <div className="backups-master-title-group">
@@ -430,6 +510,7 @@ export default function BackupsView({ currentUser }) {
             </table>
           </div>
         )}
+      </div>
       </div>
       </div>
 

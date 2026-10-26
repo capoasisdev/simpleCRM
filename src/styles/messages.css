@@ -1292,3 +1292,615 @@
   to { transform: rotate(360deg); }
 }
 
+/* ==========================================================================
+   MOBILE RESPONSIVENESS (<= 768px)
+   WhatsApp / native phone messages style view:
+   - Roster of contacts taking full width
+   - Single-row compact header with hamburger menu button
+   - Slide-out filters and search drawer matching Leads section
+   - Tapping contact opens full-width conversation with back button
+   - Clean clearance above fixed mobile bottom navigation bar
+   ========================================================================== */
+
+.messages-mobile-back-btn {
+  display: none;
+}
+
+.messages-mobile-toolbar-actions {
+  display: none;
+}
+
+.messages-mobile-drawer-backdrop {
+  display: none;
+}
+
+.messages-mobile-drawer {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Compact Single-Row Toolbar on Mobile */
+  .messages-toolbar {
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 10px 14px !important;
+    gap: 10px !important;
+    background: #ffffff !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+  }
+
+  .messages-toolbar-left {
+    display: flex !important;
+    align-items: center !important;
+    flex: 1 !important;
+    gap: 8px !important;
+    min-width: 0 !important;
+  }
+
+  .messages-title-group {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    margin-right: 0 !important;
+  }
+
+  /* Move inline channel, search, and filters out of the mobile toolbar */
+  .messages-toolbar-left .messages-channel-dropdown-wrap,
+  .messages-toolbar-left .messages-search-box,
+  .messages-toolbar-filters {
+    display: none !important;
+  }
+
+  /* Mobile Hamburger Menu Button on the Right */
+  .messages-mobile-toolbar-actions {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .messages-mobile-menu-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background-color: var(--color-gray-100, #f1f5f9);
+    color: #0f172a;
+    border: 1px solid var(--color-gray-200, #e2e8f0);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .messages-mobile-menu-btn:active {
+    background-color: var(--color-gray-200, #e2e8f0);
+  }
+
+  .messages-mobile-menu-btn.active {
+    background-color: #0f172a;
+    color: #ffffff;
+    border-color: #0f172a;
+  }
+
+  /* Slide-Out Drawer from Right (Matching Leads section) */
+  .messages-mobile-drawer-backdrop {
+    display: block !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background-color: rgba(0, 0, 0, 0.45);
+    z-index: 100;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    animation: messagesFadeIn 0.18s ease;
+  }
+
+  .messages-mobile-drawer {
+    display: flex !important;
+    flex-direction: column !important;
+    position: absolute !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    right: 0 !important;
+    left: auto !important;
+    height: 100% !important;
+    width: 310px;
+    max-width: 86vw;
+    background-color: #ffffff;
+    z-index: 101;
+    border-left: 1px solid var(--color-gray-200, #e2e8f0);
+    box-shadow: -6px 0 28px rgba(0, 0, 0, 0.15);
+    animation: drawerSlideInRight 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .messages-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid #e2e8f0;
+    flex-shrink: 0;
+  }
+
+  .messages-drawer-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .messages-drawer-title {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  .messages-drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .messages-drawer-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .messages-drawer-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* Search inside drawer */
+  .messages-drawer-search-wrap {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+  }
+
+  .messages-drawer-search-icon {
+    position: absolute;
+    left: 10px;
+    color: #94a3b8;
+    pointer-events: none;
+  }
+
+  .messages-drawer-search-input {
+    width: 100%;
+    height: 36px;
+    padding: 6px 30px 6px 32px;
+    font-size: 13px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #f8fafc;
+    color: #0f172a;
+    outline: none;
+    font-family: inherit;
+    transition: all 0.15s ease;
+  }
+
+  .messages-drawer-search-input:focus {
+    background: #ffffff;
+    border-color: #0284c7;
+    box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+  }
+
+  .messages-drawer-search-clear {
+    position: absolute;
+    right: 8px;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Channel selection inside drawer */
+  .messages-drawer-channel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .messages-drawer-channel-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    font-size: 13px;
+    font-weight: 500;
+    color: #334155;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    text-align: left;
+  }
+
+  .messages-drawer-channel-btn:hover {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+  }
+
+  .messages-drawer-channel-btn.active {
+    background: #f0f9ff;
+    border-color: #0284c7;
+    color: #0284c7;
+    font-weight: 600;
+  }
+
+  .messages-drawer-channel-btn-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .messages-drawer-channel-icon.whatsapp {
+    color: #16a34a;
+  }
+
+  .messages-drawer-channel-icon.email {
+    color: #0284c7;
+  }
+
+  .messages-drawer-channel-btn-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .messages-drawer-channel-count {
+    font-size: 11px;
+    font-weight: 700;
+    color: #64748b;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    padding: 1px 6px;
+    border-radius: 999px;
+  }
+
+  .messages-drawer-channel-btn.active .messages-drawer-channel-count {
+    background: #0284c7;
+    color: #ffffff;
+    border-color: #0284c7;
+  }
+
+  /* Select inputs inside drawer */
+  .messages-drawer-select-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .messages-drawer-select-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .messages-drawer-select-lbl {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #475569;
+  }
+
+  .messages-drawer-select-item .pipeline-custom-select-trigger {
+    min-height: 36px;
+    height: 36px;
+    font-size: 13px;
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    border-radius: 6px;
+  }
+
+  /* Date presets & chips inside drawer */
+  .messages-drawer-date-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .messages-drawer-date-chip {
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    font-size: 12px;
+    font-weight: 500;
+    color: #475569;
+    cursor: pointer;
+    transition: all 0.12s ease;
+  }
+
+  .messages-drawer-date-chip:hover {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+  }
+
+  .messages-drawer-date-chip.active {
+    background: #0f172a;
+    border-color: #0f172a;
+    color: #ffffff;
+    font-weight: 600;
+  }
+
+  .messages-drawer-reset-date-btn {
+    background: transparent;
+    border: none;
+    color: #0284c7;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .messages-drawer-custom-date-box {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: #f8fafc;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+  }
+
+  .messages-drawer-custom-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .messages-drawer-custom-row span {
+    font-size: 11px;
+    color: #94a3b8;
+  }
+
+  .messages-drawer-date-input {
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    font-size: 11.5px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 2px 6px;
+    background: #ffffff;
+    color: #0f172a;
+    font-family: inherit;
+  }
+
+  /* Workspace & Column Layout on Mobile */
+  .messages-workspace {
+    flex-direction: column;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* --- VIEW 1: Contact Roster (when chat is NOT open) --- */
+  .messages-contacts-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 !important;
+    border-right: none !important;
+    display: flex !important;
+    height: 100% !important;
+  }
+
+  .messages-chat-panel {
+    display: none !important;
+  }
+
+  .messages-sidebar-header {
+    padding: 8px 14px;
+  }
+
+  .messages-contacts-list {
+    flex: 1;
+    overflow-y: auto;
+    /* Extra clearance for the fixed mobile bottom navigation bar */
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .messages-contact-item {
+    padding: 12px 14px;
+    min-height: 62px;
+    border-bottom: 1px solid #f1f5f9;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .messages-contact-item:active {
+    background-color: #f1f5f9;
+  }
+
+  .messages-contact-item.is-selected {
+    border-left: none;
+    padding-left: 14px;
+    background-color: #ffffff;
+  }
+
+  .messages-avatar {
+    width: 42px;
+    height: 42px;
+    font-size: 13.5px;
+  }
+
+  .messages-contact-name {
+    font-size: 14.5px;
+  }
+
+  .messages-contact-phone {
+    font-size: 12px;
+  }
+
+  /* --- VIEW 2: Active Chat Pane (when chat IS open) --- */
+  .is-mobile-chat-open .messages-toolbar {
+    display: none !important;
+  }
+
+  .is-mobile-chat-open .messages-contacts-panel {
+    display: none !important;
+  }
+
+  .is-mobile-chat-open .messages-chat-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    background: #f8fafc;
+  }
+
+  /* Mobile Chat Header (WhatsApp style) */
+  .messages-chat-header {
+    padding: 10px 14px;
+    min-height: 56px;
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .messages-mobile-back-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    border-radius: 8px;
+    background: transparent;
+    border: none;
+    color: #0f172a;
+    cursor: pointer;
+    margin-right: 4px;
+    margin-left: -6px;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color 0.15s ease;
+  }
+
+  .messages-mobile-back-btn:active {
+    background-color: #f1f5f9;
+  }
+
+  .messages-avatar-header {
+    width: 36px;
+    height: 36px;
+    font-size: 13px;
+  }
+
+  .messages-chat-contact-name {
+    font-size: 15px;
+    max-width: 220px;
+  }
+
+  .messages-chat-contact-meta {
+    font-size: 11.5px;
+    gap: 5px;
+  }
+
+  .messages-chat-meta-email-text {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Mobile Chat Thread */
+  .messages-chat-thread {
+    padding: 12px 10px;
+    gap: 10px;
+    flex: 1;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .messages-bubble {
+    max-width: 90%;
+    padding: 10px 12px;
+    font-size: 13.5px;
+  }
+
+  .messages-email-card {
+    max-width: 94%;
+    padding: 10px 12px;
+  }
+
+  .messages-email-header {
+    gap: 6px;
+  }
+
+  .messages-email-badge {
+    font-size: 10.5px;
+    padding: 1px 6px;
+  }
+
+  .messages-email-subject {
+    font-size: 13px;
+  }
+
+  /* Mobile Chat Footer Actions */
+  .messages-chat-footer {
+    display: flex !important;
+    align-items: stretch !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    border-top: 1px solid #e2e8f0 !important;
+    /* Ensure the footer rests directly above the fixed 58px bottom navigation bar */
+    margin-bottom: calc(58px + env(safe-area-inset-bottom, 0px)) !important;
+    flex-shrink: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .btn-messages-footer-action {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    height: 44px !important;
+    padding: 0 6px !important;
+    font-size: 12px !important;
+    gap: 5px !important;
+  }
+
+  .btn-messages-footer-action svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* Send Email Modal on Mobile */
+  .messages-modal-card {
+    max-height: 88vh;
+    border-radius: 12px;
+  }
+
+  .messages-modal-header {
+    padding: 12px 16px;
+  }
+
+  .messages-modal-form {
+    padding: 14px 16px;
+    overflow-y: auto;
+  }
+}
+
+

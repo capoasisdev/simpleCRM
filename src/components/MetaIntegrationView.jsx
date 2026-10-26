@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   CheckCircle2,
   XCircle,
@@ -23,10 +24,12 @@ import {
   Phone,
   Zap,
   Mail,
-  Globe
+  Globe,
+  Monitor
 } from 'lucide-react';
 import EmailIntegrationView from './EmailIntegrationView';
 import WebsiteFormsView from './WebsiteFormsView';
+import { fetchEmailConfig } from '../lib/email';
 import { supabase } from '../lib/supabase';
 import {
   loginWithMeta,
@@ -160,6 +163,33 @@ function CustomDropdown({
   );
 }
 
+const INTEGRATION_CHANNELS = [
+  {
+    id: 'facebook',
+    label: 'Facebook Lead Ads',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1877F2', flexShrink: 0 }}>
+        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+      </svg>
+    )
+  },
+  {
+    id: 'whatsapp',
+    label: 'WhatsApp Cloud API',
+    icon: <MessageCircle size={18} style={{ color: '#25D366', flexShrink: 0 }} />
+  },
+  {
+    id: 'email',
+    label: 'Email (Resend)',
+    icon: <Mail size={18} style={{ color: '#0284c7', flexShrink: 0 }} />
+  },
+  {
+    id: 'website',
+    label: 'Website Forms',
+    icon: <Globe size={18} style={{ color: '#6366f1', flexShrink: 0 }} />
+  }
+];
+
 export default function MetaIntegrationView({ currentUser }) {
   const [config, setConfig] = useState(() => {
     try {
@@ -260,8 +290,26 @@ export default function MetaIntegrationView({ currentUser }) {
   const [testFeedback, setTestFeedback] = useState(null);
   const feedbackTimerRef = useRef(null);
 
-  // Channel Tab State ('facebook' | 'whatsapp')
+  // Channel Tab State ('facebook' | 'whatsapp' | 'email' | 'website')
   const [activeChannel, setActiveChannel] = useState('facebook');
+  const [isMobileChannelOpen, setIsMobileChannelOpen] = useState(false);
+  const mobileChannelRef = useRef(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (mobileChannelRef.current && !mobileChannelRef.current.contains(e.target)) {
+        setIsMobileChannelOpen(false);
+      }
+    };
+    if (isMobileChannelOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+      document.addEventListener('touchstart', handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [isMobileChannelOpen]);
 
   // WhatsApp Cloud API States
   const [waIsConnected, setWaIsConnected] = useState(false);
@@ -285,6 +333,7 @@ export default function MetaIntegrationView({ currentUser }) {
 
   // WhatsApp Test Message Modal
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
+  const [emailConfig, setEmailConfig] = useState(null);
   const [testRecipientPhone, setTestRecipientPhone] = useState('');
   const [testLeadName, setTestLeadName] = useState(() => currentUser?.name || currentUser?.full_name || 'Admin');
   const [testTemplateName, setTestTemplateName] = useState('');
@@ -446,6 +495,9 @@ export default function MetaIntegrationView({ currentUser }) {
     fetchConnectedForms();
     fetchPipelines();
     fetchUsers();
+    fetchEmailConfig().then(cfg => {
+      if (cfg && isMounted) setEmailConfig(cfg);
+    }).catch(() => {});
 
     // Subscribe to realtime updates for connected_forms
     const formsChannel = supabase
@@ -1227,6 +1279,11 @@ export default function MetaIntegrationView({ currentUser }) {
           </button>
         </div>
 
+        {/* Mobile Channel Dropdown Skeleton */}
+        <div className="meta-mobile-channel-select-wrap" style={{ pointerEvents: 'none' }}>
+          <Skeleton width="100%" height="42px" borderRadius="10px" />
+        </div>
+
         <div className="meta-inner">
           {/* Section 1: Hero Card Skeleton */}
           <div className="meta-hero-card-container">
@@ -1278,10 +1335,110 @@ export default function MetaIntegrationView({ currentUser }) {
     );
   }
 
+  const websiteFormsCount = forms.filter(f => f.source === 'website').length;
+  const isFbConnected = Boolean(config.is_connected && config.access_token);
+  const isWaConnected = Boolean(waIsConnected || (waPhoneId.trim() && waToken.trim()));
+  const isEmailConnected = Boolean(emailConfig?.is_connected || (emailConfig?.api_key && emailConfig.api_key.trim()));
+  const isWebsiteActive = websiteFormsCount > 0;
+
+  const mobileServices = [
+    {
+      id: 'facebook',
+      name: 'Facebook Lead Ads',
+      sub: isFbConnected ? (config.connected_page_name || 'Account Connected') : 'Lead Ads sync',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="#1877F2">
+          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+        </svg>
+      ),
+      iconBg: '#eff6ff',
+      iconBorder: '#dbeafe',
+      isConnected: isFbConnected,
+      statusLabel: isFbConnected ? 'Connected' : 'Not Connected'
+    },
+    {
+      id: 'whatsapp',
+      name: 'WhatsApp Cloud API',
+      sub: isWaConnected ? (waAccountName || `${waTemplates.length} templates synced`) : 'Cloud API messaging',
+      icon: <MessageCircle size={18} style={{ color: '#25D366' }} />,
+      iconBg: '#f0fdf4',
+      iconBorder: '#bbf7d0',
+      isConnected: isWaConnected,
+      statusLabel: isWaConnected ? 'Connected' : 'Not Connected'
+    },
+    {
+      id: 'email',
+      name: 'Email Integration',
+      sub: isEmailConnected ? (emailConfig?.from_email || 'Resend connected') : 'SMTP / Resend API',
+      icon: <Mail size={18} style={{ color: '#0284c7' }} />,
+      iconBg: '#f0f9ff',
+      iconBorder: '#bae6fd',
+      isConnected: isEmailConnected,
+      statusLabel: isEmailConnected ? 'Connected' : 'Not Connected'
+    },
+    {
+      id: 'website',
+      name: 'Website Forms',
+      sub: isWebsiteActive ? `${websiteFormsCount} active ${websiteFormsCount === 1 ? 'form' : 'forms'}` : 'Universal embed script',
+      icon: <Globe size={18} style={{ color: '#6366f1' }} />,
+      iconBg: '#eef2ff',
+      iconBorder: '#c7d2fe',
+      isConnected: isWebsiteActive,
+      statusLabel: isWebsiteActive ? `${websiteFormsCount} Active` : 'Not Set'
+    }
+  ];
+
   return (
     <div className="meta-container">
-      {/* Subnav Pill Toggle - Full Width at Top */}
-      <div className="meta-subnav-bar">
+      {/* Mobile 2-Column Status View (Strictly visible on mobile <= 900px) */}
+      <div className="meta-mobile-status-view">
+        <div className="meta-mobile-status-card">
+          <div className="meta-mobile-status-table-header">
+            <span className="meta-status-th-service">Service</span>
+            <span className="meta-status-th-status">Status</span>
+          </div>
+
+          <div className="meta-mobile-status-table-body">
+            {mobileServices.map((svc) => (
+              <div key={svc.id} className="meta-mobile-status-row">
+                <div className="meta-mobile-status-left">
+                  <div className="meta-mobile-status-icon-box" style={{ background: svc.iconBg, borderColor: svc.iconBorder }}>
+                    {svc.icon}
+                  </div>
+                  <div className="meta-mobile-status-info">
+                    <span className="meta-mobile-status-name">{svc.name}</span>
+                    <span className="meta-mobile-status-sub">{svc.sub}</span>
+                  </div>
+                </div>
+
+                <div className="meta-mobile-status-right">
+                  <span className={`meta-mobile-status-badge ${svc.isConnected ? 'is-connected' : 'is-disconnected'}`}>
+                    {svc.statusLabel}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Clean Desktop Notice Banner */}
+        <div className="meta-mobile-desktop-notice">
+          <div className="meta-notice-icon-box">
+            <Monitor size={17} strokeWidth={1.75} />
+          </div>
+          <div className="meta-notice-text-col">
+            <span className="meta-notice-title">Desktop Management</span>
+            <span className="meta-notice-desc">
+              To connect new accounts, configure webhooks, or copy integration scripts, open simplecrm on your computer.
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop Full-Featured View (Hidden on mobile <= 900px) */}
+      <div className="meta-desktop-full-view">
+        {/* Subnav Pill Toggle - Full Width at Top (Desktop) */}
+        <div className="meta-subnav-bar">
         <button
           type="button"
           className={`meta-subnav-btn ${activeChannel === 'facebook' ? 'active' : ''}`}
@@ -1316,6 +1473,48 @@ export default function MetaIntegrationView({ currentUser }) {
           <Globe size={18} style={{ color: '#6366f1' }} />
           Website Forms
         </button>
+      </div>
+
+      {/* Mobile Channel Dropdown Selector (Hidden on Desktop) */}
+      <div className="meta-mobile-channel-select-wrap" ref={mobileChannelRef}>
+        <button
+          type="button"
+          className={`meta-mobile-channel-trigger ${isMobileChannelOpen ? 'open' : ''}`}
+          onClick={() => setIsMobileChannelOpen(s => !s)}
+        >
+          <div className="meta-mobile-channel-current">
+            {INTEGRATION_CHANNELS.find(c => c.id === activeChannel)?.icon}
+            <span className="meta-mobile-channel-name">
+              {INTEGRATION_CHANNELS.find(c => c.id === activeChannel)?.label}
+            </span>
+          </div>
+          <ChevronDown size={17} className={`meta-mobile-channel-chevron ${isMobileChannelOpen ? 'rotated' : ''}`} />
+        </button>
+
+        {isMobileChannelOpen && (
+          <div className="meta-mobile-channel-menu">
+            {INTEGRATION_CHANNELS.map(ch => {
+              const isSelected = activeChannel === ch.id;
+              return (
+                <button
+                  key={ch.id}
+                  type="button"
+                  className={`meta-mobile-channel-option ${isSelected ? 'selected' : ''}`}
+                  onClick={() => {
+                    setActiveChannel(ch.id);
+                    setIsMobileChannelOpen(false);
+                  }}
+                >
+                  <div className="meta-mobile-channel-option-left">
+                    {ch.icon}
+                    <span>{ch.label}</span>
+                  </div>
+                  {isSelected && <Check size={16} className="meta-mobile-channel-check" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="meta-inner">
@@ -1756,9 +1955,10 @@ export default function MetaIntegrationView({ currentUser }) {
 
         {/* End of Main Content */}
       </div>
+    </div>
 
       {/* Asset Selection Modal */}
-      {isModalOpen && (
+      {isModalOpen && createPortal(
         <div className="meta-modal-backdrop" onClick={() => !isSubmittingSelection && setIsModalOpen(false)}>
           <div className="meta-modal" onClick={e => e.stopPropagation()}>
             <div className="meta-modal-header">
@@ -1902,11 +2102,12 @@ export default function MetaIntegrationView({ currentUser }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* WhatsApp Multi-Account Asset Selection Modal */}
-      {isWaAssetModalOpen && (
+      {isWaAssetModalOpen && createPortal(
         <div className="meta-modal-backdrop" onClick={() => setIsWaAssetModalOpen(false)}>
           <div className="meta-modal" style={{ maxWidth: '520px' }} onClick={e => e.stopPropagation()}>
             <div className="meta-modal-header">
@@ -1984,11 +2185,12 @@ export default function MetaIntegrationView({ currentUser }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* WhatsApp Live Test Message Modal */}
-      {isTestModalOpen && (
+      {isTestModalOpen && createPortal(
         <div className="meta-modal-backdrop" onClick={() => !isSendingTest && setIsTestModalOpen(false)}>
           <div className="meta-modal meta-test-modal" onClick={e => e.stopPropagation()}>
             <div className="meta-modal-header">
@@ -2114,7 +2316,8 @@ export default function MetaIntegrationView({ currentUser }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

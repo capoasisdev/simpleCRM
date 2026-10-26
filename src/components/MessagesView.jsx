@@ -19,7 +19,9 @@ import {
   X,
   Loader2,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ArrowLeft,
+  Menu
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { fetchWhatsAppMessages } from '../lib/whatsapp';
@@ -27,6 +29,8 @@ import { fetchEmailLogs, fetchEmailTemplates, sendEmailViaResend, renderEmailVar
 import { getMessagesScope, isLeadAssignedToUser, hasPermission } from '../lib/permissions';
 import CustomSelect from './common/CustomSelect';
 import Skeleton from './common/Skeleton';
+import { haptic } from '../lib/haptics';
+import { registerBackHandler } from '../lib/backButton';
 import '../styles/messages.css';
 
 const getInitials = (name) => {
@@ -173,6 +177,47 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
   };
 
   const chatEndRef = useRef(null);
+
+  // Mobile screen detection (phone / WhatsApp style single-column navigation)
+  const [isMobileScreen, setIsMobileScreen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth <= 768;
+    }
+    return false;
+  });
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileScreen(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Handle mobile hardware back button and browser navigation
+  useEffect(() => {
+    if (isMobileScreen && selectedContactId) {
+      return registerBackHandler(() => {
+        setSelectedContactId(null);
+        return true;
+      });
+    }
+  }, [selectedContactId, isMobileScreen]);
+
+  useEffect(() => {
+    if (isMobileDrawerOpen) {
+      return registerBackHandler(() => {
+        setIsMobileDrawerOpen(false);
+        return true;
+      });
+    }
+  }, [isMobileDrawerOpen]);
+
+  const handleMobileBack = () => {
+    haptic.light();
+    setSelectedContactId(null);
+  };
 
   // Permission evaluation
   const hasViewPermission = hasPermission(currentUser, 'messages', 'view');
@@ -570,14 +615,17 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
     customEndDate
   ]);
 
-  // Currently active conversation
+  // Currently active conversation (On mobile, only active when contact is explicitly clicked)
   const activeConversation = useMemo(() => {
     if (selectedContactId) {
       const found = filteredConversations.find((c) => c.id === selectedContactId);
       if (found) return found;
     }
-    return filteredConversations[0] || null;
-  }, [selectedContactId, filteredConversations]);
+    if (!isMobileScreen) {
+      return filteredConversations[0] || null;
+    }
+    return null;
+  }, [selectedContactId, filteredConversations, isMobileScreen]);
 
   // Active messages stream for the selected conversation
   const activeMessages = useMemo(() => {
@@ -728,8 +776,10 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
     );
   }
 
+  const isMobileChatOpen = isMobileScreen && !!activeConversation;
+
   return (
-    <div className="messages-view-container">
+    <div className={`messages-view-container ${isMobileChatOpen ? 'is-mobile-chat-open' : ''}`}>
       {/* Top Toolbar: Search, Channel Selector, & Pipeline Filters */}
       <header className="messages-toolbar">
         <div className="messages-toolbar-left">
@@ -843,10 +893,210 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
             />
           </div>
         </div>
+
+        {/* Mobile Toolbar Actions (Hamburger Menu) */}
+        <div className="messages-mobile-toolbar-actions">
+          <button
+            type="button"
+            className={`messages-mobile-menu-btn ${isMobileDrawerOpen ? 'active' : ''}`}
+            onClick={() => setIsMobileDrawerOpen((prev) => !prev)}
+            aria-label={isMobileDrawerOpen ? 'Close filters and search' : 'Open filters and search'}
+            title="Filters & Search"
+          >
+            {isMobileDrawerOpen ? <X size={18} strokeWidth={2} /> : <Menu size={18} strokeWidth={2} />}
+          </button>
+        </div>
       </header>
 
       {/* Main Split Layout */}
       <div className="messages-workspace">
+        {/* Mobile Slide-Out Filters & Controls Drawer */}
+        {isMobileDrawerOpen && (
+          <>
+            <div
+              className="messages-mobile-drawer-backdrop"
+              onClick={() => setIsMobileDrawerOpen(false)}
+              aria-hidden="true"
+            />
+            <aside
+              className="messages-mobile-drawer"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Messages Filters and Controls"
+            >
+              <div className="messages-drawer-header">
+                <div className="messages-drawer-title-wrap">
+                  <MessageSquare size={16} strokeWidth={2} style={{ color: '#0284c7' }} />
+                  <span className="messages-drawer-title">Messages & Filters</span>
+                </div>
+              </div>
+
+              <div className="messages-drawer-body">
+                {/* Search Bar */}
+                <div className="messages-drawer-section">
+                  <div className="messages-drawer-section-title">Search</div>
+                  <div className="messages-drawer-search-wrap">
+                    <Search size={15} strokeWidth={1.75} className="messages-drawer-search-icon" />
+                    <input
+                      type="text"
+                      className="messages-drawer-search-input"
+                      placeholder="Search contact..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        className="messages-drawer-search-clear"
+                        onClick={() => setSearchQuery('')}
+                        aria-label="Clear search"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Channel Filter */}
+                <div className="messages-drawer-section">
+                  <div className="messages-drawer-section-title">Channel</div>
+                  <div className="messages-drawer-channel-list">
+                    {[
+                      { id: 'all', label: 'All Channels', icon: Inbox, count: channelCounts.all },
+                      { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, count: channelCounts.whatsapp, colorClass: 'whatsapp' },
+                      { id: 'email', label: 'Email', icon: Mail, count: channelCounts.email, colorClass: 'email' }
+                    ].map((opt) => {
+                      const OptIcon = opt.icon;
+                      const isSelected = selectedChannelFilter === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          className={`messages-drawer-channel-btn ${isSelected ? 'active' : ''}`}
+                          onClick={() => {
+                            setSelectedChannelFilter(opt.id);
+                            setIsMobileDrawerOpen(false);
+                          }}
+                        >
+                          <div className="messages-drawer-channel-btn-left">
+                            <OptIcon size={14} className={`messages-drawer-channel-icon ${opt.colorClass || ''}`} />
+                            <span>{opt.label}</span>
+                          </div>
+                          <div className="messages-drawer-channel-btn-right">
+                            <span className="messages-drawer-channel-count">{opt.count}</span>
+                            {isSelected && <Check size={14} strokeWidth={2.5} />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Pipeline & Stage Filters */}
+                <div className="messages-drawer-section">
+                  <div className="messages-drawer-section-title">Pipeline & Stage</div>
+                  <div className="messages-drawer-select-group">
+                    <div className="messages-drawer-select-item">
+                      <label className="messages-drawer-select-lbl">Pipeline</label>
+                      <CustomSelect
+                        value={selectedPipelineId}
+                        onChange={(val) => {
+                          setSelectedPipelineId(val);
+                          setSelectedStageId('all');
+                        }}
+                        options={[
+                          { value: 'all', label: 'All Pipelines' },
+                          ...pipelines.map((p) => ({ value: p.id, label: p.name }))
+                        ]}
+                        placeholder="Select Pipeline"
+                      />
+                    </div>
+                    <div className="messages-drawer-select-item">
+                      <label className="messages-drawer-select-lbl">Stage</label>
+                      <CustomSelect
+                        value={selectedStageId}
+                        onChange={setSelectedStageId}
+                        options={stageFilterOptions}
+                        placeholder="Select Stage"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Date Filter */}
+                <div className="messages-drawer-section" style={{ borderBottom: 'none' }}>
+                  <div className="messages-drawer-section-title">
+                    <span>Date Range</span>
+                    {selectedDateFilter !== 'all' && (
+                      <button
+                        type="button"
+                        className="messages-drawer-reset-date-btn"
+                        onClick={() => {
+                          setSelectedDateFilter('all');
+                          setCustomStartDate('');
+                          setCustomEndDate('');
+                        }}
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  <div className="messages-drawer-date-presets">
+                    {[
+                      { id: 'all', label: 'All Dates' },
+                      { id: 'today', label: 'Today' },
+                      { id: 'yesterday', label: 'Yesterday' },
+                      { id: 'last7', label: 'Last 7 Days' },
+                      { id: 'last30', label: 'Last 30 Days' },
+                      { id: 'custom', label: 'Custom' }
+                    ].map((item) => {
+                      const isSelected = selectedDateFilter === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`messages-drawer-date-chip ${isSelected ? 'active' : ''}`}
+                          onClick={() => {
+                            setSelectedDateFilter(item.id);
+                            if (item.id !== 'custom') {
+                              setCustomStartDate('');
+                              setCustomEndDate('');
+                            }
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {selectedDateFilter === 'custom' && (
+                    <div className="messages-drawer-custom-date-box">
+                      <div className="messages-drawer-custom-row">
+                        <input
+                          type="date"
+                          className="messages-drawer-date-input"
+                          value={customStartDate}
+                          onChange={(e) => setCustomStartDate(e.target.value)}
+                          title="Start Date"
+                        />
+                        <span>to</span>
+                        <input
+                          type="date"
+                          className="messages-drawer-date-input"
+                          value={customEndDate}
+                          onChange={(e) => setCustomEndDate(e.target.value)}
+                          title="End Date"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </aside>
+          </>
+        )}
+
         {/* Left Column: Contact Roster */}
         <aside className="messages-contacts-panel" aria-label="Contacts Roster">
           {/* Sidebar Date Filter Header */}
@@ -1015,6 +1265,14 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
               {/* Chat Header */}
               <div className="messages-chat-header">
                 <div className="messages-chat-header-info">
+                  <button
+                    type="button"
+                    className="messages-mobile-back-btn"
+                    onClick={handleMobileBack}
+                    aria-label="Back to contacts list"
+                  >
+                    <ArrowLeft size={18} strokeWidth={2.2} />
+                  </button>
                   <div className="messages-avatar messages-avatar-header">
                     {getInitials(activeConversation.leadName)}
                   </div>

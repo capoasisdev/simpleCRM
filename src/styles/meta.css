@@ -24,9 +24,9 @@
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100%;
+  height: auto;
+  min-height: 100%;
   background-color: #ffffff;
-  overflow-y: auto;
   box-sizing: border-box;
 }
 
@@ -39,6 +39,7 @@
   flex-direction: column;
   gap: 22px;
   box-sizing: border-box;
+  height: auto;
 }
 
 .meta-master-header {
@@ -55,9 +56,6 @@
   letter-spacing: -0.02em;
   margin: 0;
   line-height: 1.2;
-  background: #f5f5dc;
-  padding: 4px 8px;
-  width: fit-content;
 }
 
 /* ----------------- Modern Structured Panels System ----------------- */
@@ -368,9 +366,6 @@
   font-size: 20px;
   font-weight: 600;
   color: #0f172a;
-  background: #f5f5dc;
-  padding: 4px 8px;
-  width: fit-content;
   letter-spacing: -0.01em;
 }
 
@@ -1337,7 +1332,28 @@
   background-color: #f1f5f9;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
+  .meta-container {
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .meta-inner {
+    padding: 14px 12px 24px 12px !important;
+    gap: 16px !important;
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    box-sizing: border-box !important;
+  }
+  .meta-master-header {
+    flex-wrap: wrap !important;
+    gap: 12px !important;
+  }
   .meta-hero-content {
     flex-direction: column;
     align-items: flex-start;
@@ -2555,6 +2571,682 @@
 .syn-punct { color: #64748b; }
 .syn-var { color: #f1f5f9; }
 
+/* Mobile Channel Dropdown Selector & Status View (Hidden on Desktop) */
+.meta-mobile-channel-select-wrap {
+  display: none !important;
+}
 
+.meta-mobile-status-view {
+  display: none !important;
+}
 
+.meta-desktop-full-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
 
+/* ==========================================================================
+   Comprehensive Integrations Mobile Styles (<= 900px)
+   ========================================================================== */
+@media (max-width: 900px) {
+  /* 0. Hide Desktop-only Integrations Interface on Mobile */
+  .meta-desktop-full-view {
+    display: none !important;
+  }
+
+  /* Clean 2-Column Mobile Status Table (Service Left, Status Right) */
+  .meta-mobile-status-view {
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 16px 14px 48px 14px !important;
+    gap: 16px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .meta-mobile-status-card {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 14px !important;
+    overflow: hidden !important;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .meta-mobile-status-table-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 12px 16px !important;
+    background: #f8fafc !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    color: #64748b !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+  }
+
+  .meta-mobile-status-table-body {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .meta-mobile-status-row {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 14px 16px !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    gap: 12px !important;
+    transition: background-color 0.15s ease !important;
+  }
+
+  .meta-mobile-status-row:last-child {
+    border-bottom: none !important;
+  }
+
+  .meta-mobile-status-left {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    min-width: 0 !important;
+    flex: 1 !important;
+  }
+
+  .meta-mobile-status-icon-box {
+    width: 38px !important;
+    height: 38px !important;
+    border-radius: 10px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border: 1px solid transparent !important;
+    flex-shrink: 0 !important;
+  }
+
+  .meta-mobile-status-info {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    gap: 2px !important;
+  }
+
+  .meta-mobile-status-name {
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .meta-mobile-status-sub {
+    font-size: 11.5px !important;
+    color: #64748b !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .meta-mobile-status-right {
+    flex-shrink: 0 !important;
+  }
+
+  .meta-mobile-status-badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 3px 8px !important;
+    border-radius: 5px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+    white-space: nowrap !important;
+  }
+
+  .meta-mobile-status-badge.is-connected {
+    background: #f0fdf4 !important;
+    color: #166534 !important;
+    border: 1px solid #bbf7d0 !important;
+  }
+
+  .meta-mobile-status-badge.is-disconnected {
+    background: #f4f4f5 !important;
+    color: #52525b !important;
+    border: 1px solid #e4e4e7 !important;
+  }
+
+  .meta-mobile-desktop-notice {
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+    padding: 14px 16px !important;
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 12px !important;
+    color: #475569 !important;
+    box-sizing: border-box !important;
+  }
+
+  .meta-notice-icon-box {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 8px !important;
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: #475569 !important;
+    flex-shrink: 0 !important;
+  }
+
+  .meta-notice-text-col {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 3px !important;
+  }
+
+  .meta-notice-title {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #1e293b !important;
+  }
+
+  .meta-notice-desc {
+    font-size: 12px !important;
+    color: #64748b !important;
+    line-height: 1.45 !important;
+  }
+
+  /* 1. Hide the second horizontal scrolling subnav bar on mobile */
+  .meta-subnav-bar {
+    display: none !important;
+  }
+
+  /* 2. Sleek, Compact Channel Dropdown Selector */
+  .meta-mobile-channel-select-wrap {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 12px 14px 4px 14px !important;
+    box-sizing: border-box !important;
+    position: relative !important;
+    z-index: 30 !important;
+  }
+
+  .meta-mobile-channel-trigger {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    height: 42px !important;
+    padding: 0 14px !important;
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 10px !important;
+    color: #0f172a !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05) !important;
+    transition: all 0.15s ease !important;
+    font-family: inherit !important;
+    box-sizing: border-box !important;
+  }
+
+  .meta-mobile-channel-trigger:active,
+  .meta-mobile-channel-trigger.open {
+    border-color: #0f172a !important;
+    box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.08) !important;
+  }
+
+  .meta-mobile-channel-current {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    min-width: 0 !important;
+  }
+
+  .meta-mobile-channel-name {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+  }
+
+  .meta-mobile-channel-chevron {
+    color: #64748b !important;
+    transition: transform 0.2s ease !important;
+    flex-shrink: 0 !important;
+  }
+
+  .meta-mobile-channel-chevron.rotated {
+    transform: rotate(180deg) !important;
+    color: #0f172a !important;
+  }
+
+  .meta-mobile-channel-menu {
+    position: absolute !important;
+    top: calc(100% + 4px) !important;
+    left: 14px !important;
+    right: 14px !important;
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.04) !important;
+    padding: 6px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2px !important;
+    z-index: 50 !important;
+    animation: metaModalScale 0.15s ease !important;
+    box-sizing: border-box !important;
+  }
+
+  .meta-mobile-channel-option {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    height: 42px !important;
+    padding: 0 12px !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 8px !important;
+    cursor: pointer !important;
+    font-size: 13.5px !important;
+    font-weight: 500 !important;
+    color: #334155 !important;
+    transition: all 0.12s ease !important;
+    font-family: inherit !important;
+    box-sizing: border-box !important;
+  }
+
+  .meta-mobile-channel-option:hover,
+  .meta-mobile-channel-option:active {
+    background: #f8fafc !important;
+    color: #0f172a !important;
+  }
+
+  .meta-mobile-channel-option.selected {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+    font-weight: 600 !important;
+  }
+
+  .meta-mobile-channel-option-left {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+  }
+
+  .meta-mobile-channel-check {
+    color: #0f172a !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* 2. Main Page Layout */
+  .meta-container {
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .meta-inner {
+    padding: 14px 12px 24px 12px !important;
+    gap: 16px !important;
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    box-sizing: border-box !important;
+  }
+
+  .meta-master-header {
+    flex-wrap: wrap !important;
+    gap: 12px !important;
+  }
+
+  /* 3. Facebook Channel */
+  .meta-hero-card {
+    padding: 16px !important;
+  }
+
+  .meta-hero-content {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+
+  .meta-hero-actions {
+    width: 100% !important;
+    margin-top: 6px !important;
+  }
+
+  .meta-btn-facebook-login {
+    width: 100% !important;
+    justify-content: center !important;
+    height: 40px !important;
+  }
+
+  .meta-forms-header {
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+  }
+
+  .meta-form-item {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+    padding: 12px !important;
+  }
+
+  .meta-form-item-left {
+    width: 100% !important;
+    gap: 10px !important;
+  }
+
+  .meta-form-item-right {
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    padding-top: 8px !important;
+    border-top: 1px solid #f1f5f9 !important;
+  }
+
+  /* 4. WhatsApp Channel */
+  .meta-wa-card {
+    padding: 16px !important;
+  }
+
+  .meta-wa-header-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+
+  .meta-wa-header-row button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  .meta-wa-form-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    margin-bottom: 16px !important;
+  }
+
+  .meta-wa-field.full-width {
+    grid-column: span 1 !important;
+  }
+
+  .meta-wa-actions-bar {
+    flex-direction: column-reverse !important;
+    width: 100% !important;
+    gap: 8px !important;
+  }
+
+  .meta-wa-actions-bar button {
+    width: 100% !important;
+    justify-content: center !important;
+    height: 38px !important;
+  }
+
+  .meta-template-row-item {
+    position: relative !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    padding: 12px 14px !important;
+    gap: 4px !important;
+  }
+
+  .meta-template-identity {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding-right: 96px !important;
+  }
+
+  .meta-template-icon-tile {
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 6px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .meta-template-info-col {
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .meta-template-name {
+    font-size: 13.5px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: block !important;
+  }
+
+  .meta-template-body-snippet {
+    font-size: 12px !important;
+    color: #64748b !important;
+    line-height: 1.4 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 100% !important;
+    margin-top: 1px !important;
+    box-sizing: border-box !important;
+  }
+
+  .meta-template-status-col {
+    position: absolute !important;
+    top: 12px !important;
+    right: 14px !important;
+    width: auto !important;
+    flex-shrink: 0 !important;
+  }
+
+  .meta-template-status-badge {
+    font-size: 10.5px !important;
+    font-weight: 600 !important;
+    padding: 2px 7px !important;
+    border-radius: 6px !important;
+    letter-spacing: 0.02em !important;
+  }
+
+  .meta-templates-attached-bottom {
+    position: static !important;
+    margin-top: 12px !important;
+    display: flex !important;
+    justify-content: stretch !important;
+  }
+
+  .btn-meta-attached-test {
+    width: 100% !important;
+    justify-content: center !important;
+    border-radius: 8px !important;
+    border-top: 1px solid #e2e8f0 !important;
+    height: 38px !important;
+  }
+
+  /* 5. Website Forms & Connected Lead Forms Channels */
+  .meta-panel-card {
+    padding: 0 !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+    height: auto !important;
+    min-height: fit-content !important;
+    flex-shrink: 0 !important;
+  }
+
+  .meta-panel-header {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    padding: 14px 16px !important;
+    gap: 12px !important;
+    height: auto !important;
+    min-height: fit-content !important;
+    flex-shrink: 0 !important;
+    overflow: visible !important;
+  }
+
+  .meta-panel-header-left {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    min-height: 28px !important;
+    height: auto !important;
+  }
+
+  .meta-panel-title {
+    font-size: 16px !important;
+    font-weight: 600 !important;
+    line-height: 1.3 !important;
+    margin: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+  }
+
+  .btn-meta-add-form {
+    width: 100% !important;
+    justify-content: center !important;
+    height: 38px !important;
+    min-height: 38px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .meta-forms-table {
+    display: flex !important;
+    flex-direction: column !important;
+    height: auto !important;
+    min-height: fit-content !important;
+  }
+
+  .meta-form-row-item {
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 12px 14px !important;
+    gap: 10px !important;
+  }
+
+  .meta-form-identity {
+    flex: 1 !important;
+    min-width: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+  }
+
+  .meta-form-info-col {
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .meta-form-title {
+    font-size: 13.5px !important;
+    font-weight: 600 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: block !important;
+  }
+
+  .meta-form-meta-row {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    margin-top: 2px !important;
+  }
+
+  .meta-form-actions-col {
+    width: auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 6px !important;
+    padding-top: 0 !important;
+    border-top: none !important;
+    flex-shrink: 0 !important;
+  }
+
+  .meta-script-preview-box {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .meta-script-code-wrap {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    max-width: 100% !important;
+  }
+
+  .meta-script-code {
+    white-space: pre-wrap !important;
+    word-break: break-all !important;
+    font-size: 11px !important;
+  }
+
+  /* 6. Universal Bottom-Sheet Modals */
+  .meta-modal-backdrop {
+    position: fixed !important;
+    inset: 0 !important;
+    align-items: flex-end !important;
+    padding: 0 !important;
+    z-index: 10000 !important;
+  }
+
+  .meta-modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 16px 16px 0 0 !important;
+    max-height: 85vh !important;
+    animation: metaModalScale 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+
+  .meta-modal-header {
+    padding: 16px 18px 12px 18px !important;
+  }
+
+  .meta-modal-body {
+    padding: 14px 18px !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    max-height: calc(85vh - 120px) !important;
+  }
+
+  .meta-modal-footer {
+    padding: 12px 18px calc(20px + env(safe-area-inset-bottom, 0px)) 18px !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  .meta-modal-btn-cancel,
+  .meta-modal-btn-confirm {
+    flex: 1 1 calc(50% - 4px) !important;
+    justify-content: center !important;
+    text-align: center !important;
+    height: 38px !important;
+  }
+}

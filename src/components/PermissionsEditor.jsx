@@ -160,7 +160,7 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
             <GitFork size={15} strokeWidth={1.8} className="perm-section-icon" />
             <span className="perm-section-name">Pipelines</span>
           </div>
-          <div className="perm-col-scope">
+          <div className="perm-col-scope perm-scope-empty">
             <span className="perm-scope-na">—</span>
           </div>
           <div className="perm-col-actions">
@@ -311,7 +311,7 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
             <Shield size={15} strokeWidth={1.8} className="perm-section-icon" />
             <span className="perm-section-name">Admin</span>
           </div>
-          <div className="perm-col-scope">
+          <div className="perm-col-scope perm-scope-empty">
             <span className="perm-scope-na">—</span>
           </div>
           <div className="perm-col-actions">
