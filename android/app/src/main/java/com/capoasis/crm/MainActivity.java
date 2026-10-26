@@ -12,7 +12,16 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(NativeVibrationPlugin.class);
         super.onCreate(savedInstanceState);
+        applyAutofillSuppression();
+    }
 
+    @Override
+    public void onResume() {
+        super.onResume();
+        applyAutofillSuppression();
+    }
+
+    private void applyAutofillSuppression() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getWindow().getDecorView().setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
         }

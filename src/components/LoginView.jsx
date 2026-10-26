@@ -57,15 +57,20 @@ export default function LoginView({ onLoginSuccess }) {
           <h1 className="brand-heading">simplecrm</h1>
 
           <form className="login-form" onSubmit={handleSubmit} noValidate autoComplete="off">
+            {/* Hidden dummy fields to trap aggressive Chromium autofill heuristics */}
+            <input type="text" style={{ display: 'none' }} tabIndex={-1} autoComplete="username" aria-hidden="true" />
+            <input type="password" style={{ display: 'none' }} tabIndex={-1} autoComplete="current-password" aria-hidden="true" />
+
             <div className="form-group">
-              <label htmlFor="work-email" className="form-label">
+              <label htmlFor="crm-login-id" className="form-label">
                 WORK EMAIL
               </label>
               <div className="input-wrapper">
                 <input
-                  id="work-email"
-                  name="email"
-                  type="email"
+                  id="crm-login-id"
+                  name="crm_login_account_id"
+                  type="text"
+                  inputMode="email"
                   className="input-field"
                   placeholder="name@company.com"
                   value={email}
@@ -83,13 +88,13 @@ export default function LoginView({ onLoginSuccess }) {
             </div>
 
             <div className="form-group">
-              <label htmlFor="user-pin" className="form-label">
+              <label htmlFor="crm-login-pass" className="form-label">
                 4-DIGIT ACCESS PIN
               </label>
               <div className="input-wrapper">
                 <input
-                  id="user-pin"
-                  name="pin"
+                  id="crm-login-pass"
+                  name="crm_login_pass_code"
                   type={showPin ? 'text' : 'password'}
                   inputMode="numeric"
                   maxLength={4}
@@ -100,7 +105,7 @@ export default function LoginView({ onLoginSuccess }) {
                     setPin(e.target.value.replace(/\D/g, '').slice(0, 4));
                     if (errorMessage) setErrorMessage('');
                   }}
-                  autoComplete="off"
+                  autoComplete="new-password"
                   required
                 />
                 <button
