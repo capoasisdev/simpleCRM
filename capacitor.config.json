@@ -17,7 +17,7 @@
       "overlaysWebView": false
     },
     "Keyboard": {
-      "resize": "none",
+      "resize": "body",
       "resizeOnFullScreen": false
     }
   }
