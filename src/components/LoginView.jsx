@@ -18,7 +18,7 @@ export default function LoginView({ onLoginSuccess }) {
     const rawPin = pinRef.current ? pinRef.current.value : '';
 
     const trimmedEmail = rawEmail.trim().toLowerCase();
-    const trimmedPin = rawPin.trim();
+    const trimmedPin = rawPin.trim().replace(/\D/g, '').slice(0, 4);
 
     if (!trimmedEmail || !trimmedPin) {
       setErrorMessage('Please enter both work email and 4-digit PIN.');
@@ -82,14 +82,13 @@ export default function LoginView({ onLoginSuccess }) {
                   id="login-identity-input"
                   name="login_account_id"
                   type="text"
+                  inputMode="email"
                   className="input-field"
                   placeholder="Enter your work email"
-                  autoComplete="new-password"
+                  autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck="false"
-                  readOnly
-                  onFocus={(e) => e.target.removeAttribute('readOnly')}
                   onKeyDown={handleKeyDown}
                 />
               </div>
@@ -106,16 +105,12 @@ export default function LoginView({ onLoginSuccess }) {
                   name="login_access_code"
                   type={showPin ? 'text' : 'password'}
                   inputMode="numeric"
+                  pattern="[0-9]*"
                   maxLength={4}
                   className="input-field password-input"
                   placeholder="Enter 4-digit PIN"
-                  autoComplete="new-password"
-                  readOnly
-                  onFocus={(e) => e.target.removeAttribute('readOnly')}
+                  autoComplete="off"
                   onKeyDown={handleKeyDown}
-                  onInput={(e) => {
-                    e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
-                  }}
                 />
                 <button
                   type="button"
