@@ -8,7 +8,10 @@ import {
   Check,
   X,
   Code,
-  RefreshCw
+  RefreshCw,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import Skeleton from './common/Skeleton';
@@ -20,6 +23,7 @@ export default function WebsiteFormsView({ currentUser }) {
   const [pipelines, setPipelines] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [newFormName, setNewFormName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [selectedScriptForm, setSelectedScriptForm] = useState(null);
@@ -156,8 +160,28 @@ export default function WebsiteFormsView({ currentUser }) {
 
   if (isLoading) {
     return (
-      <>
-        <div className="meta-panel-card" style={{ marginTop: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%' }}>
+        {/* Hero Card Skeleton */}
+        <div className="meta-panel-card">
+          <div className="meta-account-row">
+            <div className="meta-account-identity">
+              <Skeleton width="44px" height="44px" borderRadius="8px" />
+              <div className="meta-account-details" style={{ gap: '6px' }}>
+                <Skeleton width="190px" height="20px" borderRadius="4px" />
+              </div>
+            </div>
+            <div className="meta-account-actions">
+              <Skeleton width="110px" height="34px" borderRadius="7px" />
+            </div>
+          </div>
+          <div className="meta-account-footer-row">
+            <Skeleton width="220px" height="14px" borderRadius="4px" />
+            <Skeleton width="60px" height="14px" borderRadius="4px" />
+          </div>
+        </div>
+
+        {/* Forms Table Skeleton */}
+        <div className="meta-panel-card">
           <div className="meta-panel-header">
             <div className="meta-panel-header-left">
               <Skeleton width="130px" height="18px" borderRadius="4px" />
@@ -170,7 +194,7 @@ export default function WebsiteFormsView({ currentUser }) {
             {[1, 2, 3].map((i) => (
               <div key={i} className="meta-form-row-item">
                 <div className="meta-form-identity">
-                  <Skeleton width="34px" height="34px" borderRadius="8px" />
+                  <Skeleton width="36px" height="36px" borderRadius="8px" />
                   <div className="meta-form-info-col" style={{ gap: '6px' }}>
                     <Skeleton width={i === 1 ? '140px' : (i === 2 ? '170px' : '120px')} height="15px" borderRadius="4px" />
                     <Skeleton width={i === 1 ? '110px' : (i === 2 ? '135px' : '100px')} height="14px" borderRadius="10px" />
@@ -179,38 +203,78 @@ export default function WebsiteFormsView({ currentUser }) {
                 <div className="meta-form-actions-col">
                   <Skeleton width="88px" height="30px" borderRadius="6px" />
                   <Skeleton width="30px" height="30px" borderRadius="6px" />
-                  <Skeleton width="30px" height="30px" borderRadius="6px" />
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Setup Procedure Skeleton */}
-        <div style={{ marginTop: '36px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <Skeleton width="115px" height="20px" borderRadius="4px" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-            {[1, 2, 3, 4].map((step) => (
-              <div key={step} style={{ display: 'flex', alignItems: 'flex-start', gap: '18px' }}>
-                <Skeleton width="22px" height="28px" borderRadius="4px" />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-                  <Skeleton width={step === 1 ? '190px' : (step === 2 ? '140px' : (step === 3 ? '160px' : '175px'))} height="16px" borderRadius="4px" />
-                  <Skeleton width={step === 1 ? '92%' : (step === 2 ? '65%' : (step === 3 ? '80%' : '75%'))} height="13px" borderRadius="3px" />
-                </div>
-              </div>
-            ))}
+        {/* Setup Guide Skeleton */}
+        <div className="meta-panel-card">
+          <div className="meta-panel-header">
+            <div className="meta-panel-header-left">
+              <Skeleton width="180px" height="18px" borderRadius="4px" />
+              <Skeleton width="55px" height="18px" borderRadius="10px" />
+            </div>
+            <Skeleton width="96px" height="30px" borderRadius="7px" />
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <div className="meta-panel-card" style={{ marginTop: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%' }}>
+      {/* SECTION 1: HERO STATUS CARD */}
+      <div className="meta-panel-card">
+        <div className="meta-account-row">
+          <div className="meta-account-identity">
+            <div className="meta-brand-tile">
+              <Globe size={22} color="#0f172a" />
+            </div>
+            <div className="meta-account-details">
+              <div className="meta-account-title-line">
+                <span className="meta-account-name">Universal Website Forms</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="meta-account-actions">
+            <button
+              type="button"
+              className="btn-meta-clean"
+              onClick={() => {
+                if (forms.length > 0) {
+                  setSelectedScriptForm(forms[0]);
+                  setScriptCopied(false);
+                } else {
+                  setIsModalOpen(true);
+                }
+              }}
+              style={{ height: '34px', padding: '0 12px', fontSize: '13px', gap: '6px' }}
+            >
+              <Code size={14} />
+              <span>Get Embed Script</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="meta-account-footer-row">
+          <span className="meta-id-pill">
+            Endpoint: <strong>{supabaseUrl ? `${supabaseUrl.replace(/^https?:\/\//, '')}/functions/v1/website-webhook` : 'Supabase Edge Functions'}</strong>
+          </span>
+          <span className="meta-connection-status">
+            <span className="meta-status-dot is-connected" />
+            Active
+          </span>
+        </div>
+      </div>
+
+      {/* SECTION 2: FORMS PANEL */}
+      <div className="meta-panel-card">
         <div className="meta-panel-header">
           <div className="meta-panel-header-left">
-            <span className="meta-panel-title">Website Forms</span>
+            <span className="meta-panel-title">Connected Forms</span>
             <span className="meta-count-badge">
               {forms.length} {forms.length === 1 ? 'form' : 'forms'} active
             </span>
@@ -241,8 +305,6 @@ export default function WebsiteFormsView({ currentUser }) {
         ) : (
           <div className="meta-forms-table">
             {forms.map((form) => {
-              const connectedPipe = pipelines.find((p) => p.id === form.pipeline_id);
-
               return (
                 <div key={form.id || form.form_id} className="meta-form-row-item">
                   <div className="meta-form-identity">
@@ -323,61 +385,84 @@ export default function WebsiteFormsView({ currentUser }) {
         )}
       </div>
 
-      {/* Setup Procedure Section */}
-      <div style={{ marginTop: '36px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-        <div className="pipeline-general-label" style={{ marginBottom: '6px' }}>
-          Setup Procedure
+      {/* SECTION 3: SETUP PROCEDURE GUIDE (COLLAPSIBLE) */}
+      <div className="meta-panel-card">
+        <div
+          className="meta-panel-header"
+          style={{ cursor: 'pointer', userSelect: 'none' }}
+          onClick={() => setIsGuideOpen(!isGuideOpen)}
+        >
+          <div className="meta-panel-header-left">
+            <span className="meta-panel-title">Integration & Embed Guide</span>
+            <span className="meta-count-badge">4 steps</span>
+          </div>
+
+          <button
+            type="button"
+            className="btn-meta-clean"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsGuideOpen(!isGuideOpen);
+            }}
+            style={{ height: '30px', padding: '0 10px', fontSize: '12px', gap: '6px' }}
+          >
+            <HelpCircle size={13} />
+            <span>{isGuideOpen ? 'Hide Guide' : 'View Guide'}</span>
+            {isGuideOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '18px' }}>
-            <span className="pipeline-number-index" style={{ lineHeight: 1.15 }}>1</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <span style={{ fontSize: '16px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
-                Create a Dedicated Pipeline
-              </span>
-              <span style={{ fontSize: '13.5px', color: '#64748b', lineHeight: 1.55 }}>
-                Go to <strong>Pipelines</strong> and create a new pipeline for this campaign (e.g. <em>Website Inquiries</em>). Select this form under <strong>Lead Source</strong> so incoming leads route to their own stages and custom team distribution.
-              </span>
+        {isGuideOpen && (
+          <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '20px', borderTop: '1px solid #f1f5f9' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+              <span className="pipeline-number-index" style={{ lineHeight: 1.15, flexShrink: 0 }}>1</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '15px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
+                  Create a Dedicated Pipeline
+                </span>
+                <span style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.55 }}>
+                  Go to <strong>Pipelines</strong> and create a new pipeline for this campaign (e.g. <em>Website Inquiries</em>). Select this form under <strong>Lead Source</strong> so incoming leads route to their own stages and custom team distribution.
+                </span>
+              </div>
             </div>
-          </div>
 
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '18px' }}>
-            <span className="pipeline-number-index" style={{ lineHeight: 1.15 }}>2</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <span style={{ fontSize: '16px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
-                Copy the Script
-              </span>
-              <span style={{ fontSize: '13.5px', color: '#64748b', lineHeight: 1.55 }}>
-                Click <strong>Get Script</strong> on your form above and copy the generated JavaScript code.
-              </span>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+              <span className="pipeline-number-index" style={{ lineHeight: 1.15, flexShrink: 0 }}>2</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '15px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
+                  Copy the Script
+                </span>
+                <span style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.55 }}>
+                  Click <strong>Get Script</strong> on your form above and copy the generated JavaScript code.
+                </span>
+              </div>
             </div>
-          </div>
 
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '18px' }}>
-            <span className="pipeline-number-index" style={{ lineHeight: 1.15 }}>3</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <span style={{ fontSize: '16px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
-                Embed into Website
-              </span>
-              <span style={{ fontSize: '13.5px', color: '#64748b', lineHeight: 1.55 }}>
-                Paste the snippet into your website footer or custom HTML block before the closing <code className="meta-code-inline">&lt;/body&gt;</code> tag.
-              </span>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+              <span className="pipeline-number-index" style={{ lineHeight: 1.15, flexShrink: 0 }}>3</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '15px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
+                  Embed into Website
+                </span>
+                <span style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.55 }}>
+                  Paste the snippet into your website footer or custom HTML block before the closing <code className="meta-code-inline">&lt;/body&gt;</code> tag.
+                </span>
+              </div>
             </div>
-          </div>
 
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '18px' }}>
-            <span className="pipeline-number-index" style={{ lineHeight: 1.15 }}>4</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <span style={{ fontSize: '16px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
-                Set Form ID & Field Names
-              </span>
-              <span style={{ fontSize: '13.5px', color: '#64748b', lineHeight: 1.55 }}>
-                Ensure your <code className="meta-code-inline">&lt;form&gt;</code> ID matches <code className="meta-code-inline">YOUR_FORM_ID</code> and inputs have standard name attributes (<code className="meta-code-inline">name</code>, <code className="meta-code-inline">phone</code>, <code className="meta-code-inline">email</code>, <code className="meta-code-inline">city</code>, <code className="meta-code-inline">message</code>). Additional fields are captured automatically as custom fields.
-              </span>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+              <span className="pipeline-number-index" style={{ lineHeight: 1.15, flexShrink: 0 }}>4</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '15px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
+                  Set Form ID & Field Names
+                </span>
+                <span style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.55 }}>
+                  Ensure your <code className="meta-code-inline">&lt;form&gt;</code> ID matches <code className="meta-code-inline">YOUR_FORM_ID</code> and inputs have standard name attributes (<code className="meta-code-inline">name</code>, <code className="meta-code-inline">phone</code>, <code className="meta-code-inline">email</code>, <code className="meta-code-inline">city</code>, <code className="meta-code-inline">message</code>). Additional fields are captured automatically as custom fields.
+                </span>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
 
@@ -554,6 +639,6 @@ export default function WebsiteFormsView({ currentUser }) {
         </div>,
         document.body
       )}
-    </>
+    </div>
   );
 }

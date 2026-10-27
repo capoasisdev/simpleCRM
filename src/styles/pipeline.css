@@ -972,20 +972,20 @@
 
 /* Position adjustment for elements near right edge */
 [data-tooltip-pos="right-edge"]::before {
-  left: auto;
-  right: 14px;
-  transform: translateY(3px);
+  left: auto !important;
+  right: 14px !important;
+  transform: translateY(3px) !important;
 }
 
 [data-tooltip-pos="right-edge"]::after {
-  left: auto;
-  right: 0;
-  transform: translateY(3px);
+  left: auto !important;
+  right: 0 !important;
+  transform: translateY(3px) !important;
 }
 
 [data-tooltip-pos="right-edge"]:hover::before,
 [data-tooltip-pos="right-edge"]:hover::after {
-  transform: translateY(0);
+  transform: translateY(0) !important;
 }
 
 .pipeline-numbered-left {

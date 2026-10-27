@@ -25,7 +25,8 @@ import {
   Zap,
   Mail,
   Globe,
-  Monitor
+  Monitor,
+  ArrowUpRight
 } from 'lucide-react';
 import EmailIntegrationView from './EmailIntegrationView';
 import WebsiteFormsView from './WebsiteFormsView';
@@ -40,7 +41,8 @@ import {
   validateMetaToken,
   exchangeForLongLivedUserToken,
   loginWithWhatsApp,
-  fetchUserWhatsAppAccounts
+  fetchUserWhatsAppAccounts,
+  fetchAdAccountBudget
 } from '../lib/metaSdk';
 import {
   testWhatsAppCredentials,
@@ -56,7 +58,8 @@ function CustomDropdown({
   options = [],
   placeholder = 'Select option...',
   searchable = false,
-  searchPlaceholder = 'Search...'
+  searchPlaceholder = 'Search...',
+  className = ''
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -84,7 +87,7 @@ function CustomDropdown({
     : options;
 
   return (
-    <div className="meta-custom-select-wrap" ref={dropdownRef}>
+    <div className={`meta-custom-select-wrap ${className}`} ref={dropdownRef}>
       <button
         type="button"
         className={`meta-custom-select-trigger ${isOpen ? 'active' : ''}`}
@@ -166,27 +169,27 @@ function CustomDropdown({
 const INTEGRATION_CHANNELS = [
   {
     id: 'facebook',
-    label: 'Facebook Lead Ads',
+    label: 'Facebook Ads',
     icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1877F2', flexShrink: 0 }}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
         <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
       </svg>
     )
   },
   {
     id: 'whatsapp',
-    label: 'WhatsApp Cloud API',
-    icon: <MessageCircle size={18} style={{ color: '#25D366', flexShrink: 0 }} />
+    label: 'WhatsApp API',
+    icon: <MessageCircle size={20} strokeWidth={1.75} style={{ flexShrink: 0 }} />
   },
   {
     id: 'email',
-    label: 'Email (Resend)',
-    icon: <Mail size={18} style={{ color: '#0284c7', flexShrink: 0 }} />
+    label: 'Email',
+    icon: <Mail size={20} strokeWidth={1.75} style={{ flexShrink: 0 }} />
   },
   {
     id: 'website',
     label: 'Website Forms',
-    icon: <Globe size={18} style={{ color: '#6366f1', flexShrink: 0 }} />
+    icon: <Globe size={20} strokeWidth={1.75} style={{ flexShrink: 0 }} />
   }
 ];
 
@@ -276,7 +279,15 @@ export default function MetaIntegrationView({ currentUser }) {
   // Asset Selection Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [discoveredPages, setDiscoveredPages] = useState([]);
-  const [discoveredAdAccounts, setDiscoveredAdAccounts] = useState([]);
+  const [discoveredAdAccounts, setDiscoveredAdAccounts] = useState(() => {
+    try {
+      const cached = localStorage.getItem('crm_cached_discovered_ad_accounts');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
   const [selectedPageId, setSelectedPageId] = useState('');
   const [selectedAdAccountId, setSelectedAdAccountId] = useState('');
   const [discoveredForms, setDiscoveredForms] = useState([]);
@@ -290,8 +301,176 @@ export default function MetaIntegrationView({ currentUser }) {
   const [testFeedback, setTestFeedback] = useState(null);
   const feedbackTimerRef = useRef(null);
 
+  // Ad Account Budget & Health State
+  const [adBudget, setAdBudget] = useState(() => {
+    try {
+      const cached = localStorage.getItem('crm_cached_ad_budget');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isLoadingAdBudget, setIsLoadingAdBudget] = useState(false);
+
+  const formatCurrency = (val, curr = 'INR') => {
+    if (val === null || val === undefined || isNaN(val)) return '—';
+    try {
+      return new Intl.NumberFormat(curr === 'INR' ? 'en-IN' : 'en-US', {
+        style: 'currency',
+        currency: curr,
+        maximumFractionDigits: 0,
+        minimumFractionDigits: 0
+      }).format(Math.round(Number(val)));
+    } catch {
+      return `${curr} ${Math.round(Number(val)).toLocaleString(curr === 'INR' ? 'en-IN' : 'en-US')}`;
+    }
+  };
+
+  const formatCompactCurrency = (val, curr = 'INR') => {
+    if (val === null || val === undefined || isNaN(val)) return '—';
+    const num = Number(val);
+    if (curr === 'INR') {
+      if (num >= 10000000) return `₹${(num / 10000000).toFixed(2)} Cr`;
+      if (num >= 100000) return `₹${(num / 100000).toFixed(2)} L`;
+      return `₹${Math.round(num).toLocaleString('en-IN')}`;
+    }
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: curr,
+      notation: 'compact',
+      maximumFractionDigits: 1
+    }).format(num);
+  };
+
+  const loadAdBudget = async () => {
+    if (!config.ad_account_id) return;
+    setIsLoadingAdBudget(true);
+    try {
+      const userTok = fbUserToken || localStorage.getItem('crm_meta_user_token');
+      const waAccess = config.whatsapp_access_token;
+      const b = await fetchAdAccountBudget(
+        config.ad_account_id,
+        userTok || waAccess || config.access_token,
+        [waAccess, config.access_token, userTok]
+      );
+      if (b) {
+        setAdBudget(b);
+        try {
+          localStorage.setItem('crm_cached_ad_budget', JSON.stringify(b));
+        } catch {}
+      }
+    } catch (err) {
+      console.warn('Could not fetch ad budget in MetaIntegrationView:', err);
+    } finally {
+      setIsLoadingAdBudget(false);
+    }
+  };
+
+  useEffect(() => {
+    if (config.is_connected && config.ad_account_id) {
+      loadAdBudget();
+    }
+  }, [config.is_connected, config.ad_account_id]);
+
+  // Auto-fetch accessible Ad Accounts when connected so switcher is always populated
+  useEffect(() => {
+    const fetchAccounts = async () => {
+      const userTok = fbUserToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('crm_meta_user_token') : null);
+      const waAccess = config.whatsapp_access_token;
+      const pageTok = config.access_token;
+      try {
+        const accounts = await fetchUserAdAccounts(userTok, [waAccess, pageTok]);
+        if (accounts && accounts.length > 0) {
+          setDiscoveredAdAccounts(accounts);
+          try {
+            localStorage.setItem('crm_cached_discovered_ad_accounts', JSON.stringify(accounts));
+          } catch (e) {}
+        }
+      } catch (e) {
+        console.warn('Could not auto-fetch ad accounts:', e);
+      }
+    };
+    if (config.is_connected) {
+      fetchAccounts();
+    }
+  }, [config.is_connected, config.whatsapp_access_token, config.access_token, fbUserToken]);
+
+  const handleSwitchAdAccount = async (newAccountId) => {
+    if (!newAccountId) return;
+    const cleanId = `act_${String(newAccountId).replace(/^act_/, '')}`;
+    if (cleanId === config.ad_account_id) return;
+
+    setIsSwitchingAccount(true);
+    const matched = discoveredAdAccounts.find(
+      a => String(a.account_id || a.id).replace(/^act_/, '') === String(newAccountId).replace(/^act_/, '')
+    );
+    const newAccountName = matched?.name || cleanId;
+
+    const updatedConfig = {
+      ...config,
+      ad_account_id: cleanId,
+      connected_account_name: newAccountName
+    };
+    setConfig(updatedConfig);
+    try {
+      localStorage.setItem('crm_cached_meta_config', JSON.stringify(updatedConfig));
+    } catch (e) {}
+
+    if (rowId) {
+      try {
+        await supabase
+          .from('meta_config')
+          .update({
+            ad_account_id: cleanId,
+            connected_account_name: newAccountName,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', rowId);
+      } catch (err) {
+        console.error('Error switching ad account in DB:', err);
+      }
+    }
+
+    setFbSuccessBanner(`Switched Ad Budget tracking to "${newAccountName}"!`);
+    setTimeout(() => setFbSuccessBanner(''), 4000);
+
+    // Refresh budget for this newly selected ad account
+    setIsLoadingAdBudget(true);
+    try {
+      const userTok = fbUserToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('crm_meta_user_token') : null);
+      const waAccess = config.whatsapp_access_token;
+      const b = await fetchAdAccountBudget(
+        cleanId,
+        userTok || waAccess || config.access_token,
+        [waAccess, config.access_token, userTok]
+      );
+      if (b) {
+        setAdBudget(b);
+        try {
+          localStorage.setItem('crm_cached_ad_budget', JSON.stringify(b));
+        } catch {}
+      }
+    } catch (err) {
+      console.warn('Could not fetch budget after switching ad account:', err);
+    } finally {
+      setIsLoadingAdBudget(false);
+      setIsSwitchingAccount(false);
+    }
+  };
+
   // Channel Tab State ('facebook' | 'whatsapp' | 'email' | 'website')
   const [activeChannel, setActiveChannel] = useState('facebook');
+  const [visitedChannels, setVisitedChannels] = useState(() => ({
+    facebook: true,
+    whatsapp: false,
+    email: false,
+    website: false
+  }));
+
+  useEffect(() => {
+    setVisitedChannels(prev => prev[activeChannel] ? prev : { ...prev, [activeChannel]: true });
+  }, [activeChannel]);
+
   const [isMobileChannelOpen, setIsMobileChannelOpen] = useState(false);
   const mobileChannelRef = useRef(null);
 
@@ -318,6 +497,7 @@ export default function MetaIntegrationView({ currentUser }) {
   const [waWabaId, setWaWabaId] = useState('');
   const [waToken, setWaToken] = useState('');
   const [waTemplates, setWaTemplates] = useState([]);
+  const [previewingWaTemplate, setPreviewingWaTemplate] = useState(null);
   const [isSavingWa, setIsSavingWa] = useState(false);
   const [isTestingWa, setIsTestingWa] = useState(false);
   const [isSyncingWa, setIsSyncingWa] = useState(false);
@@ -413,7 +593,8 @@ export default function MetaIntegrationView({ currentUser }) {
             lead_form_ids: (data.lead_form_ids || []).join(', '),
             is_connected: data.is_connected || false,
             connected_page_name: data.connected_page_name || '',
-            connected_account_name: data.connected_account_name || ''
+            connected_account_name: data.connected_account_name || '',
+            whatsapp_access_token: data.whatsapp_access_token || ''
           };
           setConfig(newConf);
           try {
@@ -663,6 +844,9 @@ export default function MetaIntegrationView({ currentUser }) {
       // Exchange short-lived login token for long-lived token if app secret available
       const effectiveUserToken = await exchangeForLongLivedUserToken(userToken, targetAppId, config.app_secret);
       setFbUserToken(effectiveUserToken);
+      try {
+        localStorage.setItem('crm_meta_user_token', effectiveUserToken);
+      } catch (e) {}
 
       // Fetch managed Facebook Pages & Ad Accounts
       const [pages, adAccounts] = await Promise.all([
@@ -1242,92 +1426,125 @@ export default function MetaIntegrationView({ currentUser }) {
   if (isLoading) {
     return (
       <div className="meta-container">
-        <div className="meta-subnav-bar">
-          <button
-            type="button"
-            className={`meta-subnav-btn ${activeChannel === 'facebook' ? 'active' : ''}`}
-            onClick={() => setActiveChannel('facebook')}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1877F2' }}>
-              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-            </svg>
-            Facebook Lead Ads
-          </button>
-          <button
-            type="button"
-            className={`meta-subnav-btn ${activeChannel === 'whatsapp' ? 'active' : ''}`}
-            onClick={() => setActiveChannel('whatsapp')}
-          >
-            <MessageCircle size={20} style={{ color: '#25D366' }} />
-            WhatsApp Cloud API
-          </button>
-          <button
-            type="button"
-            className={`meta-subnav-btn ${activeChannel === 'email' ? 'active' : ''}`}
-            onClick={() => setActiveChannel('email')}
-          >
-            <Mail size={20} style={{ color: '#0284c7' }} />
-            Email
-          </button>
-          <button
-            type="button"
-            className={`meta-subnav-btn ${activeChannel === 'website' ? 'active' : ''}`}
-            onClick={() => setActiveChannel('website')}
-          >
-            <Globe size={18} style={{ color: '#6366f1' }} />
-            Website Forms
-          </button>
-        </div>
-
-        {/* Mobile Channel Dropdown Skeleton */}
-        <div className="meta-mobile-channel-select-wrap" style={{ pointerEvents: 'none' }}>
-          <Skeleton width="100%" height="42px" borderRadius="10px" />
-        </div>
-
-        <div className="meta-inner">
-          {/* Section 1: Hero Card Skeleton */}
-          <div className="meta-hero-card-container">
-            <div className="meta-panel-card" style={{ padding: '20px 24px' }}>
-              <div className="meta-skeleton-hero">
-                <div className="meta-skeleton-hero-left">
-                  <Skeleton width="44px" height="44px" borderRadius="10px" />
-                  <div className="meta-skeleton-hero-details">
-                    <Skeleton width="180px" height="18px" borderRadius="4px" />
-                    <Skeleton width="130px" height="12px" borderRadius="3px" style={{ marginTop: 2 }} />
-                  </div>
-                </div>
-                <div className="meta-skeleton-hero-actions">
-                  <Skeleton width="34px" height="34px" borderRadius="6px" />
-                  <Skeleton width="34px" height="34px" borderRadius="6px" />
-                  <Skeleton width="34px" height="34px" borderRadius="6px" />
-                </div>
-              </div>
-            </div>
+        {/* Mobile Skeleton View (<= 900px) */}
+        <div className="meta-mobile-status-view">
+          <div className="meta-mobile-status-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <Skeleton width="100%" height="48px" borderRadius="8px" />
+            <Skeleton width="100%" height="48px" borderRadius="8px" />
+            <Skeleton width="100%" height="48px" borderRadius="8px" />
+            <Skeleton width="100%" height="48px" borderRadius="8px" />
           </div>
+        </div>
 
-          {/* Section 2: Connected Forms Panel Skeleton */}
-          <div className="meta-panel-card" style={{ padding: '20px 24px' }}>
-            <div className="meta-skeleton-panel-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span className="meta-panel-title">Connected Lead Forms</span>
-                <Skeleton width="75px" height="22px" borderRadius="6px" />
-              </div>
-              <Skeleton width="92px" height="32px" borderRadius="6px" />
-            </div>
+        {/* Desktop Full-Featured Skeleton View */}
+        <div className="meta-desktop-full-view">
+          {/* Left Vertical Channels Sidebar */}
+          <aside className="meta-sidebar-pane" aria-label="Integration Channels">
+            <ul className="meta-sidebar-list">
+              {INTEGRATION_CHANNELS.map((ch) => {
+                const isActive = activeChannel === ch.id;
+                return (
+                  <li key={ch.id}>
+                    <button
+                      type="button"
+                      className={`meta-sidebar-btn ${isActive ? 'active' : ''}`}
+                      onClick={() => setActiveChannel(ch.id)}
+                    >
+                      {ch.icon}
+                      <span>{ch.label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </aside>
 
-            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {[1, 2].map((i) => (
-                <div key={i} className="meta-skeleton-panel-row">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <Skeleton width="36px" height="36px" borderRadius="6px" />
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                      <Skeleton width={i === 1 ? '170px' : '210px'} height="15px" borderRadius="4px" />
-                      <Skeleton width="95px" height="12px" borderRadius="3px" />
+          {/* Right Content Pane Skeleton */}
+          <div className="meta-content-pane">
+            <div className="meta-inner">
+              {/* Section 1: Hero Card Skeleton */}
+              <div className="meta-hero-card-container">
+                <div className="meta-panel-card" style={{ padding: '20px 24px' }}>
+                  <div className="meta-skeleton-hero">
+                    <div className="meta-skeleton-hero-left">
+                      <Skeleton width="44px" height="44px" borderRadius="10px" />
+                      <div className="meta-skeleton-hero-details">
+                        <Skeleton width="180px" height="18px" borderRadius="4px" />
+                        <Skeleton width="130px" height="12px" borderRadius="3px" style={{ marginTop: 2 }} />
+                      </div>
+                    </div>
+                    <div className="meta-skeleton-hero-actions">
+                      <Skeleton width="34px" height="34px" borderRadius="6px" />
+                      <Skeleton width="34px" height="34px" borderRadius="6px" />
+                      <Skeleton width="34px" height="34px" borderRadius="6px" />
                     </div>
                   </div>
-                  <Skeleton width="76px" height="28px" borderRadius="6px" />
                 </div>
-              ))}
+              </div>
+
+              {/* Section 1.5: Ad Budget Card Skeleton */}
+              <div className="meta-panel-card" style={{ padding: '20px 24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Skeleton width="32px" height="32px" borderRadius="8px" />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <Skeleton width="190px" height="16px" borderRadius="4px" />
+                      <Skeleton width="120px" height="12px" borderRadius="3px" />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Skeleton width="180px" height="34px" borderRadius="7px" />
+                    <Skeleton width="78px" height="34px" borderRadius="7px" />
+                  </div>
+                </div>
+
+                <div className="meta-budget-hero-box" style={{ marginBottom: 16 }}>
+                  <div className="meta-budget-hero-left">
+                    <Skeleton width="110px" height="12px" borderRadius="3px" />
+                    <div style={{ marginTop: 6 }}>
+                      <Skeleton width="150px" height="28px" borderRadius="6px" />
+                    </div>
+                  </div>
+                  <Skeleton width="150px" height="36px" borderRadius="7px" />
+                </div>
+
+                <div className="metric-tiles-row">
+                  {[1, 2, 3].map(n => (
+                    <div key={n} className="metric-tile">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+                        <Skeleton width="90px" height="20px" borderRadius="4px" />
+                        <Skeleton width="70px" height="11px" borderRadius="3px" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Section 2: Connected Forms Panel Skeleton */}
+              <div className="meta-panel-card" style={{ padding: '20px 24px' }}>
+                <div className="meta-skeleton-panel-header">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span className="meta-panel-title">Connected Lead Forms</span>
+                    <Skeleton width="75px" height="22px" borderRadius="6px" />
+                  </div>
+                  <Skeleton width="92px" height="32px" borderRadius="6px" />
+                </div>
+
+                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[1, 2].map((i) => (
+                    <div key={i} className="meta-skeleton-panel-row">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <Skeleton width="36px" height="36px" borderRadius="6px" />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                          <Skeleton width={i === 1 ? '170px' : '210px'} height="15px" borderRadius="4px" />
+                          <Skeleton width="95px" height="12px" borderRadius="3px" />
+                        </div>
+                      </div>
+                      <Skeleton width="76px" height="28px" borderRadius="6px" />
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1437,87 +1654,30 @@ export default function MetaIntegrationView({ currentUser }) {
 
       {/* Desktop Full-Featured View (Hidden on mobile <= 900px) */}
       <div className="meta-desktop-full-view">
-        {/* Subnav Pill Toggle - Full Width at Top (Desktop) */}
-        <div className="meta-subnav-bar">
-        <button
-          type="button"
-          className={`meta-subnav-btn ${activeChannel === 'facebook' ? 'active' : ''}`}
-          onClick={() => setActiveChannel('facebook')}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1877F2' }}>
-            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-          </svg>
-          Facebook Lead Ads
-        </button>
-        <button
-          type="button"
-          className={`meta-subnav-btn ${activeChannel === 'whatsapp' ? 'active' : ''}`}
-          onClick={() => setActiveChannel('whatsapp')}
-        >
-          <MessageCircle size={20} style={{ color: '#25D366' }} />
-          WhatsApp Cloud API
-        </button>
-        <button
-          type="button"
-          className={`meta-subnav-btn ${activeChannel === 'email' ? 'active' : ''}`}
-          onClick={() => setActiveChannel('email')}
-        >
-          <Mail size={20} style={{ color: '#0284c7' }} />
-          Email
-        </button>
-        <button
-          type="button"
-          className={`meta-subnav-btn ${activeChannel === 'website' ? 'active' : ''}`}
-          onClick={() => setActiveChannel('website')}
-        >
-          <Globe size={18} style={{ color: '#6366f1' }} />
-          Website Forms
-        </button>
-      </div>
-
-      {/* Mobile Channel Dropdown Selector (Hidden on Desktop) */}
-      <div className="meta-mobile-channel-select-wrap" ref={mobileChannelRef}>
-        <button
-          type="button"
-          className={`meta-mobile-channel-trigger ${isMobileChannelOpen ? 'open' : ''}`}
-          onClick={() => setIsMobileChannelOpen(s => !s)}
-        >
-          <div className="meta-mobile-channel-current">
-            {INTEGRATION_CHANNELS.find(c => c.id === activeChannel)?.icon}
-            <span className="meta-mobile-channel-name">
-              {INTEGRATION_CHANNELS.find(c => c.id === activeChannel)?.label}
-            </span>
-          </div>
-          <ChevronDown size={17} className={`meta-mobile-channel-chevron ${isMobileChannelOpen ? 'rotated' : ''}`} />
-        </button>
-
-        {isMobileChannelOpen && (
-          <div className="meta-mobile-channel-menu">
-            {INTEGRATION_CHANNELS.map(ch => {
-              const isSelected = activeChannel === ch.id;
+        {/* Left Vertical Channels Sidebar (Desktop) */}
+        <aside className="meta-sidebar-pane" aria-label="Integration Channels">
+          <ul className="meta-sidebar-list">
+            {INTEGRATION_CHANNELS.map((ch) => {
+              const isActive = activeChannel === ch.id;
               return (
-                <button
-                  key={ch.id}
-                  type="button"
-                  className={`meta-mobile-channel-option ${isSelected ? 'selected' : ''}`}
-                  onClick={() => {
-                    setActiveChannel(ch.id);
-                    setIsMobileChannelOpen(false);
-                  }}
-                >
-                  <div className="meta-mobile-channel-option-left">
+                <li key={ch.id}>
+                  <button
+                    type="button"
+                    className={`meta-sidebar-btn ${isActive ? 'active' : ''}`}
+                    onClick={() => setActiveChannel(ch.id)}
+                  >
                     {ch.icon}
                     <span>{ch.label}</span>
-                  </div>
-                  {isSelected && <Check size={16} className="meta-mobile-channel-check" />}
-                </button>
+                  </button>
+                </li>
               );
             })}
-          </div>
-        )}
-      </div>
+          </ul>
+        </aside>
 
-      <div className="meta-inner">
+        {/* Channels Content Pane */}
+        <div className="meta-content-pane">
+          <div className="meta-inner">
         {activeChannel === 'facebook' && (
           <>
 
@@ -1587,70 +1747,79 @@ export default function MetaIntegrationView({ currentUser }) {
             )}
 
             {/* Section 1: Connected Facebook Account Hero Card */}
-            <div className={`meta-hero-card-container ${config.is_connected ? (tokenHealth.status === 'valid' ? 'is-healthy' : tokenHealth.status === 'expired' ? 'is-broken' : '') : ''}`}>
+            <div className="meta-hero-card-container">
               <div className="meta-panel-card">
-                {config.is_connected && (config.connected_account_name || config.ad_account_id) && (
-                  <span className="meta-id-pill">
-                    Ad Account: <strong>{config.connected_account_name || config.ad_account_id}</strong>
-                  </span>
-                )}
                 {config.is_connected ? (
-                  <div className="meta-account-row">
-                    <div className="meta-account-identity">
-                      <div className="meta-brand-tile">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="#1877F2">
-                          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                        </svg>
-                      </div>
-                      <div className="meta-account-details">
-                        <div className="meta-account-title-line">
-                          <span className="meta-account-name">{config.connected_page_name || 'Connected Page'}</span>
+                  <>
+                    <div className="meta-account-row">
+                      <div className="meta-account-identity">
+                        <div className="meta-brand-tile">
+                          <svg width="22" height="22" viewBox="0 0 24 24" fill="#0f172a">
+                            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                          </svg>
                         </div>
+                        <div className="meta-account-details">
+                          <div className="meta-account-title-line">
+                            <span className="meta-account-name">{config.connected_page_name || 'Connected Page'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="meta-account-actions">
+                        {testFeedback && (
+                          <span className={`meta-inline-feedback ${testFeedback.type}`}>
+                            {testFeedback.type === 'testing' && <RefreshCw size={11} className="meta-spin" />}
+                            {testFeedback.type === 'success' && <CheckCircle2 size={11} />}
+                            {testFeedback.type === 'error' && <AlertCircle size={11} />}
+                            <span>{testFeedback.text}</span>
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className="btn-meta-clean btn-meta-icon-only"
+                          onClick={() => checkTokenHealth(undefined, true)}
+                          disabled={tokenHealth.status === 'checking'}
+                          data-tooltip="Test Token"
+                          aria-label="Test Token"
+                        >
+                          <RefreshCw size={15} className={tokenHealth.status === 'checking' ? 'meta-spin' : ''} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-meta-clean btn-meta-icon-only"
+                          onClick={handleOpenAssetModal}
+                          disabled={isConnectingFb}
+                          data-tooltip="Switch Page / Forms"
+                          aria-label="Switch Page / Forms"
+                        >
+                          <Layers size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-meta-disconnect btn-meta-icon-only"
+                          onClick={handleDisconnect}
+                          disabled={isSaving}
+                          data-tooltip="Disconnect Facebook"
+                          data-tooltip-pos="right-edge"
+                          aria-label="Disconnect Facebook"
+                        >
+                          <Unlink size={15} />
+                        </button>
                       </div>
                     </div>
 
-                    <div className="meta-account-actions">
-                      {testFeedback && (
-                        <span className={`meta-inline-feedback ${testFeedback.type}`}>
-                          {testFeedback.type === 'testing' && <RefreshCw size={11} className="meta-spin" />}
-                          {testFeedback.type === 'success' && <CheckCircle2 size={11} />}
-                          {testFeedback.type === 'error' && <AlertCircle size={11} />}
-                          <span>{testFeedback.text}</span>
+                    {(config.connected_account_name || config.ad_account_id) && (
+                      <div className="meta-account-footer-row">
+                        <span className="meta-id-pill">
+                          Ad Account: <strong>{config.connected_account_name || config.ad_account_id}</strong>
                         </span>
-                      )}
-                      <button
-                        type="button"
-                        className="btn-meta-clean btn-meta-icon-only"
-                        onClick={() => checkTokenHealth(undefined, true)}
-                        disabled={tokenHealth.status === 'checking'}
-                        data-tooltip="Test Token"
-                        aria-label="Test Token"
-                      >
-                        <RefreshCw size={15} className={tokenHealth.status === 'checking' ? 'meta-spin' : ''} />
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-meta-clean btn-meta-icon-only"
-                        onClick={handleOpenAssetModal}
-                        disabled={isConnectingFb}
-                        data-tooltip="Switch Page / Forms"
-                        aria-label="Switch Page / Forms"
-                      >
-                        <Layers size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-meta-disconnect btn-meta-icon-only"
-                        onClick={handleDisconnect}
-                        disabled={isSaving}
-                        data-tooltip="Disconnect Facebook"
-                        data-tooltip-pos="right-edge"
-                        aria-label="Disconnect Facebook"
-                      >
-                        <Unlink size={15} />
-                      </button>
-                    </div>
-                  </div>
+                        <span className="meta-connection-status">
+                          <span className={`meta-status-dot ${tokenHealth.status === 'expired' ? 'is-expired' : 'is-connected'}`} />
+                          {tokenHealth.status === 'expired' ? 'Token Expired' : 'Connected'}
+                        </span>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div className="meta-disconnected-row">
                     <div className="meta-account-identity">
@@ -1678,6 +1847,149 @@ export default function MetaIntegrationView({ currentUser }) {
                 )}
               </div>
             </div>
+
+            {/* Section 1.5: Ad Account Budget & Health Panel */}
+            {config.is_connected && config.ad_account_id && (
+              <div className="meta-panel-card" style={{ padding: '20px 24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div className="meta-brand-tile" style={{ width: '32px', height: '32px' }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="#0f172a">
+                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '15px', fontWeight: 600, color: '#0f172a' }}>
+                        Ad Account Budget & Live Status
+                      </div>
+                      <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '1px' }}>
+                        Tracking spend for <strong>{config.connected_account_name || config.ad_account_id}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {(() => {
+                      const currentCleanId = config.ad_account_id?.replace(/^act_/, '') || '';
+                      const options = discoveredAdAccounts.map(acc => ({
+                        value: String(acc.account_id || acc.id).replace(/^act_/, ''),
+                        label: acc.name,
+                        sublabel: `(${acc.account_id || acc.id})`
+                      }));
+                      if (currentCleanId && !options.some(o => o.value === currentCleanId)) {
+                        options.unshift({
+                          value: currentCleanId,
+                          label: config.connected_account_name || currentCleanId,
+                          sublabel: `(${currentCleanId})`
+                        });
+                      }
+                      return options.length > 0 ? (
+                        <div style={{ minWidth: '220px', maxWidth: '280px' }}>
+                          <CustomDropdown
+                            value={currentCleanId}
+                            onChange={handleSwitchAdAccount}
+                            options={options}
+                            placeholder="Select Ad Account..."
+                            searchable={options.length > 4}
+                            className="compact"
+                          />
+                        </div>
+                      ) : null;
+                    })()}
+
+                    <button
+                      type="button"
+                      className="btn-meta-clean"
+                      onClick={loadAdBudget}
+                      disabled={isLoadingAdBudget || isSwitchingAccount}
+                      style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                      data-tooltip="Refresh live budget"
+                      aria-label="Refresh live budget"
+                    >
+                      <RefreshCw size={13} className={isLoadingAdBudget || isSwitchingAccount ? 'meta-spin' : ''} />
+                      <span>{isLoadingAdBudget || isSwitchingAccount ? 'Syncing...' : 'Refresh'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {isLoadingAdBudget && !adBudget ? (
+                  <>
+                    <div className="meta-budget-hero-box" style={{ marginBottom: '16px' }}>
+                      <div className="meta-budget-hero-left">
+                        <Skeleton width="110px" height="12px" borderRadius="3px" />
+                        <div style={{ marginTop: 6 }}>
+                          <Skeleton width="150px" height="28px" borderRadius="6px" />
+                        </div>
+                      </div>
+                      <Skeleton width="150px" height="36px" borderRadius="7px" />
+                    </div>
+
+                    <div className="metric-tiles-row">
+                      {[1, 2, 3].map(n => (
+                        <div key={n} className="metric-tile">
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+                            <Skeleton width="90px" height="20px" borderRadius="4px" />
+                            <Skeleton width="70px" height="11px" borderRadius="3px" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="meta-budget-hero-box" style={{ marginBottom: '16px' }}>
+                      <div className="meta-budget-hero-left">
+                        <span className="meta-budget-hero-label">
+                          {adBudget?.fundingSourceDisplay ? 'Available Prepaid Balance' : 'Current Balance'}
+                        </span>
+                        <div className="meta-budget-hero-val">
+                          {adBudget ? (
+                            formatCurrency(adBudget.prepaidBalance ?? adBudget.remainingSpendCap ?? 0, adBudget.currency)
+                          ) : (
+                            '—'
+                          )}
+                        </div>
+                      </div>
+                      <div className="meta-budget-hero-action">
+                        <a
+                          href={`https://adsmanager.facebook.com/billing_hub/payment_settings?act=${config.ad_account_id.replace(/^act_/, '')}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn-meta-topup"
+                        >
+                          <span>Top Up in Ads Manager</span>
+                          <ArrowUpRight size={13} />
+                        </a>
+                      </div>
+                    </div>
+
+                    <div className="metric-tiles-row">
+                      <div className="metric-tile">
+                        <div className="metric-tile-val">
+                          {formatCurrency(adBudget?.todayInsights?.spend || 0, adBudget?.currency || 'INR')}
+                        </div>
+                        <div className="metric-tile-lbl">Today's Ad Spend</div>
+                      </div>
+                      <div
+                        className="metric-tile"
+                        data-tooltip={adBudget?.amountSpent ? `Lifetime: ₹${Math.round(adBudget.amountSpent).toLocaleString('en-IN')}` : undefined}
+                      >
+                        <div className="metric-tile-val">
+                          {formatCompactCurrency(adBudget?.amountSpent || 0, adBudget?.currency || 'INR')}
+                        </div>
+                        <div className="metric-tile-lbl">Lifetime Spend</div>
+                      </div>
+                      <div className="metric-tile">
+                        <div className="metric-tile-val">
+                          {adBudget?.accountStatus === 1 ? 'Active' : adBudget?.accountStatus === 3 ? 'Unsettled' : 'Disabled'}
+                        </div>
+                        <div className="metric-tile-lbl">Account Status</div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Section 2: Connected Lead Forms Panel */}
             {config.is_connected && (
@@ -1771,63 +2083,72 @@ export default function MetaIntegrationView({ currentUser }) {
             )}
 
             {/* Section 1: Connected WhatsApp Account Hero Card */}
-            <div className={`meta-hero-card-container ${waIsConnected ? 'is-healthy' : ''}`}>
+            <div className="meta-hero-card-container">
               <div className="meta-panel-card">
-                {waIsConnected && (waPhoneId || waWabaId) && (
-                  <span className="meta-id-pill">
-                    {waPhoneId ? `Phone ID: ${waPhoneId}` : `WABA ID: ${waWabaId}`}
-                  </span>
-                )}
                 {waIsConnected ? (
-                  <div className="meta-account-row">
-                    <div className="meta-account-identity">
-                      <div className="meta-brand-tile" style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-                        <MessageCircle size={24} color="#16a34a" />
-                      </div>
-                      <div className="meta-account-details">
-                        <div className="meta-account-title-line">
-                          <span className="meta-account-name">{waAccountName || 'WhatsApp Business'}</span>
+                  <>
+                    <div className="meta-account-row">
+                      <div className="meta-account-identity">
+                        <div className="meta-brand-tile">
+                          <MessageCircle size={22} color="#0f172a" />
                         </div>
+                        <div className="meta-account-details">
+                          <div className="meta-account-title-line">
+                            <span className="meta-account-name">{waAccountName || 'WhatsApp Business'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="meta-account-actions">
+                        <button
+                          type="button"
+                          className="btn-meta-clean btn-meta-icon-only"
+                          onClick={handleTestWhatsAppConnection}
+                          disabled={isTestingWa}
+                          data-tooltip="Test Connection"
+                          aria-label="Test Connection"
+                        >
+                          <RefreshCw size={15} className={isTestingWa ? 'meta-spin' : ''} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-meta-clean btn-meta-icon-only"
+                          onClick={handleConnectWithWhatsApp}
+                          disabled={isConnectingWa}
+                          data-tooltip="Switch / Reconnect"
+                          aria-label="Switch / Reconnect"
+                        >
+                          <Layers size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-meta-clean btn-meta-icon-only btn-meta-icon-unlink"
+                          onClick={handleDisconnectWhatsApp}
+                          data-tooltip="Disconnect"
+                          aria-label="Disconnect"
+                        >
+                          <Unlink size={15} />
+                        </button>
                       </div>
                     </div>
 
-                    <div className="meta-account-actions">
-                      <button
-                        type="button"
-                        className="btn-meta-clean btn-meta-icon-only"
-                        onClick={handleTestWhatsAppConnection}
-                        disabled={isTestingWa}
-                        data-tooltip="Test Connection"
-                        aria-label="Test Connection"
-                      >
-                        <RefreshCw size={15} className={isTestingWa ? 'meta-spin' : ''} />
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-meta-clean btn-meta-icon-only"
-                        onClick={handleConnectWithWhatsApp}
-                        disabled={isConnectingWa}
-                        data-tooltip="Switch / Reconnect"
-                        aria-label="Switch / Reconnect"
-                      >
-                        <Layers size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-meta-clean btn-meta-icon-only btn-meta-icon-unlink"
-                        onClick={handleDisconnectWhatsApp}
-                        data-tooltip="Disconnect"
-                        aria-label="Disconnect"
-                      >
-                        <Unlink size={15} />
-                      </button>
-                    </div>
-                  </div>
+                    {(waPhoneId || waWabaId) && (
+                      <div className="meta-account-footer-row">
+                        <span className="meta-id-pill">
+                          {waPhoneId ? 'Phone ID:' : 'WABA ID:'} <strong>{waPhoneId || waWabaId}</strong>
+                        </span>
+                        <span className="meta-connection-status">
+                          <span className="meta-status-dot is-connected" />
+                          Connected
+                        </span>
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <div className="meta-account-row">
+                  <div className="meta-disconnected-row">
                     <div className="meta-account-identity">
-                      <div className="meta-brand-tile" style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-                        <MessageCircle size={24} color="#16a34a" />
+                      <div className="meta-brand-tile muted">
+                        <MessageCircle size={24} color="#94a3b8" />
                       </div>
                       <div className="meta-account-details">
                         <span className="meta-account-name">Connect with WhatsApp</span>
@@ -1838,7 +2159,6 @@ export default function MetaIntegrationView({ currentUser }) {
                       className="btn-meta-facebook-connect"
                       onClick={handleConnectWithWhatsApp}
                       disabled={isConnectingWa}
-                      style={{ backgroundColor: '#25D366', borderColor: '#25D366' }}
                     >
                       <MessageCircle size={16} color="white" />
                       {isConnectingWa ? 'Connecting...' : 'Connect WhatsApp'}
@@ -1848,17 +2168,27 @@ export default function MetaIntegrationView({ currentUser }) {
               </div>
             </div>
 
-
             {/* Approved Message Templates Section */}
-            <div className="meta-templates-container">
-              <div className="meta-panel-card">
-                <div className="meta-panel-header">
-                  <div className="meta-panel-header-left">
-                    <span className="meta-panel-title">Approved Message Templates</span>
-                    <span className="meta-count-badge">
-                      {waTemplates.length} {waTemplates.length === 1 ? 'template' : 'templates'} active
-                    </span>
-                  </div>
+            <div className="meta-panel-card">
+              <div className="meta-panel-header">
+                <div className="meta-panel-header-left">
+                  <span className="meta-panel-title">Approved Message Templates</span>
+                  <span className="meta-count-badge">
+                    {waTemplates.length} {waTemplates.length === 1 ? 'template' : 'templates'} active
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn-meta-clean"
+                    onClick={handleOpenTestModal}
+                    disabled={!waPhoneId.trim() || !waToken.trim()}
+                    style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Send size={13} />
+                    <span>Test Message</span>
+                  </button>
 
                   <button
                     type="button"
@@ -1867,95 +2197,102 @@ export default function MetaIntegrationView({ currentUser }) {
                     disabled={isSyncingWa || !waWabaId.trim() || !waToken.trim()}
                   >
                     <RefreshCw size={13} className={isSyncingWa ? 'meta-spin' : ''} />
-                    {isSyncingWa ? 'Syncing...' : 'Sync from Meta'}
+                    <span>{isSyncingWa ? 'Syncing...' : 'Sync from Meta'}</span>
                   </button>
                 </div>
+              </div>
 
-                {/* Templates List or Empty State */}
-                {waTemplates.length === 0 ? (
-                  <div className="meta-forms-empty-state">
-                    <MessageCircle size={24} color="#94a3b8" />
-                    <p className="meta-empty-title">No message templates synced</p>
-                    <p style={{ fontSize: '12px', color: '#64748b', maxWidth: '400px', margin: '4px auto 12px auto' }}>
-                      Click <strong>Sync from Meta</strong> to fetch your approved WhatsApp message templates.
-                    </p>
-                    <button
-                      type="button"
-                      className="btn-meta-clean"
-                      onClick={handleSyncTemplates}
-                      disabled={isSyncingWa || !waWabaId.trim() || !waToken.trim()}
-                      style={{ marginTop: '8px' }}
-                    >
-                      <RefreshCw size={13} className={isSyncingWa ? 'meta-spin' : ''} />
-                      Sync Templates
-                    </button>
-                  </div>
-                ) : (
-                  <div className="meta-templates-table">
-                    {waTemplates.map((tmpl) => {
-                      const status = (tmpl.status || 'APPROVED').toLowerCase();
-                      return (
-                        <div key={tmpl.id || tmpl.name} className="meta-template-row-item">
-                          <div className="meta-template-identity">
-                            <div className="meta-template-icon-tile">
-                              <MessageCircle size={16} color="#16a34a" />
-                            </div>
-                            <div className="meta-template-info-col">
-                              <div className="meta-template-name-row">
-                                <span className="meta-template-name">{tmpl.name}</span>
-                              </div>
-                              {tmpl.bodyText && (
-                                <div className="meta-template-body-snippet">
-                                  {tmpl.bodyText}
-                                </div>
+              {/* Templates List or Empty State */}
+              {waTemplates.length === 0 ? (
+                <div className="meta-forms-empty-state">
+                  <MessageCircle size={24} color="#94a3b8" />
+                  <p className="meta-empty-title">No message templates synced</p>
+                  <p style={{ fontSize: '12px', color: '#64748b', maxWidth: '400px', margin: '4px auto 12px auto' }}>
+                    Click <strong>Sync from Meta</strong> to fetch your approved WhatsApp message templates.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-meta-clean"
+                    onClick={handleSyncTemplates}
+                    disabled={isSyncingWa || !waWabaId.trim() || !waToken.trim()}
+                    style={{ marginTop: '8px' }}
+                  >
+                    <RefreshCw size={13} className={isSyncingWa ? 'meta-spin' : ''} />
+                    Sync Templates
+                  </button>
+                </div>
+              ) : (
+                <div className="meta-templates-table">
+                  {waTemplates.map((tmpl) => {
+                    const status = (tmpl.status || 'APPROVED').toLowerCase();
+                    return (
+                      <div
+                        key={tmpl.id || tmpl.name}
+                        className="meta-template-row-item"
+                      >
+                        <div className="meta-template-identity">
+                          <div className="meta-doc-tile">
+                            <MessageCircle size={16} color="#475569" />
+                          </div>
+                          <div className="meta-template-info-col">
+                            <div className="meta-template-name-row" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span className="meta-template-name">{tmpl.name}</span>
+                              {tmpl.category && (
+                                <span className="meta-id-tag" style={{ textTransform: 'lowercase' }}>{tmpl.category}</span>
+                              )}
+                              {tmpl.language && (
+                                <span className="meta-id-tag">{tmpl.language}</span>
                               )}
                             </div>
                           </div>
-
-                          <div className="meta-template-status-col">
-                            <span className={`meta-template-status-badge ${status}`}>
-                              {status === 'approved' && <CheckCircle2 size={12} />}
-                              {status === 'rejected' && <XCircle size={12} />}
-                              {status === 'pending' && <AlertCircle size={12} />}
-                              {tmpl.status || 'APPROVED'}
-                            </span>
-                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
 
-              {/* Attached Bottom-Right Action Button */}
-              <div className="meta-templates-attached-bottom">
-                <button
-                  type="button"
-                  className="btn-meta-attached-test"
-                  onClick={handleOpenTestModal}
-                  disabled={!waPhoneId.trim() || !waToken.trim()}
-                >
-                  <Send size={12} color="#25D366" />
-                  <span>Send Test Message</span>
-                </button>
-              </div>
+                        <div className="meta-template-status-col" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span className={`meta-template-status-badge ${status}`}>
+                            {status === 'approved' && <CheckCircle2 size={12} />}
+                            {status === 'rejected' && <XCircle size={12} />}
+                            {status === 'pending' && <AlertCircle size={12} />}
+                            {tmpl.status || 'APPROVED'}
+                          </span>
+
+                          <button
+                            type="button"
+                            className="btn-meta-clean btn-meta-icon-only"
+                            onClick={() => setPreviewingWaTemplate(tmpl)}
+                            data-tooltip="View"
+                            data-tooltip-pos="right-edge"
+                            aria-label={`View ${tmpl.name}`}
+                          >
+                            <Eye size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </>
         )}
 
-        {/* Email Integration Channel Content */}
-        {activeChannel === 'email' && (
-          <EmailIntegrationView currentUser={currentUser} />
+        {/* Email Integration Channel Content (persisted once visited for instant switching) */}
+        {visitedChannels.email && (
+          <div style={{ display: activeChannel === 'email' ? 'block' : 'none', width: '100%' }}>
+            <EmailIntegrationView currentUser={currentUser} />
+          </div>
         )}
 
-        {/* Website Forms Channel Content */}
-        {activeChannel === 'website' && (
-          <WebsiteFormsView currentUser={currentUser} />
+        {/* Website Forms Channel Content (persisted once visited for instant switching) */}
+        {visitedChannels.website && (
+          <div style={{ display: activeChannel === 'website' ? 'block' : 'none', width: '100%' }}>
+            <WebsiteFormsView currentUser={currentUser} />
+          </div>
         )}
 
         {/* End of Main Content */}
+          </div>
+        </div>
       </div>
-    </div>
 
       {/* Asset Selection Modal */}
       {isModalOpen && createPortal(
@@ -2001,7 +2338,10 @@ export default function MetaIntegrationView({ currentUser }) {
 
               {/* Select Ad Account Custom Dropdown */}
               <div className="meta-modal-field">
-                <label className="meta-modal-label">Ad Account</label>
+                <label className="meta-modal-label">Ad Account (for Budget & Spend Tracking)</label>
+                <div style={{ fontSize: '11.5px', color: '#64748b', marginBottom: '6px' }}>
+                  Select the account where you fund your ad campaigns. Your Facebook Page forms are imported below.
+                </div>
                 <CustomDropdown
                   value={selectedAdAccountId}
                   onChange={setSelectedAdAccountId}
@@ -2313,6 +2653,55 @@ export default function MetaIntegrationView({ currentUser }) {
                     Send Test Message
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* WhatsApp Template Message Preview Modal */}
+      {previewingWaTemplate && createPortal(
+        <div className="meta-modal-backdrop" onClick={() => setPreviewingWaTemplate(null)}>
+          <div className="meta-modal" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="meta-modal-header">
+              <div>
+                <h3 className="meta-modal-title">{previewingWaTemplate.name}</h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                  {previewingWaTemplate.category && (
+                    <span className="meta-id-tag" style={{ textTransform: 'lowercase' }}>{previewingWaTemplate.category}</span>
+                  )}
+                  {previewingWaTemplate.language && (
+                    <span className="meta-id-tag">{previewingWaTemplate.language}</span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="meta-modal-close-btn"
+                onClick={() => setPreviewingWaTemplate(null)}
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="meta-modal-body" style={{ padding: '20px' }}>
+              <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '8px' }}>
+                Template Content
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '14px', fontSize: '13.5px', lineHeight: 1.6, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
+                {previewingWaTemplate.bodyText || '(No body text defined for this template)'}
+              </div>
+            </div>
+
+            <div className="meta-modal-footer" style={{ padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #f1f5f9' }}>
+              <button
+                type="button"
+                className="btn-meta-clean"
+                onClick={() => setPreviewingWaTemplate(null)}
+              >
+                Close
               </button>
             </div>
           </div>

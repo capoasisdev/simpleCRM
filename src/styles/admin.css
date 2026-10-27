@@ -409,6 +409,23 @@
   transform: translateX(-50%) translateY(0);
 }
 
+[data-tooltip-pos="right-edge"]::before {
+  left: auto !important;
+  right: 12px !important;
+  transform: translateY(3px) !important;
+}
+
+[data-tooltip-pos="right-edge"]::after {
+  left: auto !important;
+  right: 0 !important;
+  transform: translateY(3px) !important;
+}
+
+[data-tooltip-pos="right-edge"]:hover::before,
+[data-tooltip-pos="right-edge"]:hover::after {
+  transform: translateY(0) !important;
+}
+
 /* Permissions Checkboxes in Modal */
 .admin-perms-checklist {
   display: flex;
@@ -578,11 +595,20 @@
               padding 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Suppress tooltips when settings subnav is open/expanded */
+.settings-subnav-pane:not(.settings-subnav-collapsed) [data-tooltip]::before,
+.settings-subnav-pane:not(.settings-subnav-collapsed) [data-tooltip]::after {
+  display: none !important;
+}
+
 .settings-subnav-pane.settings-subnav-collapsed {
   width: 68px;
   min-width: 68px;
   max-width: 68px;
   padding: 24px 10px;
+  overflow: visible !important;
+  position: relative;
+  z-index: 25;
 }
 
 .settings-subnav-pane.settings-subnav-collapsed .settings-subnav-btn span {
@@ -593,6 +619,30 @@
   justify-content: center;
   padding: 10px;
   gap: 0;
+}
+
+/* Tooltips pop to the right in collapsed mode */
+.settings-subnav-pane.settings-subnav-collapsed [data-tooltip]::before {
+  bottom: auto;
+  left: calc(100% + 2px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-3px);
+  border-color: transparent #0f172a transparent transparent;
+  z-index: 101;
+}
+
+.settings-subnav-pane.settings-subnav-collapsed [data-tooltip]::after {
+  bottom: auto;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-3px);
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+}
+
+.settings-subnav-pane.settings-subnav-collapsed [data-tooltip]:hover::before,
+.settings-subnav-pane.settings-subnav-collapsed [data-tooltip]:hover::after {
+  transform: translateY(-50%) translateX(0);
 }
 
 .settings-subnav-list {
@@ -654,6 +704,10 @@
   height: 100%;
   overflow-y: auto;
   background-color: #ffffff;
+}
+
+.settings-content-pane:has(.meta-container) {
+  overflow: hidden;
 }
 
 /* Modern Admin Modals - Pipeline Settings Pattern */

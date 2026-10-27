@@ -34,7 +34,11 @@ import {
   Layers,
   CalendarClock,
   MoreHorizontal,
-  Sparkles
+  Sparkles,
+  AlertTriangle,
+  RefreshCw,
+  Wallet,
+  CreditCard
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getDashboardScope, getAnalyticsScope } from '../lib/permissions';
@@ -51,7 +55,8 @@ import BackupsView from './BackupsView';
 import AnalyticsView from './AnalyticsView';
 import NotificationDrawer from './NotificationDrawer';
 import AiAssistantWidget from './AiAssistantWidget';
-import { getStoredNotifications, clearAllNotifications, markAllNotificationsRead } from '../lib/notifications';
+import { getStoredNotifications, clearAllNotifications, markAllNotificationsRead, addNotification } from '../lib/notifications';
+import { fetchAdAccountBudget } from '../lib/metaSdk';
 import { checkAndRunDailyAutoBackup } from '../lib/backups';
 import { haptic } from '../lib/haptics';
 import { registerBackHandler } from '../lib/backButton';
@@ -141,7 +146,7 @@ export default function DashboardView({ currentUser, onLogout }) {
     if (path.startsWith('/admin')) {
       const parts = path.split('/').filter(Boolean);
       let sub = parts[1] || 'users';
-      if (sub === 'routing' || sub === 'automations') sub = 'integrations';
+      if (sub === 'routing' || sub === 'automations' || sub === 'meta') sub = 'integrations';
       return { tab: 'Admin', adminSub: sub };
     }
     const clean = path.replace(/^\//, '');
@@ -167,8 +172,8 @@ export default function DashboardView({ currentUser, onLogout }) {
 
   const [activeTab, setActiveTab] = useState(validInitialTab);
   const [adminSubTab, setAdminSubTab] = useState(
-    (initialLoc.adminSub === 'routing' || initialLoc.adminSub === 'automations')
-      ? 'users'
+    (initialLoc.adminSub === 'routing' || initialLoc.adminSub === 'automations' || initialLoc.adminSub === 'meta')
+      ? 'integrations'
       : (initialLoc.adminSub || (canManageUsers ? 'users' : 'integrations'))
   );
 
@@ -214,24 +219,25 @@ export default function DashboardView({ currentUser, onLogout }) {
 
   const navigateTo = (tabName, subTab = 'users') => {
     haptic.selection();
+    const effectiveSub = (subTab === 'meta' || subTab === 'routing' || subTab === 'automations') ? 'integrations' : subTab;
     setActiveTab(tabName);
     if (tabName === 'LaterOn') {
       setHasVisitedLaterOn(true);
     }
     if (tabName === 'Admin') {
-      setAdminSubTab(subTab);
-      if (subTab !== 'stages') {
+      setAdminSubTab(effectiveSub);
+      if (effectiveSub !== 'stages') {
         setIsPipelineConfiguring(false);
       }
     } else {
       setIsPipelineConfiguring(false);
     }
-    const path = getRouteForTab(tabName, subTab);
+    const path = getRouteForTab(tabName, effectiveSub);
     if (window.location.pathname !== path) {
-      window.history.pushState({ tab: tabName, adminSub: subTab }, '', path);
+      window.history.pushState({ tab: tabName, adminSub: effectiveSub }, '', path);
     }
     try {
-      localStorage.setItem('simplecrm_last_active_tab', JSON.stringify({ tab: tabName, adminSub: subTab }));
+      localStorage.setItem('simplecrm_last_active_tab', JSON.stringify({ tab: tabName, adminSub: effectiveSub }));
     } catch {}
   };
 
@@ -793,16 +799,127 @@ export default function DashboardView({ currentUser, onLogout }) {
     }
   };
 
-  const [tasks, setTasks] = useState([
-    { id: 1, title: 'Send revised enterprise proposal to Reliance Retail', due: 'Today, 4:00 PM', completed: false },
-    { id: 2, title: 'Contract review call with Tata Motors legal team', due: 'Today, 5:30 PM', completed: true },
-    { id: 3, title: 'Follow up on inbound lead', due: 'Tomorrow, 10:00 AM', completed: false },
-    { id: 4, title: 'Prepare sales pipeline forecast report', due: 'Oct 16, 2:00 PM', completed: false }
-  ]);
+  // Meta Ad Account Budget & Health State
+  const [adBudget, setAdBudget] = useState(() => {
+    try {
+      const cached = localStorage.getItem('crm_cached_ad_budget');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isLoadingAdBudget, setIsLoadingAdBudget] = useState(false);
+  const [adBudgetError, setAdBudgetError] = useState('');
 
-  const toggleTask = (id) => {
-    setTasks(tasks.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)));
+  const formatCurrency = (val, curr = 'INR') => {
+    if (val === null || val === undefined || isNaN(val)) return '—';
+    try {
+      return new Intl.NumberFormat(curr === 'INR' ? 'en-IN' : 'en-US', {
+        style: 'currency',
+        currency: curr,
+        maximumFractionDigits: 0,
+        minimumFractionDigits: 0
+      }).format(Math.round(Number(val)));
+    } catch {
+      return `${curr} ${Math.round(Number(val)).toLocaleString(curr === 'INR' ? 'en-IN' : 'en-US')}`;
+    }
   };
+
+  const formatCompactCurrency = (val, curr = 'INR') => {
+    if (val === null || val === undefined || isNaN(val)) return '—';
+    const num = Number(val);
+    if (curr === 'INR') {
+      if (num >= 10000000) return `₹${(num / 10000000).toFixed(2)} Cr`;
+      if (num >= 100000) return `₹${(num / 100000).toFixed(2)} L`;
+      return `₹${Math.round(num).toLocaleString('en-IN')}`;
+    }
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: curr,
+      notation: 'compact',
+      maximumFractionDigits: 1
+    }).format(num);
+  };
+
+  const loadAdAccountBudget = async (isManual = false) => {
+    try {
+      if (isManual) {
+        haptic.selection();
+      }
+      setIsLoadingAdBudget(true);
+      setAdBudgetError('');
+
+      // 1. Fetch meta_config from Supabase
+      let metaConf = null;
+      try {
+        const { data } = await supabase
+          .from('meta_config')
+          .select('*')
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (data) metaConf = data;
+      } catch (err) {
+        console.warn('Could not read meta_config from Supabase:', err);
+      }
+
+      if (!metaConf) {
+        try {
+          const cached = localStorage.getItem('crm_cached_meta_config');
+          if (cached) metaConf = JSON.parse(cached);
+        } catch {}
+      }
+
+      const adAccountId = metaConf?.ad_account_id;
+      if (!adAccountId) {
+        setIsLoadingAdBudget(false);
+        return;
+      }
+
+      const cachedUserToken = localStorage.getItem('crm_meta_user_token');
+      const waToken = metaConf?.whatsapp_access_token;
+      const pageToken = metaConf?.access_token;
+
+      const budget = await fetchAdAccountBudget(
+        adAccountId,
+        cachedUserToken || waToken || pageToken,
+        [waToken, pageToken, cachedUserToken]
+      );
+
+      if (budget) {
+        setAdBudget(budget);
+        try {
+          localStorage.setItem('crm_cached_ad_budget', JSON.stringify(budget));
+        } catch {}
+
+        // If exhausted or unsettled, notify admins
+        if (budget.isExhausted) {
+          const currentNotifs = getStoredNotifications();
+          const alreadyNotified = currentNotifs.some(
+            (n) => n.id === `meta_budget_alert_${budget.accountId}`
+          );
+          if (!alreadyNotified) {
+            addNotification({
+              id: `meta_budget_alert_${budget.accountId}`,
+              type: 'warning',
+              title: 'Meta Ad Budget Exhausted!',
+              message: `Ad account "${budget.name || budget.accountId}" has reached its budget limit (${budget.fundingSourceDisplay || '₹0.00 available'}). Inbound leads are paused until balance is topped up.`,
+              openDrawer: false
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error loading ad account budget:', err);
+      setAdBudgetError(err.message || 'Failed to fetch ad budget');
+    } finally {
+      setIsLoadingAdBudget(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAdAccountBudget(false);
+  }, []);
 
   // October 2026 starts on Thursday (index 4) and has 31 days
   const calendarDays = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -851,6 +968,32 @@ export default function DashboardView({ currentUser, onLogout }) {
         </div>
 
         <div className="header-right-cluster">
+          {adBudget && (
+            <div
+              className={`header-meta-budget-chip ${adBudget.statusBadge}`}
+              onClick={() => {
+                if (adBudget.isExhausted) {
+                  window.open(
+                    `https://adsmanager.facebook.com/billing_hub/payment_settings?act=${adBudget.accountId.replace(/^act_/, '')}`,
+                    '_blank'
+                  );
+                } else if (hasAdminAccess) {
+                  navigateTo('Admin', 'integrations');
+                }
+              }}
+              title={
+                adBudget.isExhausted
+                  ? 'Meta Ad Budget Exhausted! Click to top up in Ads Manager'
+                  : `Meta Ad Budget: ${formatCurrency(adBudget.prepaidBalance ?? adBudget.remainingSpendCap ?? adBudget.amountSpent, adBudget.currency)}`
+              }
+            >
+              <span className="chip-dot" />
+              <span className="chip-label-prefix">Ad Budget:</span>
+              <strong>
+                {formatCurrency(adBudget.prepaidBalance ?? adBudget.remainingSpendCap ?? 0, adBudget.currency)}
+              </strong>
+            </div>
+          )}
           <button
             type="button"
             className="header-icon-btn"
@@ -1107,7 +1250,98 @@ export default function DashboardView({ currentUser, onLogout }) {
                   </div>
                 </section>
 
-                {/* Card 2: Recent Deals (Dynamic) */}
+                {/* Card 2: Meta Ad Account Budget & Health */}
+                <section className="dashboard-card" aria-label="Meta Ad Budget & Status">
+                  <div className="card-header-row">
+                    <div className="card-title-group" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="#1877F2">
+                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                      </svg>
+                      <h2 className="card-title">Meta Ad Budget</h2>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="card-action-link"
+                      onClick={() => loadAdAccountBudget(true)}
+                      disabled={isLoadingAdBudget}
+                    >
+                      {isLoadingAdBudget ? 'Syncing...' : 'Refresh'}
+                    </button>
+                  </div>
+
+                  <div className="metric-tiles-row">
+                    <div className="metric-tile">
+                      <div className="metric-tile-val">
+                        {isLoadingAdBudget && !adBudget ? (
+                          <Skeleton width="50px" height="22px" />
+                        ) : (
+                          <span className="fade-in-value">
+                            {formatCurrency(adBudget?.prepaidBalance ?? adBudget?.remainingSpendCap ?? 0, adBudget?.currency || 'INR')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="metric-tile-lbl">Available Balance</div>
+                    </div>
+
+                    <div className="metric-tile">
+                      <div className="metric-tile-val">
+                        {isLoadingAdBudget && !adBudget ? (
+                          <Skeleton width="50px" height="22px" />
+                        ) : (
+                          <span className="fade-in-value">
+                            {formatCurrency(adBudget?.todayInsights?.spend || 0, adBudget?.currency || 'INR')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="metric-tile-lbl">Today's Spend</div>
+                    </div>
+
+                    <div
+                      className="metric-tile"
+                      data-tooltip={adBudget?.amountSpent ? `Lifetime: ₹${Math.round(adBudget.amountSpent).toLocaleString('en-IN')}` : undefined}
+                    >
+                      <div className="metric-tile-val">
+                        {isLoadingAdBudget && !adBudget ? (
+                          <Skeleton width="65px" height="22px" />
+                        ) : (
+                          <span className="fade-in-value">
+                            {formatCompactCurrency(adBudget?.amountSpent || 0, adBudget?.currency || 'INR')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="metric-tile-lbl">Lifetime Spent</div>
+                    </div>
+                  </div>
+
+                  <div className="card-buttons-row">
+                    <a
+                      href={
+                        adBudget?.accountId
+                          ? `https://adsmanager.facebook.com/billing_hub/payment_settings?act=${adBudget.accountId.replace(/^act_/, '')}`
+                          : 'https://adsmanager.facebook.com/'
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="card-btn-primary"
+                      style={{ textDecoration: 'none' }}
+                    >
+                      <span>Top Up</span>
+                      <ArrowUpRight size={14} />
+                    </a>
+                    {hasAdminAccess && (
+                      <button
+                        type="button"
+                        className="card-btn-secondary"
+                        onClick={() => navigateTo('Admin', 'integrations')}
+                      >
+                        <span>Meta Settings</span>
+                      </button>
+                    )}
+                  </div>
+                </section>
+
+                {/* Card 3: Recent Deals (Dynamic) */}
                 {canViewDashboardDeals && (
                   <section className="dashboard-card" aria-label="Recent Deals">
                     <div className="card-header-row">
@@ -1163,53 +1397,6 @@ export default function DashboardView({ currentUser, onLogout }) {
                     </div>
                   </section>
                 )}
-
-                {/* Card 3: Tasks Overview */}
-                <section className="dashboard-card tasks-card" aria-label="Tasks Overview">
-                  <div className="card-header-row">
-                    <div className="card-title-group">
-                      <CalendarCheck size={18} strokeWidth={1.5} />
-                      <h2 className="card-title">Tasks Overview</h2>
-                    </div>
-                    <button type="button" className="card-action-link">View All</button>
-                  </div>
-
-                  <div className="metric-tiles-row" style={{ marginBottom: '14px' }}>
-                    <div className="metric-tile">
-                      <div className="metric-tile-val">{tasks.length}</div>
-                      <div className="metric-tile-lbl">Total Tasks</div>
-                    </div>
-                    <div className="metric-tile">
-                      <div className="metric-tile-val">{tasks.filter((t) => !t.completed).length}</div>
-                      <div className="metric-tile-lbl">In Progress</div>
-                    </div>
-                    <div className="metric-tile">
-                      <div className="metric-tile-val">{tasks.filter((t) => t.completed).length}</div>
-                      <div className="metric-tile-lbl">Completed</div>
-                    </div>
-                  </div>
-
-                  <div className="task-list">
-                    {tasks.map((task) => (
-                      <div key={task.id} className="task-item">
-                        <div className="task-left">
-                          <button
-                            type="button"
-                            className={`task-checkbox-mock ${task.completed ? 'checked' : ''}`}
-                            onClick={() => toggleTask(task.id)}
-                            aria-label={task.completed ? 'Mark incomplete' : 'Mark complete'}
-                          >
-                            {task.completed && <Check size={12} strokeWidth={2.5} />}
-                          </button>
-                          <span className={`task-text ${task.completed ? 'completed' : ''}`}>
-                            {task.title}
-                          </span>
-                        </div>
-                        <span className="task-due">{task.due}</span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
               </div>
 
               {/* Right Column (Lead Conversion, Calendar) */}
@@ -1342,31 +1529,39 @@ export default function DashboardView({ currentUser, onLogout }) {
           {activeTab === 'Admin' && (
             <div className="settings-workspace-layout">
               {/* Secondary Settings Sub-navigation inside Settings Main Section */}
-              <div className={`settings-subnav-pane ${adminSubTab === 'stages' && isPipelineConfiguring ? 'settings-subnav-collapsed' : ''}`}>
-                <ul className="settings-subnav-list">
-                  {[
-                    ...(canManageUsers || user.role === 'admin' ? [{ id: 'users', label: 'Users', icon: Users }] : []),
-                    ...(user.role === 'admin' ? [{ id: 'import', label: 'Import Leads', icon: UploadCloud }] : []),
-                    ...(canManageMeta || user.role === 'admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
-                    ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : []),
-                    ...(user.role === 'admin' ? [{ id: 'backups', label: 'Backups', icon: Database }] : [])
-                  ].map((sub) => {
-                    const SubIcon = sub.icon;
-                    return (
-                      <li key={sub.id}>
-                        <button
-                          type="button"
-                          className={`settings-subnav-btn ${adminSubTab === sub.id ? 'active' : ''}`}
-                          onClick={() => navigateTo('Admin', sub.id)}
-                        >
-                          <SubIcon size={20} strokeWidth={1.75} />
-                          <span>{sub.label}</span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
+              {(() => {
+                const isSettingsSubnavCollapsed = (adminSubTab === 'stages' && isPipelineConfiguring) || adminSubTab === 'integrations' || adminSubTab === 'meta';
+                return (
+                  <div
+                    className={`settings-subnav-pane ${isSettingsSubnavCollapsed ? 'settings-subnav-collapsed' : ''}`}
+                  >
+                    <ul className="settings-subnav-list">
+                      {[
+                        ...(canManageUsers || user.role === 'admin' ? [{ id: 'users', label: 'Users', icon: Users }] : []),
+                        ...(user.role === 'admin' ? [{ id: 'import', label: 'Import Leads', icon: UploadCloud }] : []),
+                        ...(canManageMeta || user.role === 'admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
+                        ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : []),
+                        ...(user.role === 'admin' ? [{ id: 'backups', label: 'Backups', icon: Database }] : [])
+                      ].map((sub) => {
+                        const SubIcon = sub.icon;
+                        return (
+                          <li key={sub.id}>
+                            <button
+                              type="button"
+                              className={`settings-subnav-btn ${adminSubTab === sub.id ? 'active' : ''}`}
+                              onClick={() => navigateTo('Admin', sub.id)}
+                              data-tooltip={isSettingsSubnavCollapsed ? sub.label : undefined}
+                            >
+                              <SubIcon size={20} strokeWidth={1.75} />
+                              <span>{sub.label}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              })()}
 
               {/* Settings Content Pane */}
               <div key={adminSubTab} className="settings-content-pane tab-pane-animated">
@@ -1376,7 +1571,7 @@ export default function DashboardView({ currentUser, onLogout }) {
                 {adminSubTab === 'import' && user.role === 'admin' && (
                   <CsvImportView currentUser={user} onNavigate={navigateTo} />
                 )}
-                {adminSubTab === 'integrations' && (canManageMeta || user.role === 'admin') && (
+                {(adminSubTab === 'integrations' || adminSubTab === 'meta') && (canManageMeta || user.role === 'admin') && (
                   <MetaIntegrationView currentUser={user} />
                 )}
                 {adminSubTab === 'stages' && (

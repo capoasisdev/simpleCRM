@@ -2,6 +2,8 @@
  * Meta (Facebook) JavaScript SDK & Graph API Helper
  */
 
+import { supabase } from './supabase';
+
 const DEFAULT_APP_ID = import.meta.env.VITE_META_APP_ID || '977193864751819';
 const DEFAULT_APP_SECRET = import.meta.env.VITE_META_APP_SECRET || '';
 const API_VERSION = 'v20.0';
@@ -126,17 +128,31 @@ export const fetchPageLeadForms = async (pageId, pageAccessToken) => {
 /**
  * Fetch Ad Accounts accessible to the authenticated user
  */
-export const fetchUserAdAccounts = async (userAccessToken) => {
-  try {
-    const res = await fetch(
-      `https://graph.facebook.com/${API_VERSION}/me/adaccounts?fields=id,name,account_id&limit=100&access_token=${userAccessToken}`
-    );
-    const data = await res.json();
-    return data.data || [];
-  } catch (err) {
-    console.warn('Could not fetch ad accounts:', err);
-    return [];
+export const fetchUserAdAccounts = async (primaryToken, fallbackTokens = []) => {
+  const candidateTokens = Array.from(
+    new Set(
+      [
+        primaryToken,
+        ...(Array.isArray(fallbackTokens) ? fallbackTokens : [fallbackTokens]),
+        typeof localStorage !== 'undefined' ? localStorage.getItem('crm_meta_user_token') : null
+      ].filter((t) => t && typeof t === 'string' && t.trim().length > 15)
+    )
+  );
+
+  for (const token of candidateTokens) {
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/${API_VERSION}/me/adaccounts?fields=id,name,account_id&limit=100&access_token=${token.trim()}`
+      );
+      const data = await res.json();
+      if (Array.isArray(data?.data) && data.data.length > 0) {
+        return data.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch ad accounts with token:', err);
+    }
   }
+  return [];
 };
 
 /**
@@ -317,5 +333,177 @@ export const fetchUserWhatsAppAccounts = async (userAccessToken) => {
 
   return accounts;
 };
+
+/**
+ * Fetch Ad Account budget, balance, spend cap, account status, and today's insights
+ * Supports automatic fallback across available tokens (user token, WhatsApp token, page token)
+ */
+export const fetchAdAccountBudget = async (adAccountId, primaryToken, fallbackTokens = []) => {
+  if (!adAccountId || typeof adAccountId !== 'string' || !adAccountId.trim()) {
+    return null;
+  }
+
+  const cleanNumeric = adAccountId.replace(/^act_/, '').trim();
+  const actId = `act_${cleanNumeric}`;
+
+  // Gather candidate tokens to try (removing duplicates and blanks)
+  const candidateTokens = Array.from(
+    new Set(
+      [
+        primaryToken,
+        ...fallbackTokens,
+        typeof localStorage !== 'undefined' ? localStorage.getItem('crm_meta_user_token') : null
+      ].filter((t) => t && typeof t === 'string' && t.trim().length > 15)
+    )
+  );
+
+  let accountData = null;
+  let activeToken = null;
+  let lastError = null;
+
+  for (const token of candidateTokens) {
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/${API_VERSION}/${actId}?fields=name,account_id,account_status,disable_reason,currency,amount_spent,spend_cap,balance,funding_source_details&access_token=${token.trim()}`
+      );
+      const data = await res.json();
+      if (data && !data.error && data.account_id) {
+        accountData = data;
+        activeToken = token.trim();
+        break;
+      } else if (data.error) {
+        lastError = data.error;
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  // If candidate tokens were page tokens or failed, try fetching whatsapp_access_token from Supabase
+  if (!accountData) {
+    try {
+      const { data: dbConf } = await supabase
+        .from('meta_config')
+        .select('whatsapp_access_token')
+        .limit(1)
+        .maybeSingle();
+
+      const dbToken = dbConf?.whatsapp_access_token;
+      if (dbToken && !candidateTokens.includes(dbToken.trim())) {
+        const res = await fetch(
+          `https://graph.facebook.com/${API_VERSION}/${actId}?fields=name,account_id,account_status,disable_reason,currency,amount_spent,spend_cap,balance,funding_source_details&access_token=${dbToken.trim()}`
+        );
+        const data = await res.json();
+        if (data && !data.error && data.account_id) {
+          accountData = data;
+          activeToken = dbToken.trim();
+        } else if (data.error) {
+          lastError = data.error;
+        }
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (!accountData) {
+    console.warn(
+      `Could not fetch ad account (${actId}):`,
+      lastError?.message || 'Check your Meta permissions.'
+    );
+    return null;
+  }
+
+  // Fetch today's insights using the validated working token
+  let todayInsights = { spend: 0, impressions: 0, clicks: 0 };
+  try {
+    const insRes = await fetch(
+      `https://graph.facebook.com/${API_VERSION}/${actId}/insights?date_preset=today&fields=spend,impressions,clicks&access_token=${activeToken}`
+    );
+    const insData = await insRes.json();
+    if (insData?.data && insData.data.length > 0) {
+      const first = insData.data[0];
+      todayInsights = {
+        spend: parseFloat(first.spend || 0),
+        impressions: parseInt(first.impressions || 0, 10),
+        clicks: parseInt(first.clicks || 0, 10)
+      };
+    }
+  } catch (err) {
+    console.warn('Could not fetch today ad insights:', err);
+  }
+
+  // Currency & Amounts (Meta returns monetary amounts in basic units / cents)
+  const currency = accountData.currency || 'INR';
+  const amountSpent = accountData.amount_spent ? parseFloat(accountData.amount_spent) / 100 : 0;
+  const rawSpendCap =
+    accountData.spend_cap && accountData.spend_cap !== '0'
+      ? parseFloat(accountData.spend_cap) / 100
+      : null;
+  const rawBalance = accountData.balance ? parseFloat(accountData.balance) / 100 : 0;
+
+  // Remaining spend cap
+  const remainingSpendCap =
+    rawSpendCap !== null ? Math.max(0, rawSpendCap - amountSpent) : null;
+
+  // Parse available prepaid balance from funding_source_details if available
+  let prepaidBalance = null;
+  const fundingSourceDisplay = accountData.funding_source_details?.display_string || '';
+  if (fundingSourceDisplay) {
+    const match = fundingSourceDisplay.match(/[\d,.]+/);
+    if (match) {
+      const parsed = parseFloat(match[0].replace(/,/g, ''));
+      if (!isNaN(parsed)) prepaidBalance = parsed;
+    }
+  }
+
+  // Account status: 1 = ACTIVE, 2 = DISABLED, 3 = UNSETTLED (Billing/payment exhausted)
+  const accountStatus = accountData.account_status;
+  const isCapExhausted = remainingSpendCap !== null && remainingSpendCap <= 0.05;
+  const isPrepaidExhausted = prepaidBalance !== null && prepaidBalance <= 0;
+  const isUnsettled = accountStatus === 3 || accountStatus === 2;
+  const isExhausted = isCapExhausted || isPrepaidExhausted || isUnsettled;
+
+  // Status text & badge
+  let statusText = 'Active';
+  let statusBadge = 'active'; // 'active' | 'warning' | 'exhausted'
+
+  if (accountStatus === 2) {
+    statusText = 'Disabled';
+    statusBadge = 'exhausted';
+  } else if (accountStatus === 3) {
+    statusText = 'Unsettled';
+    statusBadge = 'exhausted';
+  } else if (isPrepaidExhausted || isCapExhausted) {
+    statusText = 'Top-up Needed';
+    statusBadge = 'exhausted';
+  } else if (
+    (remainingSpendCap !== null && remainingSpendCap < 1500) ||
+    (prepaidBalance !== null && prepaidBalance < 1500)
+  ) {
+    statusText = 'Low Balance';
+    statusBadge = 'warning';
+  }
+
+  return {
+    accountId: actId,
+    name: accountData.name || actId,
+    currency,
+    accountStatus,
+    amountSpent,
+    spendCap: rawSpendCap,
+    remainingSpendCap,
+    balance: rawBalance,
+    prepaidBalance,
+    fundingSourceDisplay,
+    isExhausted,
+    statusText,
+    statusBadge,
+    todayInsights,
+    activeToken,
+    lastUpdated: new Date().toISOString()
+  };
+};
+
 
 

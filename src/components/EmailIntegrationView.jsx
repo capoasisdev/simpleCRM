@@ -35,9 +35,11 @@ import {
   RESEND_API_BASE
 } from '../lib/email';
 import Skeleton from './common/Skeleton';
+import '../styles/meta.css';
 import '../styles/email.css';
 
 export default function EmailIntegrationView({ currentUser }) {
+  const apiKeyInputRef = useRef(null);
   const [config, setConfig] = useState({
     provider: 'resend',
     api_key: '',
@@ -359,93 +361,103 @@ export default function EmailIntegrationView({ currentUser }) {
     return (
       <div className="email-view-container">
         {/* SECTION 1: HERO STATUS CARD SKELETON */}
-        <div className="email-hero-card">
-          <div className="email-hero-left">
-            <Skeleton width="44px" height="44px" borderRadius="10px" />
-            <div className="email-hero-info">
-              <Skeleton width="170px" height="18px" borderRadius="4px" />
+        <div className="meta-panel-card">
+          <div className="meta-account-row">
+            <div className="meta-account-identity">
+              <Skeleton width="44px" height="44px" borderRadius="8px" />
+              <div className="meta-account-details" style={{ gap: '6px' }}>
+                <Skeleton width="180px" height="20px" borderRadius="4px" />
+              </div>
+            </div>
+            <div className="meta-account-actions">
+              <Skeleton width="34px" height="34px" borderRadius="7px" />
+              <Skeleton width="34px" height="34px" borderRadius="7px" />
             </div>
           </div>
-          <div className="email-hero-actions">
-            <Skeleton width="95px" height="32px" borderRadius="6px" />
+          <div className="meta-account-footer-row">
+            <Skeleton width="160px" height="14px" borderRadius="4px" />
+            <Skeleton width="80px" height="14px" borderRadius="4px" />
           </div>
         </div>
 
         {/* SECTION 2: CREDENTIALS & SENDER CONFIGURATION SKELETON */}
-        <div className="email-panel-card">
-          <div className="email-panel-header">
-            <Skeleton width="220px" height="16px" borderRadius="4px" />
-            <Skeleton width="130px" height="14px" borderRadius="4px" />
+        <div className="meta-panel-card">
+          <div className="meta-panel-header">
+            <div className="meta-panel-header-left">
+              <Skeleton width="220px" height="16px" borderRadius="4px" />
+            </div>
+            <Skeleton width="130px" height="30px" borderRadius="7px" />
           </div>
 
-          <table className="email-kv-table">
-            <tbody>
-              <tr className="email-kv-row">
-                <td className="email-kv-key-col">
-                  <Skeleton width="115px" height="14px" borderRadius="4px" />
-                </td>
-                <td className="email-kv-val-col">
-                  <Skeleton width="100%" height="38px" borderRadius="6px" />
-                </td>
-              </tr>
-              <tr className="email-kv-row">
-                <td className="email-kv-key-col">
-                  <Skeleton width="80px" height="14px" borderRadius="4px" />
-                </td>
-                <td className="email-kv-val-col">
-                  <Skeleton width="100%" height="38px" borderRadius="6px" />
-                </td>
-              </tr>
-              <tr className="email-kv-row">
-                <td className="email-kv-key-col">
-                  <Skeleton width="135px" height="14px" borderRadius="4px" />
-                </td>
-                <td className="email-kv-val-col">
-                  <Skeleton width="100%" height="38px" borderRadius="6px" />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                    <Skeleton width="90px" height="13px" borderRadius="4px" />
-                    <Skeleton width="140px" height="22px" borderRadius="12px" />
-                  </div>
-                </td>
-              </tr>
-              <tr className="email-kv-row">
-                <td className="email-kv-key-col">
-                  <Skeleton width="90px" height="14px" borderRadius="4px" />
-                </td>
-                <td className="email-kv-val-col">
-                  <Skeleton width="100%" height="38px" borderRadius="6px" />
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div style={{ padding: '8px 24px 20px 24px' }}>
+            <table className="email-kv-table">
+              <tbody>
+                <tr className="email-kv-row">
+                  <td className="email-kv-key-col">
+                    <Skeleton width="115px" height="14px" borderRadius="4px" />
+                  </td>
+                  <td className="email-kv-val-col">
+                    <Skeleton width="100%" height="40px" borderRadius="8px" />
+                  </td>
+                </tr>
+                <tr className="email-kv-row">
+                  <td className="email-kv-key-col">
+                    <Skeleton width="80px" height="14px" borderRadius="4px" />
+                  </td>
+                  <td className="email-kv-val-col">
+                    <Skeleton width="100%" height="40px" borderRadius="8px" />
+                  </td>
+                </tr>
+                <tr className="email-kv-row">
+                  <td className="email-kv-key-col">
+                    <Skeleton width="135px" height="14px" borderRadius="4px" />
+                  </td>
+                  <td className="email-kv-val-col">
+                    <Skeleton width="100%" height="40px" borderRadius="8px" />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                      <Skeleton width="90px" height="13px" borderRadius="4px" />
+                      <Skeleton width="140px" height="22px" borderRadius="12px" />
+                    </div>
+                  </td>
+                </tr>
+                <tr className="email-kv-row">
+                  <td className="email-kv-key-col">
+                    <Skeleton width="90px" height="14px" borderRadius="4px" />
+                  </td>
+                  <td className="email-kv-val-col">
+                    <Skeleton width="100%" height="40px" borderRadius="8px" />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/* SECTION 3: EMAIL TEMPLATES SKELETON */}
-        <div className="email-panel-card">
-          <div className="email-panel-header">
-            <div className="email-panel-header-left">
+        <div className="meta-panel-card">
+          <div className="meta-panel-header">
+            <div className="meta-panel-header-left">
               <Skeleton width="190px" height="16px" borderRadius="4px" />
               <Skeleton width="26px" height="18px" borderRadius="10px" />
             </div>
             <Skeleton width="130px" height="32px" borderRadius="6px" />
           </div>
 
-          <div className="email-template-list">
+          <div className="meta-forms-table">
             {[1, 2].map((i) => (
-              <div key={i} className="email-template-item">
-                <div className="email-template-identity" style={{ flex: 1 }}>
-                  <Skeleton width="34px" height="34px" borderRadius="8px" />
-                  <div className="email-template-info" style={{ width: '100%', gap: '8px' }}>
+              <div key={i} className="meta-form-row-item">
+                <div className="meta-form-identity">
+                  <Skeleton width="36px" height="36px" borderRadius="8px" />
+                  <div className="meta-form-info-col" style={{ width: '100%', gap: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <Skeleton width={i === 1 ? '130px' : '160px'} height="15px" borderRadius="4px" />
-                      <Skeleton width={i === 1 ? '160px' : '140px'} height="20px" borderRadius="10px" />
+                      <Skeleton width={i === 1 ? '160px' : '140px'} height="18px" borderRadius="10px" />
                     </div>
-                    <Skeleton width={i === 1 ? '85%' : '70%'} height="12px" borderRadius="3px" />
                   </div>
                 </div>
-                <div className="email-template-actions">
-                  <Skeleton width="28px" height="28px" borderRadius="6px" />
-                  <Skeleton width="28px" height="28px" borderRadius="6px" />
+                <div className="meta-form-actions-col">
+                  <Skeleton width="30px" height="30px" borderRadius="6px" />
+                  <Skeleton width="30px" height="30px" borderRadius="6px" />
                 </div>
               </div>
             ))}
@@ -477,199 +489,240 @@ export default function EmailIntegrationView({ currentUser }) {
       )}
 
       {/* SECTION 1: HERO STATUS CARD */}
-      <div className={`email-hero-card ${config.is_connected ? 'is-connected' : 'is-disconnected'}`}>
-        {config.is_connected && config.from_email && (
-          <span className="email-card-top-id">
-            Sender: <strong>{config.from_email}</strong>
-          </span>
-        )}
-        <div className="email-hero-left">
-          <div className="email-brand-tile">
-            <Mail size={24} />
-          </div>
-          <div className="email-hero-info">
-            <div className="email-hero-title-row">
-              <span className="email-hero-title">Resend Email Engine</span>
+      <div className="meta-panel-card">
+        {config.is_connected ? (
+          <>
+            <div className="meta-account-row">
+              <div className="meta-account-identity">
+                <div className="meta-brand-tile">
+                  <Mail size={22} color="#0f172a" />
+                </div>
+                <div className="meta-account-details">
+                  <div className="meta-account-title-line">
+                    <span className="meta-account-name">Resend Email Engine</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="meta-account-actions">
+                <button
+                  type="button"
+                  className="btn-meta-clean btn-meta-icon-only"
+                  onClick={() => {
+                    setTestFeedback(null);
+                    setIsTestModalOpen(true);
+                  }}
+                  disabled={!config.api_key}
+                  data-tooltip="Send Test Email"
+                  aria-label="Send Test Email"
+                >
+                  <Send size={15} />
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-meta-disconnect btn-meta-icon-only"
+                  onClick={handleDisconnect}
+                  data-tooltip="Disconnect Resend"
+                  data-tooltip-pos="right-edge"
+                  aria-label="Disconnect Resend"
+                >
+                  <Unlink size={15} />
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
 
-        <div className="email-hero-actions">
-          <button
-            type="button"
-            className="btn-email-secondary"
-            onClick={() => {
-              setTestFeedback(null);
-              setIsTestModalOpen(true);
-            }}
-            disabled={!config.api_key}
-            title="Send a live test email"
-          >
-            <Send size={13} />
-            <span>Test Email</span>
-          </button>
+            <div className="meta-account-footer-row">
+              <span className="meta-id-pill">
+                Sender: <strong>{config.from_email || 'Not configured'}</strong>
+              </span>
+              <span className="meta-connection-status">
+                <span className="meta-status-dot is-connected" />
+                Connected
+              </span>
+            </div>
+          </>
+        ) : (
+          <div className="meta-disconnected-row">
+            <div className="meta-account-identity">
+              <div className="meta-brand-tile muted">
+                <Mail size={22} />
+              </div>
+              <div className="meta-account-details">
+                <span className="meta-account-name">Connect Resend Email</span>
+              </div>
+            </div>
 
-          {config.is_connected && (
             <button
               type="button"
-              className="btn-email-danger"
-              onClick={handleDisconnect}
-              title="Disconnect Resend service"
+              className="btn-meta-facebook-connect"
+              onClick={() => {
+                if (apiKeyInputRef.current) {
+                  apiKeyInputRef.current.focus();
+                }
+              }}
             >
-              <Unlink size={13} />
-              <span>Disconnect</span>
+              <Key size={14} />
+              <span>Enter API Key</span>
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* SECTION 2: CREDENTIALS & SENDER CONFIGURATION */}
-      <div className="email-panel-card">
-        <div className="email-panel-header">
-          <div className="email-panel-header-left">
-            <span className="email-panel-title">API Credentials & Sender Profile</span>
+      <div className="meta-panel-card">
+        <div className="meta-panel-header">
+          <div className="meta-panel-header-left">
+            <span className="meta-panel-title">API Credentials & Sender Profile</span>
           </div>
           <a
             href="https://resend.com/api-keys"
             target="_blank"
             rel="noreferrer"
-            className="email-docs-link"
+            className="btn-meta-clean"
+            style={{ height: '30px', padding: '0 10px', fontSize: '12px', gap: '5px' }}
           >
             <span>Get Resend API Key</span>
             <ExternalLink size={12} />
           </a>
         </div>
 
-        <table className="email-kv-table">
-          <tbody>
-            {/* Row 1: Resend API Key */}
-            <tr className="email-kv-row">
-              <td className="email-kv-key-col">
-                <span className="email-kv-label">
-                  Resend API Key <span style={{ color: '#ef4444' }}>*</span>
-                </span>
-              </td>
-              <td className="email-kv-val-col">
-                <div className="email-kv-input-wrapper">
-                  <input
-                    type={showKey ? 'text' : 'password'}
-                    className="email-kv-input"
-                    placeholder="re_123456789_abcdef..."
-                    value={config.api_key}
-                    onChange={(e) => handleApiKeyChange(e.target.value)}
-                    style={{ fontFamily: showKey ? 'inherit' : 'monospace', paddingRight: '40px' }}
-                  />
-                  <button
-                    type="button"
-                    className="email-kv-icon-btn"
-                    onClick={() => setShowKey(!showKey)}
-                    title={showKey ? 'Hide key' : 'Show key'}
-                  >
-                    {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-              </td>
-            </tr>
-
-            {/* Row 2: From Name */}
-            <tr className="email-kv-row">
-              <td className="email-kv-key-col">
-                <span className="email-kv-label">From Name</span>
-              </td>
-              <td className="email-kv-val-col">
-                <input
-                  type="text"
-                  className="email-kv-input"
-                  placeholder="e.g. SimpleCRM or Pranav Patil"
-                  value={config.from_name}
-                  onChange={(e) => setConfig({ ...config, from_name: e.target.value })}
-                />
-              </td>
-            </tr>
-
-            {/* Row 3: From Email Address */}
-            <tr className="email-kv-row">
-              <td className="email-kv-key-col">
-                <span className="email-kv-label">From Email Address</span>
-              </td>
-              <td className="email-kv-val-col">
-                <input
-                  type="email"
-                  className="email-kv-input"
-                  placeholder="e.g. notifications@yourdomain.com"
-                  value={config.from_email}
-                  onChange={(e) => setConfig({ ...config, from_email: e.target.value })}
-                />
-                {discoveredDomains.length > 0 && (
-                  <div className="email-verified-domains-row">
-                    <span className="email-verified-domains-label">Verified domains:</span>
-                    <div className="email-verified-domains-scroll">
-                      {discoveredDomains.map((d) => {
-                        const domainName = typeof d === 'string' ? d : d.name;
-                        const emailOpt = `notifications@${domainName}`;
-                        const isSelected = config.from_email === emailOpt || config.from_email?.endsWith(`@${domainName}`);
-                        return (
-                          <button
-                            key={domainName}
-                            type="button"
-                            className={`email-domain-pill ${isSelected ? 'active' : ''}`}
-                            onClick={() => setConfig(prev => ({ ...prev, from_email: emailOpt }))}
-                            title={`Select ${emailOpt}`}
-                          >
-                            {isSelected && <Check size={11} strokeWidth={2.5} />}
-                            <span>{domainName}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
+        <div style={{ padding: '8px 24px 20px 24px' }}>
+          <table className="email-kv-table">
+            <tbody>
+              {/* Row 1: Resend API Key */}
+              <tr className="email-kv-row">
+                <td className="email-kv-key-col">
+                  <span className="email-kv-label">
+                    Resend API Key <span style={{ color: '#ef4444' }}>*</span>
+                  </span>
+                </td>
+                <td className="email-kv-val-col">
+                  <div className="email-kv-input-wrapper">
+                    <input
+                      ref={apiKeyInputRef}
+                      type={showKey ? 'text' : 'password'}
+                      className="email-kv-input"
+                      placeholder="re_123456789_abcdef..."
+                      value={config.api_key}
+                      onChange={(e) => handleApiKeyChange(e.target.value)}
+                      style={{ fontFamily: showKey ? 'inherit' : 'monospace', paddingRight: '40px' }}
+                    />
+                    <button
+                      type="button"
+                      className="email-kv-icon-btn"
+                      onClick={() => setShowKey(!showKey)}
+                      title={showKey ? 'Hide key' : 'Show key'}
+                    >
+                      {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                   </div>
-                )}
-              </td>
-            </tr>
+                </td>
+              </tr>
 
-            {/* Row 4: Reply-To Email */}
-            <tr className="email-kv-row">
-              <td className="email-kv-key-col">
-                <span className="email-kv-label">Reply-To Email</span>
-              </td>
-              <td className="email-kv-val-col">
-                <input
-                  type="email"
-                  className="email-kv-input"
-                  placeholder="e.g. sales@yourcompany.com or support@yourcompany.com"
-                  value={config.reply_to}
-                  onChange={(e) => setConfig({ ...config, reply_to: e.target.value })}
-                />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+              {/* Row 2: From Name */}
+              <tr className="email-kv-row">
+                <td className="email-kv-key-col">
+                  <span className="email-kv-label">From Name</span>
+                </td>
+                <td className="email-kv-val-col">
+                  <input
+                    type="text"
+                    className="email-kv-input"
+                    placeholder="e.g. SimpleCRM or Pranav Patil"
+                    value={config.from_name}
+                    onChange={(e) => setConfig({ ...config, from_name: e.target.value })}
+                  />
+                </td>
+              </tr>
 
-        {isDirty && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #f1f5f9', animation: 'emailFadeIn 0.2s ease' }}>
-            <button
-              type="button"
-              className="btn-email-primary"
-              onClick={() => handleSaveSettings()}
-              disabled={isSaving}
-            >
-              <Check size={14} strokeWidth={2.5} />
-              <span>{isSaving ? 'Saving...' : 'Save Settings'}</span>
-            </button>
-          </div>
-        )}
+              {/* Row 3: From Email Address */}
+              <tr className="email-kv-row">
+                <td className="email-kv-key-col">
+                  <span className="email-kv-label">From Email Address</span>
+                </td>
+                <td className="email-kv-val-col">
+                  <input
+                    type="email"
+                    className="email-kv-input"
+                    placeholder="e.g. notifications@yourdomain.com"
+                    value={config.from_email}
+                    onChange={(e) => setConfig({ ...config, from_email: e.target.value })}
+                  />
+                  {discoveredDomains.length > 0 && (
+                    <div className="email-verified-domains-row">
+                      <span className="email-verified-domains-label">Verified domains:</span>
+                      <div className="email-verified-domains-scroll">
+                        {discoveredDomains.map((d) => {
+                          const domainName = typeof d === 'string' ? d : d.name;
+                          const emailOpt = `notifications@${domainName}`;
+                          const isSelected = config.from_email === emailOpt || config.from_email?.endsWith(`@${domainName}`);
+                          return (
+                            <button
+                              key={domainName}
+                              type="button"
+                              className={`email-domain-pill ${isSelected ? 'active' : ''}`}
+                              onClick={() => setConfig(prev => ({ ...prev, from_email: emailOpt }))}
+                              title={`Select ${emailOpt}`}
+                            >
+                              {isSelected && <Check size={11} strokeWidth={2.5} />}
+                              <span>{domainName}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </td>
+              </tr>
+
+              {/* Row 4: Reply-To Email */}
+              <tr className="email-kv-row">
+                <td className="email-kv-key-col">
+                  <span className="email-kv-label">Reply-To Email</span>
+                </td>
+                <td className="email-kv-val-col">
+                  <input
+                    type="email"
+                    className="email-kv-input"
+                    placeholder="e.g. sales@yourcompany.com or support@yourcompany.com"
+                    value={config.reply_to}
+                    onChange={(e) => setConfig({ ...config, reply_to: e.target.value })}
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          {isDirty && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #f1f5f9' }}>
+              <button
+                type="button"
+                className="btn-meta-add-form"
+                onClick={() => handleSaveSettings()}
+                disabled={isSaving}
+                style={{ height: '34px', padding: '0 16px' }}
+              >
+                <Check size={14} strokeWidth={2.5} />
+                <span>{isSaving ? 'Saving...' : 'Save Settings'}</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* SECTION 3: EMAIL TEMPLATES */}
-      <div className="email-panel-card">
-        <div className="email-panel-header">
-          <div className="email-panel-header-left">
-            <span className="email-panel-title">Automated Email Templates</span>
-            <span className="email-badge-count">{templates.length}</span>
+      <div className="meta-panel-card">
+        <div className="meta-panel-header">
+          <div className="meta-panel-header-left">
+            <span className="meta-panel-title">Automated Email Templates</span>
+            <span className="meta-count-badge">
+              {templates.length} {templates.length === 1 ? 'template' : 'templates'}
+            </span>
           </div>
           <button
             type="button"
-            className="btn-email-primary"
+            className="btn-meta-add-form"
             onClick={() => {
               setEditingTemplate({
                 id: null,
@@ -681,47 +734,73 @@ export default function EmailIntegrationView({ currentUser }) {
               setIsTemplateModalOpen(true);
             }}
           >
-            <Plus size={14} strokeWidth={2.5} />
-            <span>Create Template</span>
+            <Plus size={14} /> Create Template
           </button>
         </div>
 
         {templates.length === 0 ? (
-          <div className="email-empty-state">
-            <Mail size={32} strokeWidth={1.2} />
-            <p>No email templates created yet. Create one to attach to pipeline stages.</p>
+          <div className="meta-forms-empty-state">
+            <Mail size={24} color="#94a3b8" />
+            <p className="meta-empty-title">No email templates created yet</p>
+            <button
+              type="button"
+              className="btn-meta-clean"
+              onClick={() => {
+                setEditingTemplate({
+                  id: null,
+                  name: '',
+                  subject: '',
+                  body_text: 'Hi {{name}},\n\nThank you for connecting with us. We have received your inquiry and our team is reviewing your requirements.\n\nBest regards,\nThe Team'
+                });
+                setTemplateTab('write');
+                setIsTemplateModalOpen(true);
+              }}
+              style={{ marginTop: '8px' }}
+            >
+              <Plus size={13} /> Create Template
+            </button>
           </div>
         ) : (
-          <div className="email-template-list">
+          <div className="meta-forms-table">
             {templates.map(tmpl => {
-              const strippedBody = htmlToPlainText(tmpl.body_html || '').replace(/\s+/g, ' ').trim();
               return (
-                <div key={tmpl.id} className="email-template-item">
-                  <div className="email-template-identity">
-                    <div className="email-template-icon-tile">
-                      <Mail size={16} />
+                <div key={tmpl.id} className="meta-form-row-item">
+                  <div className="meta-form-identity">
+                    <div className="meta-doc-tile">
+                      <Mail size={16} color="#475569" />
                     </div>
-                    <div className="email-template-info">
-                      <div className="email-template-header-row">
-                        <span className="email-template-name">{tmpl.name}</span>
+                    <div className="meta-form-info-col">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span className="meta-form-title">{tmpl.name}</span>
                         {tmpl.subject && (
-                          <span className="email-template-subject-pill" title={tmpl.subject}>
-                            Subject: {tmpl.subject}
-                          </span>
+                          <span className="meta-id-tag">Subject: {tmpl.subject}</span>
                         )}
                       </div>
-                      {strippedBody && (
-                        <div className="email-template-snippet" title={strippedBody}>
-                          {strippedBody}
-                        </div>
-                      )}
                     </div>
                   </div>
 
-                  <div className="email-template-actions">
+                  <div className="meta-form-actions-col">
                     <button
                       type="button"
-                      className="btn-email-row-action"
+                      className="btn-meta-clean btn-meta-icon-only"
+                      onClick={() => {
+                        setEditingTemplate({
+                          id: tmpl.id,
+                          name: tmpl.name,
+                          subject: tmpl.subject,
+                          body_text: htmlToPlainText(tmpl.body_html || '')
+                        });
+                        setTemplateTab('preview');
+                        setIsTemplateModalOpen(true);
+                      }}
+                      data-tooltip="Preview"
+                      aria-label={`Preview ${tmpl.name}`}
+                    >
+                      <Eye size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-meta-clean btn-meta-icon-only"
                       onClick={() => {
                         setEditingTemplate({
                           id: tmpl.id,
@@ -732,19 +811,20 @@ export default function EmailIntegrationView({ currentUser }) {
                         setTemplateTab('write');
                         setIsTemplateModalOpen(true);
                       }}
-                      title="Edit template"
+                      data-tooltip="Edit template"
                       aria-label={`Edit ${tmpl.name}`}
                     >
                       <Edit2 size={14} />
                     </button>
                     <button
                       type="button"
-                      className="btn-email-row-action danger"
+                      className="btn-meta-icon-trash"
                       onClick={() => handleDeleteTemplate(tmpl.id, tmpl.name)}
-                      title="Delete template"
+                      data-tooltip="Delete template"
+                      data-tooltip-pos="right-edge"
                       aria-label={`Delete ${tmpl.name}`}
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={15} />
                     </button>
                   </div>
                 </div>

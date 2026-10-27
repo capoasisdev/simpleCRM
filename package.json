@@ -11,7 +11,7 @@
     "cap:sync": "npx cap sync android",
     "cap:open": "npx cap open android",
     "cap:run": "npx cap run android",
-    "build:android": "npm run build && npx cap sync android && rm -f android/app/src/main/assets/public/simplecrm.apk"
+    "build:android": "npm run build && rm -f dist/simplecrm.apk && npx cap sync android && rm -f android/app/src/main/assets/public/simplecrm.apk"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",

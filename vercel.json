@@ -5,6 +5,10 @@
       "destination": "https://api.resend.com/:path*"
     },
     {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

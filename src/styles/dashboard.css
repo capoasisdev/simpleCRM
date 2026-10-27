@@ -1817,4 +1817,202 @@
   background-color: #334155;
 }
 
+/* ========================================================
+   Meta Ad Budget Card (Dashboard & Settings)
+   Strictly aligned with CRM Design Rules: 8px corners, monochrome
+   ======================================================== */
+.meta-budget-card {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Hero Remaining Funds Box */
+.meta-budget-hero-box {
+  background-color: var(--color-gray-50);
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-standard);
+  padding: 14px 16px;
+  margin-bottom: var(--spacing-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.meta-budget-hero-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta-budget-hero-label {
+  font-size: 11.5px;
+  font-weight: var(--font-weight-regular);
+  color: var(--text-secondary);
+}
+
+.meta-budget-hero-val {
+  font-size: 22px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: -0.01em;
+  color: var(--color-black);
+  line-height: 1.2;
+}
+
+.btn-meta-topup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--color-black);
+  color: var(--color-white);
+  font-size: 12.5px;
+  font-weight: var(--font-weight-medium);
+  padding: 8px 14px;
+  border-radius: var(--radius-standard);
+  text-decoration: none;
+  border: 1px solid var(--color-black);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.btn-meta-topup:hover {
+  background-color: var(--btn-primary-hover);
+  color: var(--color-white);
+}
+
+/* Tooltips */
+.dashboard-main-section [data-tooltip] {
+  position: relative;
+}
+
+.dashboard-main-section [data-tooltip]::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%) translateY(3px);
+  border-width: 4px;
+  border-style: solid;
+  border-color: #0f172a transparent transparent transparent;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 101;
+}
+
+.dashboard-main-section [data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(3px);
+  background: #0f172a;
+  color: #ffffff;
+  padding: 5px 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 100;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+.dashboard-main-section [data-tooltip]:hover::before,
+.dashboard-main-section [data-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Card footer & links */
+.meta-budget-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--color-gray-100);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.meta-budget-card-links {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.meta-budget-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.meta-budget-link:hover {
+  color: var(--color-black);
+}
+
+/* Header Meta Budget Chip - Matches header-user-name-btn */
+.header-meta-budget-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-standard); /* 8px standard, strictly not a pill */
+  border: 1px solid var(--color-gray-200);
+  background-color: var(--color-white);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.header-meta-budget-chip:hover {
+  background-color: var(--color-gray-50);
+  border-color: var(--color-gray-400);
+}
+
+.header-meta-budget-chip .chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-color: var(--color-black);
+}
+
+.header-meta-budget-chip.exhausted .chip-dot {
+  background-color: #ef4444;
+}
+
+.header-meta-budget-chip.warning .chip-dot {
+  background-color: #f59e0b;
+}
+
+.header-meta-budget-chip.active .chip-dot {
+  background-color: #10b981;
+}
+
+@media (max-width: 768px) {
+  .header-meta-budget-chip .chip-label-prefix {
+    display: none;
+  }
+}
+
+
 
