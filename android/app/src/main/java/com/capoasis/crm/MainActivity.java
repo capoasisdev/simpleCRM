@@ -34,6 +34,7 @@ public class MainActivity extends BridgeActivity {
                 );
             }
             getBridge().getWebView().getSettings().setSaveFormData(false);
+            getBridge().getWebView().clearCache(true);
 
             View parent = (View) getBridge().getWebView().getParent();
             if (parent != null) {

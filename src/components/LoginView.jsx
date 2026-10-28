@@ -155,6 +155,10 @@ export default function LoginView({ onLoginSuccess }) {
                 {errorMessage}
               </div>
             )}
+
+            <div style={{ textAlign: 'center', marginTop: '32px', fontSize: '11px', color: '#94a3b8', letterSpacing: '0.04em', userSelect: 'none' }}>
+              simplecrm v1.0.11 (Build 12)
+            </div>
           </div>
         </div>
       </section>
