@@ -86,10 +86,10 @@ export default function LoginView({ onLoginSuccess }) {
                   id="login-identity-input"
                   name="account_token_id"
                   type="text"
-                  inputMode="email"
+                  inputMode="text"
                   className="input-field"
                   placeholder="name@company.com"
-                  autoComplete="nope"
+                  autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck="false"
@@ -116,7 +116,7 @@ export default function LoginView({ onLoginSuccess }) {
                   maxLength={4}
                   className={`input-field password-input ${!showPin ? 'pin-masked' : ''}`}
                   placeholder="Enter 4-digit PIN"
-                  autoComplete="nope"
+                  autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck="false"
