@@ -77,9 +77,9 @@ export default function LoginView({ onLoginSuccess }) {
             <input type="password" name="fake_password_sink" style={{ display: 'none' }} tabIndex={-1} autoComplete="off" />
 
             <div className="form-group">
-              <label htmlFor="login-identity-input" className="form-label">
+              <span className="form-label">
                 WORK EMAIL
-              </label>
+              </span>
               <div className="input-wrapper">
                 <input
                   ref={emailRef}
@@ -89,7 +89,7 @@ export default function LoginView({ onLoginSuccess }) {
                   inputMode="email"
                   className="input-field"
                   placeholder="name@company.com"
-                  autoComplete="one-time-code"
+                  autoComplete="nope"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck="false"
@@ -102,9 +102,9 @@ export default function LoginView({ onLoginSuccess }) {
             </div>
 
             <div className="form-group">
-              <label htmlFor="login-passcode-input" className="form-label">
+              <span className="form-label">
                 4-DIGIT ACCESS PIN
-              </label>
+              </span>
               <div className="input-wrapper">
                 <input
                   ref={pinRef}
@@ -116,7 +116,7 @@ export default function LoginView({ onLoginSuccess }) {
                   maxLength={4}
                   className={`input-field password-input ${!showPin ? 'pin-masked' : ''}`}
                   placeholder="Enter 4-digit PIN"
-                  autoComplete="one-time-code"
+                  autoComplete="nope"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck="false"
