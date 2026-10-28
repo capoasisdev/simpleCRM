@@ -157,7 +157,7 @@ export default function LoginView({ onLoginSuccess }) {
             )}
 
             <div style={{ textAlign: 'center', marginTop: '32px', fontSize: '11px', color: '#94a3b8', letterSpacing: '0.04em', userSelect: 'none' }}>
-              simplecrm v1.0.12 (Build 13)
+              simplecrm v1.0.13 (Build 14)
             </div>
           </div>
         </div>

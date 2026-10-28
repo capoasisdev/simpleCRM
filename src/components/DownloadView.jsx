@@ -34,7 +34,7 @@ export default function DownloadView({ onGoToWeb }) {
         <div className="download-meta">
           <span>APK File</span>
           <span className="download-meta-dot">·</span>
-          <span>v1.0.12</span>
+          <span>v1.0.13</span>
           <span className="download-meta-dot">·</span>
           <span>Android 8.0+</span>
         </div>
