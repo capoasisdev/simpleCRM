@@ -78,17 +78,17 @@ export default function LoginView({ onLoginSuccess }) {
 
             <div className="form-group">
               <span className="form-label">
-                WORK EMAIL
+                WORK ACCOUNT ID
               </span>
               <div className="input-wrapper">
                 <input
                   ref={emailRef}
-                  id="login-identity-input"
-                  name="account_token_id"
+                  id="crm-account-field"
+                  name="crm_account_token"
                   type="text"
                   inputMode="text"
                   className="input-field"
-                  placeholder="name@company.com"
+                  placeholder="Enter work account"
                   autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="none"
@@ -157,7 +157,7 @@ export default function LoginView({ onLoginSuccess }) {
             )}
 
             <div style={{ textAlign: 'center', marginTop: '32px', fontSize: '11px', color: '#94a3b8', letterSpacing: '0.04em', userSelect: 'none' }}>
-              simplecrm v1.0.11 (Build 12)
+              simplecrm v1.0.12 (Build 13)
             </div>
           </div>
         </div>
