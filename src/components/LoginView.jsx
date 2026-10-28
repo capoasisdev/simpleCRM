@@ -72,6 +72,10 @@ export default function LoginView({ onLoginSuccess }) {
           <h1 className="brand-heading">simplecrm</h1>
 
           <div className="login-form">
+            {/* Dummy hidden inputs to absorb browser autofill heuristic scanners */}
+            <input type="text" name="fake_username_sink" style={{ display: 'none' }} tabIndex={-1} autoComplete="off" />
+            <input type="password" name="fake_password_sink" style={{ display: 'none' }} tabIndex={-1} autoComplete="off" />
+
             <div className="form-group">
               <label htmlFor="login-identity-input" className="form-label">
                 WORK EMAIL
@@ -80,12 +84,12 @@ export default function LoginView({ onLoginSuccess }) {
                 <input
                   ref={emailRef}
                   id="login-identity-input"
-                  name="login_account_id"
+                  name="account_token_id"
                   type="text"
                   inputMode="email"
                   className="input-field"
-                  placeholder="Enter your work email"
-                  autoComplete="off"
+                  placeholder="name@company.com"
+                  autoComplete="one-time-code"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck="false"
@@ -105,14 +109,14 @@ export default function LoginView({ onLoginSuccess }) {
                 <input
                   ref={pinRef}
                   id="login-passcode-input"
-                  name="login_access_code"
+                  name="passcode_token"
                   type="text"
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={4}
                   className={`input-field password-input ${!showPin ? 'pin-masked' : ''}`}
                   placeholder="Enter 4-digit PIN"
-                  autoComplete="off"
+                  autoComplete="one-time-code"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck="false"
