@@ -89,6 +89,9 @@ export default function LoginView({ onLoginSuccess }) {
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck="false"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
                   onKeyDown={handleKeyDown}
                 />
               </div>
@@ -103,13 +106,19 @@ export default function LoginView({ onLoginSuccess }) {
                   ref={pinRef}
                   id="login-passcode-input"
                   name="login_access_code"
-                  type={showPin ? 'text' : 'password'}
+                  type="text"
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={4}
-                  className="input-field password-input"
+                  className={`input-field password-input ${!showPin ? 'pin-masked' : ''}`}
                   placeholder="Enter 4-digit PIN"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck="false"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
                   onKeyDown={handleKeyDown}
                 />
                 <button

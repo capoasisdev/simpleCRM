@@ -272,7 +272,7 @@ export default function BackupsView({ currentUser }) {
 
         {/* Minimal App Version indicator */}
         <div className="backups-mobile-version-tag">
-          simplecrm v1.0.6 (Build 7)
+          simplecrm v1.0.7 (Build 8)
         </div>
       </div>
 

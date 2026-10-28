@@ -90,6 +90,10 @@
   padding-right: 36px;
 }
 
+.pin-masked {
+  -webkit-text-security: disc;
+}
+
 .password-toggle-btn {
   position: absolute;
   right: 0;
