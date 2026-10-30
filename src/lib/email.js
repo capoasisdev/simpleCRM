@@ -429,6 +429,19 @@ export function renderEmailVariables(templateText, lead = {}) {
     .replace(/\{\{stage\}\}/gi, stage);
 }
 
+let lastDispatchTime = 0;
+const MIN_DISPATCH_INTERVAL_MS = 350;
+
+async function throttleEmailDispatch() {
+  const now = Date.now();
+  const timeSinceLast = now - lastDispatchTime;
+  if (timeSinceLast < MIN_DISPATCH_INTERVAL_MS) {
+    const delay = MIN_DISPATCH_INTERVAL_MS - timeSinceLast;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  lastDispatchTime = Date.now();
+}
+
 /**
  * Send an email to a lead via Resend and log the result
  */
@@ -476,6 +489,8 @@ export async function sendEmailViaResend({
   let status = 'sent';
   let errorMessage = null;
 
+  await throttleEmailDispatch();
+
   try {
     const res = await fetch(`${RESEND_API_BASE}/emails`, {
       method: 'POST',
@@ -492,14 +507,22 @@ export async function sendEmailViaResend({
       })
     });
 
-    const resJson = await res.json();
+    const resJson = await res.json().catch(() => null);
+
     if (!res.ok) {
       status = 'failed';
-      errorMessage = resJson.message || `Resend Error (${res.status})`;
+      const detailMsg = resJson?.message || resJson?.error || res.statusText || 'Unknown error';
+      const errorName = resJson?.name ? ` [${resJson.name}]` : '';
+      errorMessage = `[Resend HTTP ${res.status}]${errorName} ${detailMsg}`;
+      console.error(`[Resend Email Error] To: ${to} | Status: ${res.status} | Details:`, resJson);
+    } else {
+      console.log(`[Resend Email Sent] To: ${to} | ID: ${resJson?.id}`);
     }
   } catch (err) {
     status = 'failed';
-    errorMessage = err.message || 'Network failure sending email';
+    const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    errorMessage = `[Network Failure] Endpoint: ${RESEND_API_BASE}/emails | Online: ${isOnline} | Error: ${err.message || 'Failed to fetch'}`;
+    console.error(`[Resend Network Exception] To: ${to} | Endpoint: ${RESEND_API_BASE}/emails | Error:`, err);
   }
 
   // Record to email_logs

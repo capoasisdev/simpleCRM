@@ -117,6 +117,27 @@
   box-sizing: border-box;
 }
 
+/* Scroll-driven Reveal State */
+.analytics-reveal-card {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.analytics-reveal-card.revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analytics-reveal-card {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
 .analytics-card-header {
   display: flex;
   align-items: flex-start;
@@ -364,6 +385,70 @@
   font-weight: 600;
 }
 
+.tooltip-metrics-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.tooltip-row-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #ffffff;
+}
+
+.tooltip-row-item strong {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.tooltip-marker.leads {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #ffffff;
+}
+
+.tooltip-marker.spend {
+  width: 8px;
+  height: 2px;
+  background-color: #60a5fa;
+  border-radius: 1px;
+}
+
+/* Dual-line trend legend */
+.analytics-trend-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.analytics-trend-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.analytics-trend-legend-dot.leads {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #0f172a;
+}
+
+.analytics-trend-legend-line.spend {
+  width: 14px;
+  height: 2px;
+  background-color: #3b82f6;
+  border-radius: 1px;
+}
+
 /* Vertical Column Bar Chart (Days of the week) */
 .analytics-columns-chart-container {
   display: flex;
@@ -479,7 +564,7 @@
   width: 100%;
   background-color: #0f172a;
   border-radius: 3px 3px 0 0;
-  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.15s ease;
+  transition: background-color 0.15s ease;
 }
 
 .analytics-bar-day-label {
@@ -546,3 +631,368 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Analytics Subtab Switcher */
+.analytics-subtab-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #f1f5f9;
+  padding: 4px;
+  border-radius: 8px;
+  width: fit-content;
+  user-select: none;
+}
+
+.analytics-subtab-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.analytics-subtab-pill:hover {
+  color: #0f172a;
+}
+
+.analytics-subtab-pill.active {
+  background-color: #ffffff;
+  color: #0f172a;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.analytics-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #10b981;
+}
+
+.analytics-live-dot.warning {
+  background-color: #f59e0b;
+}
+
+.analytics-live-dot.exhausted {
+  background-color: #ef4444;
+}
+
+.analytics-card-link-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+
+.analytics-card-link-icon:hover {
+  color: #0f172a;
+  border-color: #cbd5e1;
+  background-color: #f8fafc;
+}
+
+/* Ad Budget Runway Visual Card */
+.analytics-runway-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-top: 6px;
+}
+
+.analytics-runway-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.analytics-runway-bar-track {
+  width: 100%;
+  height: 8px;
+  background-color: #f1f5f9;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+}
+
+.analytics-runway-bar-fill {
+  height: 100%;
+  background-color: #0f172a;
+  border-radius: 4px;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.analytics-runway-bar-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.analytics-runway-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.analytics-runway-stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analytics-runway-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.analytics-runway-stat-val {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+/* Minimalist Conversion Funnel */
+.analytics-funnel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.analytics-funnel-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.analytics-funnel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.analytics-funnel-label {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.analytics-funnel-metric {
+  font-weight: 600;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.analytics-funnel-metric-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+  margin-left: 6px;
+}
+
+.analytics-funnel-track {
+  width: 100%;
+  height: 8px;
+  background-color: #f1f5f9;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.analytics-funnel-fill {
+  height: 100%;
+  border-radius: 4px;
+  background-color: #0f172a;
+  transition: width 0.4s ease;
+}
+
+@media (max-width: 768px) {
+  .analytics-runway-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-funnel-stage-name {
+    width: 100px;
+    font-size: 12px;
+  }
+}
+
+/* Dedicated Radial Gauge Bottom Footer (Matches .analytics-square-legend) */
+.analytics-gauge-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #f8fafc;
+  margin-top: auto;
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+  user-select: none;
+}
+
+.analytics-gauge-account-name {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.analytics-gauge-account-id {
+  color: #94a3b8;
+  font-family: inherit;
+}
+
+.analytics-gauge-dot {
+  color: #cbd5e1;
+  font-size: 14px;
+}
+
+.analytics-gauge-spent {
+  color: #475569;
+}
+
+.analytics-gauge-spent strong {
+  color: #0f172a;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Clean Rep Performance Table (Seamlessly matches Analytics Monochrome aesthetic)
+   ========================================================================== */
+
+.analytics-leaderboard-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #eef2f6;
+  border-radius: 6px;
+  background-color: #ffffff;
+}
+
+.analytics-leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.analytics-leaderboard-table th {
+  padding: 12px 18px;
+  background-color: #fafbfc;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #64748b;
+  border-bottom: 1px solid #eef2f6;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+.analytics-leaderboard-row {
+  border-bottom: 1px solid #f1f5f9;
+  transition: background-color 0.12s ease;
+}
+
+.analytics-leaderboard-row:last-child {
+  border-bottom: none;
+}
+
+.analytics-leaderboard-row:hover {
+  background-color: #f8fafc;
+}
+
+.analytics-leaderboard-table td {
+  padding: 14px 18px;
+  color: #0f172a;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.analytics-rank-num {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.analytics-rep-cell {
+  display: flex;
+  align-items: center;
+}
+
+.analytics-rep-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.analytics-cell-num {
+  font-size: 13px;
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+}
+
+.analytics-cell-num.bold {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+/* ==========================================================================
+   Staggered Column Cascade Animation for Rep Performance
+   ========================================================================== */
+
+@keyframes repColCascadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.analytics-leaderboard-table th.anim-col,
+.analytics-leaderboard-table td.anim-col {
+  opacity: 0;
+  will-change: opacity, transform;
+}
+
+.analytics-leaderboard-table.is-in-view th.anim-col,
+.analytics-leaderboard-table.is-in-view td.anim-col {
+  animation: repColCascadeIn 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: calc(var(--col-idx, 0) * 80ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analytics-leaderboard-table th.anim-col,
+  .analytics-leaderboard-table td.anim-col {
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+  }
+}
+
+
+
+

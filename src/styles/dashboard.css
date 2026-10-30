@@ -1077,7 +1077,7 @@
     -webkit-backdrop-filter: blur(20px);
     border-top: 1px solid var(--color-gray-200);
     z-index: 1000;
-    box-shadow: 0 -3px 12px rgba(0, 0, 0, 0.04);
+    box-shadow: 0 -3px 12px rgba(0, 0, 0, 0.2);
   }
 
   .mobile-nav-cell {
@@ -2009,7 +2009,7 @@
 }
 
 @media (max-width: 768px) {
-  .header-meta-budget-chip .chip-label-prefix {
+  .header-meta-budget-chip {
     display: none;
   }
 }

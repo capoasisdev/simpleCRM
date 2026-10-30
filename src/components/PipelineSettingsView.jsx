@@ -16,6 +16,7 @@ import {
   GitFork,
   FileText,
   CheckCircle2,
+  XCircle,
   ArrowDownLeft,
   Unlink,
   Sliders,
@@ -36,6 +37,7 @@ import { fetchEmailTemplates } from '../lib/email';
 import { getPipelineFields, DEFAULT_PIPELINE_FIELDS, labelToKey, extractPipelineFormQuestions } from '../lib/pipelineFields';
 import Skeleton from './common/Skeleton';
 import CustomSelect from './common/CustomSelect';
+import { META_CAPI_EVENTS } from '../lib/metaCapi';
 import '../styles/pipeline.css';
 
 
@@ -375,7 +377,9 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     }).catch(() => { });
 
     // Initialize pipeline-scoped distribution
-    const defaultRoster = (usersList.length > 0 ? usersList : [
+    // All users in the company are strictly OPT-IN per pipeline.
+    // A user is ONLY active if explicitly saved with enabled: true in user_rules.
+    const allUsersRoster = (usersList.length > 0 ? usersList : [
       { id: '1', name: 'Pranav Patil', email: 'pranav.p@capoasis.com', role: 'admin' },
       { id: '2', name: 'Nikita Sonawane', email: 'nikita.s@salado.in', role: 'member' }
     ]).map(u => ({
@@ -383,31 +387,50 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       name: u.name,
       email: u.email,
       role: u.role,
-      enabled: true,
-      weight: 50
+      enabled: false,
+      weight: 0
     }));
 
     const pipeDist = pipe.lead_distribution;
     let finalMode = 'round_robin';
-    let finalAssignee = defaultRoster[0]?.name || 'Pranav Patil';
-    let finalRules = defaultRoster;
+    let finalAssignee = allUsersRoster[0]?.name || 'Nikita Sonawane';
+    let finalRules = allUsersRoster;
 
     if (pipeDist && typeof pipeDist === 'object') {
       finalMode = pipeDist.mode || 'round_robin';
       finalAssignee = pipeDist.default_assignee || finalAssignee;
-      if (Array.isArray(pipeDist.user_rules) && pipeDist.user_rules.length > 0) {
-        finalRules = defaultRoster.map(u => {
-          const existing = pipeDist.user_rules.find(r => r.id === u.id || r.email === u.email || r.name === u.name);
-          return existing ? { ...u, enabled: existing.enabled !== false, weight: existing.weight ?? 50 } : u;
+      const savedRules = Array.isArray(pipeDist.user_rules) ? pipeDist.user_rules : [];
+
+      if (savedRules.length > 0) {
+        finalRules = allUsersRoster.map(u => {
+          const existing = savedRules.find(r => r.id === u.id || r.email === u.email || r.name === u.name);
+          if (existing) {
+            return {
+              ...u,
+              enabled: existing.enabled === true,
+              weight: existing.weight ?? (existing.enabled === true ? 50 : 0)
+            };
+          }
+          // User was never added to this pipeline -> strictly disabled
+          return { ...u, enabled: false, weight: 0 };
         });
       }
     } else if (globalRoutingConfig) {
       finalMode = globalRoutingConfig.mode || 'round_robin';
       finalAssignee = globalRoutingConfig.default_assignee || finalAssignee;
-      if (Array.isArray(globalRoutingConfig.user_rules) && globalRoutingConfig.user_rules.length > 0) {
-        finalRules = defaultRoster.map(u => {
-          const existing = globalRoutingConfig.user_rules.find(r => r.id === u.id || r.email === u.email || r.name === u.name);
-          return existing ? { ...u, enabled: existing.enabled !== false, weight: existing.weight ?? 50 } : u;
+      const savedRules = Array.isArray(globalRoutingConfig.user_rules) ? globalRoutingConfig.user_rules : [];
+
+      if (savedRules.length > 0) {
+        finalRules = allUsersRoster.map(u => {
+          const existing = savedRules.find(r => r.id === u.id || r.email === u.email || r.name === u.name);
+          if (existing) {
+            return {
+              ...u,
+              enabled: existing.enabled === true,
+              weight: existing.weight ?? (existing.enabled === true ? 50 : 0)
+            };
+          }
+          return { ...u, enabled: false, weight: 0 };
         });
       }
     }
@@ -419,7 +442,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       const eq = Math.floor(100 / activeR.length);
       const rem = 100 - (eq * activeR.length);
       finalRules = finalRules.map(r => {
-        if (r.enabled === false) return r;
+        if (r.enabled === false) return { ...r, weight: 0 };
         const aIdx = activeR.findIndex(a => a.id === r.id);
         return { ...r, weight: eq + (aIdx === 0 ? rem : 0) };
       });
@@ -444,11 +467,13 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       const equalShare = Math.floor(100 / active.length);
       const remainder = 100 - (equalShare * active.length);
       updated = updated.map(r => {
-        if (r.enabled === false) return r;
+        if (r.enabled === false) return { ...r, weight: 0 };
         const activeIdx = active.findIndex(a => a.id === r.id);
         const w = equalShare + (activeIdx === 0 ? remainder : 0);
         return { ...r, weight: w };
       });
+    } else {
+      updated = updated.map(r => ({ ...r, weight: 0 }));
     }
     setDistRules(updated);
     saveDistributionPayload({ user_rules: updated });
@@ -696,6 +721,59 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     saveStageAutomations(updated);
   };
 
+  const handleToggleMetaCapiAutomation = (stageId, checked) => {
+    let exists = false;
+    let updated = stageAutomations.map(a => {
+      if (a.stage_id === stageId) {
+        exists = true;
+        const defaultEvt = a.meta_capi_event || 'QualifiedLead';
+        return { ...a, meta_capi_active: checked, meta_capi_event: defaultEvt };
+      }
+      return a;
+    });
+
+    if (!exists) {
+      updated.push({
+        stage_id: stageId,
+        is_active: false,
+        template_name: '',
+        email_active: false,
+        email_template_id: '',
+        meta_capi_active: checked,
+        meta_capi_event: 'QualifiedLead'
+      });
+    }
+
+    setStageAutomations(updated);
+    saveStageAutomations(updated);
+  };
+
+  const handleSelectMetaCapiEvent = (stageId, eventName) => {
+    let exists = false;
+    let updated = stageAutomations.map(a => {
+      if (a.stage_id === stageId) {
+        exists = true;
+        return { ...a, meta_capi_event: eventName };
+      }
+      return a;
+    });
+
+    if (!exists) {
+      updated.push({
+        stage_id: stageId,
+        is_active: false,
+        template_name: '',
+        email_active: false,
+        email_template_id: '',
+        meta_capi_active: true,
+        meta_capi_event: eventName
+      });
+    }
+
+    setStageAutomations(updated);
+    saveStageAutomations(updated);
+  };
+
   // Back to master list
   const handleBackToList = () => {
     setEditingPipelineId(null);
@@ -817,11 +895,11 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     if (!name || !name.trim()) return;
 
     const starterStages = [
-      { id: 'new', label: 'New Leads', order: 0, is_entry: true },
-      { id: 'contacted', label: 'Contacted', order: 1, is_entry: false },
-      { id: 'proposal', label: 'Proposal Sent', order: 2, is_entry: false },
-      { id: 'won', label: 'Won', order: 3, is_entry: false },
-      { id: 'lost', label: 'Lost', order: 4, is_entry: false }
+      { id: 'new', label: 'New Leads', order: 0, is_entry: true, is_won: false, is_lost: false },
+      { id: 'contacted', label: 'Contacted', order: 1, is_entry: false, is_won: false, is_lost: false },
+      { id: 'proposal', label: 'Proposal Sent', order: 2, is_entry: false, is_won: false, is_lost: false },
+      { id: 'won', label: 'Won', order: 3, is_entry: false, is_won: true, is_lost: false },
+      { id: 'lost', label: 'Lost', order: 4, is_entry: false, is_won: false, is_lost: true }
     ];
 
     try {
@@ -976,7 +1054,9 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         id: st.id,
         label: st.label,
         order: idx,
-        is_entry: Boolean(st.is_entry)
+        is_entry: Boolean(st.is_entry),
+        is_won: Boolean(st.is_won),
+        is_lost: Boolean(st.is_lost)
       }));
 
       const { error } = await supabase
@@ -1014,7 +1094,31 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   const handleSetEntryStage = (stageId) => {
     const updated = stages.map(st => ({
       ...st,
-      is_entry: st.id === stageId
+      is_entry: st.id === stageId,
+      is_won: st.id === stageId ? false : st.is_won,
+      is_lost: st.id === stageId ? false : st.is_lost
+    }));
+    setStages(updated);
+    saveStagesList(updated);
+  };
+
+  const handleSetWonStage = (stageId) => {
+    const updated = stages.map(st => ({
+      ...st,
+      is_won: st.id === stageId ? !st.is_won : false,
+      is_entry: st.id === stageId ? false : st.is_entry,
+      is_lost: st.id === stageId ? false : st.is_lost
+    }));
+    setStages(updated);
+    saveStagesList(updated);
+  };
+
+  const handleSetLostStage = (stageId) => {
+    const updated = stages.map(st => ({
+      ...st,
+      is_lost: st.id === stageId ? !st.is_lost : false,
+      is_entry: st.id === stageId ? false : st.is_entry,
+      is_won: st.id === stageId ? false : st.is_won
     }));
     setStages(updated);
     saveStagesList(updated);
@@ -1618,6 +1722,8 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                 </div>
                 {stages.map((st, idx) => {
                   const isEntry = Boolean(st.is_entry);
+                  const isWon = Boolean(st.is_won);
+                  const isLost = Boolean(st.is_lost);
 
                   return (
                     <div
@@ -1647,12 +1753,13 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                       </div>
 
                       <div className="pipeline-numbered-actions">
+                        {/* Entry Stage Trigger */}
                         {isEntry ? (
                           <span
                             className="btn-entry-icon active"
                             data-tooltip="Entry Stage: All new incoming leads land here"
                           >
-                            <ArrowDownLeft size={17} strokeWidth={2.25} />
+                            <ArrowDownLeft size={16} strokeWidth={2.25} />
                           </span>
                         ) : (
                           canEdit && (
@@ -1662,7 +1769,53 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                               onClick={() => handleSetEntryStage(st.id)}
                               data-tooltip="Set as Entry Stage for incoming leads"
                             >
-                              <ArrowDownLeft size={17} strokeWidth={2.25} />
+                              <ArrowDownLeft size={16} strokeWidth={2.25} />
+                            </button>
+                          )
+                        )}
+
+                        {/* Won Stage Trigger */}
+                        {isWon ? (
+                          <button
+                            type="button"
+                            className="btn-won-icon active"
+                            onClick={() => canEdit && handleSetWonStage(st.id)}
+                            data-tooltip="Won Stage: Converted deals land here (Click to unset)"
+                          >
+                            <CheckCircle2 size={16} strokeWidth={2.25} />
+                          </button>
+                        ) : (
+                          canEdit && (
+                            <button
+                              type="button"
+                              className="btn-won-icon"
+                              onClick={() => handleSetWonStage(st.id)}
+                              data-tooltip="Set as Won / Converted stage"
+                            >
+                              <CheckCircle2 size={16} strokeWidth={2.25} />
+                            </button>
+                          )
+                        )}
+
+                        {/* Lost Stage Trigger */}
+                        {isLost ? (
+                          <button
+                            type="button"
+                            className="btn-lost-icon active"
+                            onClick={() => canEdit && handleSetLostStage(st.id)}
+                            data-tooltip="Lost Stage: Disqualified leads land here (Click to unset)"
+                          >
+                            <XCircle size={16} strokeWidth={2.25} />
+                          </button>
+                        ) : (
+                          canEdit && (
+                            <button
+                              type="button"
+                              className="btn-lost-icon"
+                              onClick={() => handleSetLostStage(st.id)}
+                              data-tooltip="Set as Lost / Disqualified stage"
+                            >
+                              <XCircle size={16} strokeWidth={2.25} />
                             </button>
                           )
                         )}
@@ -2102,7 +2255,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                     Stage Automations
                   </label>
                   <span className="pipeline-dist-count-badge">
-                    {stageAutomations.filter(a => a.is_active || a.email_active).length} of {stages.length} stages active
+                    {stageAutomations.filter(a => a.is_active || a.email_active || a.meta_capi_active).length} of {stages.length} stages active
                   </span>
                 </div>
 
@@ -2113,11 +2266,14 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                       is_active: false,
                       template_name: '',
                       email_active: false,
-                      email_template_id: ''
+                      email_template_id: '',
+                      meta_capi_active: false,
+                      meta_capi_event: 'QualifiedLead'
                     };
                     const isWaActive = !!auto.is_active;
                     const isEmailActive = !!auto.email_active;
-                    const isAnyActive = isWaActive || isEmailActive;
+                    const isMetaCapiActive = !!auto.meta_capi_active;
+                    const isAnyActive = isWaActive || isEmailActive || isMetaCapiActive;
 
                     return (
                       <div
@@ -2130,7 +2286,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                             <span className="pipeline-number-index">{idx + 1}</span>
                             <span className="pipeline-auto-stage-name">{st.label}</span>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                             {isWaActive && (
                               <span className="pipeline-auto-badge-pill" style={{ background: '#dcfce7', color: '#166534' }}>
                                 <MessageCircle size={11} /> WhatsApp
@@ -2139,6 +2295,14 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                             {isEmailActive && (
                               <span className="pipeline-auto-badge-pill" style={{ background: '#e0f2fe', color: '#0369a1' }}>
                                 <Mail size={11} /> Email
+                              </span>
+                            )}
+                            {isMetaCapiActive && (
+                              <span className="pipeline-auto-badge-pill" style={{ background: '#eff6ff', color: '#1d4ed8' }}>
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="#1877F2">
+                                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                                </svg>
+                                Meta CAPI: {auto.meta_capi_event || 'QualifiedLead'}
                               </span>
                             )}
                             {!isAnyActive && (
@@ -2233,6 +2397,48 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                               data-tooltip={isEmailActive ? 'Email Active (click to pause)' : 'Email Paused (click to activate)'}
                               data-tooltip-pos="right-edge"
                               aria-label={isEmailActive ? `Pause Email for ${st.label}` : `Activate Email for ${st.label}`}
+                            >
+                              <Check size={18} strokeWidth={2.5} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Meta Conversions API (CAPI) Channel Row */}
+                        <div className="pipeline-auto-channel-row">
+                          <div className="pipeline-auto-channel-info">
+                            <div className="pipeline-auto-channel-icon" style={{ background: '#eff6ff' }}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="#1877F2">
+                                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                              </svg>
+                            </div>
+                            <span className="pipeline-auto-channel-name">Meta Conversions API</span>
+                          </div>
+
+                          <div className="pipeline-auto-channel-controls">
+                            {isMetaCapiActive ? (
+                              <div className="pipeline-auto-select-container">
+                                <CustomSelect
+                                  value={auto.meta_capi_event || 'QualifiedLead'}
+                                  onChange={(val) => handleSelectMetaCapiEvent(st.id, val)}
+                                  placeholder="Select Meta event..."
+                                  options={META_CAPI_EVENTS.map(e => ({
+                                    value: e.id,
+                                    label: `${e.label} (${e.id})`
+                                  }))}
+                                />
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '12.5px', color: '#94a3b8' }}>Disabled</span>
+                            )}
+
+                            <button
+                              type="button"
+                              className={`btn-auto-rectangular-toggle ${isMetaCapiActive ? 'meta-active' : ''}`}
+                              onClick={() => handleToggleMetaCapiAutomation(st.id, !isMetaCapiActive)}
+                              disabled={!canEdit}
+                              data-tooltip={isMetaCapiActive ? 'Meta CAPI Active (click to pause)' : 'Meta CAPI Paused (click to activate)'}
+                              data-tooltip-pos="right-edge"
+                              aria-label={isMetaCapiActive ? `Pause Meta CAPI for ${st.label}` : `Activate Meta CAPI for ${st.label}`}
                             >
                               <Check size={18} strokeWidth={2.5} />
                             </button>

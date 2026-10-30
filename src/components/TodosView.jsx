@@ -724,11 +724,24 @@ export default function TodosView({ currentUser }) {
               </div>
             );
           })}
+
+          {/* Desktop Skeleton CTA Card to Add New Note */}
+          <button
+            type="button"
+            className="sticky-note-skeleton-cta desktop-only"
+            onClick={() => handleAddNewNote('note')}
+            aria-label="Create new note"
+          >
+            <div className="sticky-skeleton-plus-circle">
+              <Plus size={18} strokeWidth={2.2} />
+            </div>
+            <span className="sticky-skeleton-text">Add a note...</span>
+          </button>
         </div>
 
-        {/* Empty state when there are no notes */}
+        {/* Empty state when there are no notes (Mobile Only) */}
         {notes.length === 0 && (
-          <div className="sticky-empty-board">
+          <div className="sticky-empty-board mobile-only">
             <div className="sticky-empty-icon-wrap">
               <StickyNote size={32} strokeWidth={1.5} />
             </div>
@@ -738,10 +751,10 @@ export default function TodosView({ currentUser }) {
         )}
       </div>
 
-      {/* Floating Action Button (FAB) at Bottom Right */}
+      {/* Floating Action Button (FAB) only for mobile view */}
       <button
         type="button"
-        className="sticky-fab-add"
+        className="sticky-fab-add mobile-only"
         onClick={() => handleAddNewNote('note')}
         aria-label="Add new note"
         title="Add note"

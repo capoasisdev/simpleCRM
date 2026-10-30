@@ -26,12 +26,17 @@ import {
   Mail,
   Globe,
   Monitor,
-  ArrowUpRight
+  ArrowUpRight,
+  Activity,
+  Database,
+  CheckCheck,
+  Sparkles
 } from 'lucide-react';
 import EmailIntegrationView from './EmailIntegrationView';
 import WebsiteFormsView from './WebsiteFormsView';
 import { fetchEmailConfig } from '../lib/email';
 import { supabase } from '../lib/supabase';
+import { fetchAdAccountDatasets, sendMetaCapiTestEvent, fetchMetaCapiLogs } from '../lib/metaCapi';
 import {
   loginWithMeta,
   fetchUserPages,
@@ -211,7 +216,10 @@ export default function MetaIntegrationView({ currentUser }) {
       lead_form_ids: '',
       is_connected: false,
       connected_page_name: '',
-      connected_account_name: ''
+      connected_account_name: '',
+      dataset_id: '',
+      capi_enabled: false,
+      test_event_code: ''
     };
   });
 
@@ -520,6 +528,128 @@ export default function MetaIntegrationView({ currentUser }) {
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testModalFeedback, setTestModalFeedback] = useState(null);
 
+  // Meta Conversions API (CAPI) States
+  const [capiEnabled, setCapiEnabled] = useState(false);
+  const [datasetId, setDatasetId] = useState('');
+  const [testEventCode, setTestEventCode] = useState('');
+  const [availableDatasets, setAvailableDatasets] = useState([]);
+  const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
+  const [isSavingCapi, setIsSavingCapi] = useState(false);
+  const [isTestingCapi, setIsTestingCapi] = useState(false);
+  const [capiTestFeedback, setCapiTestFeedback] = useState(null);
+  const [capiLogs, setCapiLogs] = useState([]);
+  const [isLoadingCapiLogs, setIsLoadingCapiLogs] = useState(false);
+
+  const loadCapiLogs = async () => {
+    setIsLoadingCapiLogs(true);
+    try {
+      const logs = await fetchMetaCapiLogs(25);
+      setCapiLogs(logs);
+    } catch (e) {
+      console.warn('Error loading CAPI logs:', e);
+    } finally {
+      setIsLoadingCapiLogs(false);
+    }
+  };
+
+  const loadDatasets = async (actId, token, isUserAction = false) => {
+    if (!actId || !token) {
+      if (isUserAction) {
+        setCapiTestFeedback({ type: 'error', message: 'No Ad Account ID or Access Token configured yet.' });
+      }
+      return;
+    }
+    setIsLoadingDatasets(true);
+    if (isUserAction) setCapiTestFeedback(null);
+    try {
+      const dsets = await fetchAdAccountDatasets(actId, token);
+      setAvailableDatasets(dsets);
+      if (isUserAction) {
+        if (dsets.length > 0) {
+          setCapiTestFeedback({ type: 'success', message: `Found ${dsets.length} Dataset / Pixel in your Meta Ad Account!` });
+        } else {
+          setCapiTestFeedback({
+            type: 'info',
+            message: 'No Datasets or Pixels were found under this connected account via Graph API. If you only run Lead Gen forms, create a Dataset in Meta Events Manager in 1 minute and paste the ID below.'
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Error loading datasets:', e);
+      if (isUserAction) {
+        setCapiTestFeedback({ type: 'error', message: e.message || 'Failed to query Datasets from Meta.' });
+      }
+    } finally {
+      setIsLoadingDatasets(false);
+    }
+  };
+
+  const handleSaveCapiSettings = async (overridePayload = {}) => {
+    setIsSavingCapi(true);
+    try {
+      const payload = {
+        dataset_id: datasetId.trim(),
+        capi_enabled: capiEnabled,
+        test_event_code: testEventCode.trim(),
+        updated_at: new Date().toISOString(),
+        ...overridePayload
+      };
+
+      if (rowId) {
+        await supabase.from('meta_config').update(payload).eq('id', rowId);
+      } else {
+        const { data: newRow } = await supabase.from('meta_config').insert([payload]).select().single();
+        if (newRow?.id) setRowId(newRow.id);
+      }
+
+      setConfig(prev => ({ ...prev, ...payload }));
+      setCapiTestFeedback({ type: 'success', message: 'Conversions API settings saved successfully!' });
+      setTimeout(() => setCapiTestFeedback(null), 3500);
+    } catch (err) {
+      console.error('Save CAPI error:', err);
+      setCapiTestFeedback({ type: 'error', message: err.message || 'Failed to save CAPI settings.' });
+    } finally {
+      setIsSavingCapi(false);
+    }
+  };
+
+  const handleSendCapiTest = async () => {
+    if (!datasetId.trim()) {
+      setCapiTestFeedback({ type: 'error', message: 'Please enter or select a Dataset / Pixel ID first.' });
+      return;
+    }
+    const token = config.access_token?.trim();
+    if (!token) {
+      setCapiTestFeedback({ type: 'error', message: 'Meta Access Token is missing. Connect your account first.' });
+      return;
+    }
+
+    setIsTestingCapi(true);
+    setCapiTestFeedback(null);
+    try {
+      const result = await sendMetaCapiTestEvent({
+        datasetId: datasetId.trim(),
+        accessToken: token,
+        testEventCode: testEventCode.trim(),
+        eventName: 'QualifiedLead'
+      });
+
+      setCapiTestFeedback({
+        type: 'success',
+        message: `Test event sent! Meta accepted ${result.events_received || 1} event. fbtrace_id: ${result.fbtrace_id || 'N/A'}`
+      });
+      loadCapiLogs();
+    } catch (err) {
+      console.error('CAPI Test Error:', err);
+      setCapiTestFeedback({
+        type: 'error',
+        message: err.message || 'Meta Graph API rejected the test event. Check your Dataset ID and Token.'
+      });
+    } finally {
+      setIsTestingCapi(false);
+    }
+  };
+
   const checkTokenHealth = async (tokenOverride, isManualTest = false) => {
     const targetToken = tokenOverride !== undefined ? tokenOverride : config.access_token;
     if (!targetToken || !targetToken.trim()) {
@@ -594,12 +724,25 @@ export default function MetaIntegrationView({ currentUser }) {
             is_connected: data.is_connected || false,
             connected_page_name: data.connected_page_name || '',
             connected_account_name: data.connected_account_name || '',
-            whatsapp_access_token: data.whatsapp_access_token || ''
+            whatsapp_access_token: data.whatsapp_access_token || '',
+            dataset_id: data.dataset_id || '',
+            capi_enabled: Boolean(data.capi_enabled),
+            test_event_code: data.test_event_code || ''
           };
           setConfig(newConf);
           try {
             localStorage.setItem('crm_cached_meta_config', JSON.stringify(newConf));
           } catch (e) { }
+
+          // Populate CAPI State
+          setDatasetId(data.dataset_id || '');
+          setCapiEnabled(Boolean(data.capi_enabled));
+          setTestEventCode(data.test_event_code || '');
+
+          if (data.ad_account_id && data.access_token) {
+            loadDatasets(data.ad_account_id, data.access_token);
+          }
+          loadCapiLogs();
 
           // Populate WhatsApp Cloud API state
           setWaIsConnected(Boolean(data.whatsapp_is_connected || (data.whatsapp_phone_number_id && data.whatsapp_access_token)));
@@ -692,9 +835,22 @@ export default function MetaIntegrationView({ currentUser }) {
       )
       .subscribe();
 
+    // Subscribe to realtime updates for meta_capi_logs
+    const capiChannel = supabase
+      .channel('meta-capi-logs-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'meta_capi_logs' },
+        () => {
+          loadCapiLogs();
+        }
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
       supabase.removeChannel(formsChannel);
+      supabase.removeChannel(capiChannel);
     };
   }, []);
 
@@ -1562,7 +1718,7 @@ export default function MetaIntegrationView({ currentUser }) {
     {
       id: 'facebook',
       name: 'Facebook Lead Ads',
-      sub: isFbConnected ? (config.connected_page_name || 'Account Connected') : 'Lead Ads sync',
+      sub: isFbConnected ? (capiEnabled ? `${config.connected_page_name || 'Connected'} • CAPI Active` : (config.connected_page_name || 'Account Connected')) : 'Lead Ads sync',
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="#1877F2">
           <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
@@ -2055,6 +2211,256 @@ export default function MetaIntegrationView({ currentUser }) {
                 )}
               </div>
             )}
+
+            {/* Section 3: Meta Conversions API (CAPI) & Quality Optimization */}
+            <div className="meta-hero-card-container">
+              <div className="meta-panel-card" style={{ overflow: 'hidden' }}>
+                <div className="meta-account-row" style={{ borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
+                  <div className="meta-account-identity">
+                    <div className="meta-brand-tile" style={{ background: '#eff6ff', color: '#1d4ed8' }}>
+                      <Activity size={22} strokeWidth={2} />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <h3 className="meta-account-name" style={{ margin: 0 }}>Meta Conversions API (CAPI)</h3>
+                        <span className={`meta-status-badge ${capiEnabled ? 'is-connected' : 'is-disconnected'}`}>
+                          {capiEnabled ? 'Active' : 'Disabled'}
+                        </span>
+                      </div>
+                      <p className="meta-account-sub" style={{ margin: '4px 0 0 0', maxWidth: '640px', fontSize: '13px', color: '#64748b', lineHeight: 1.45 }}>
+                        Send qualified lead stages (e.g. <em>Qualified</em>, <em>Meeting Booked</em>, <em>Deal Won</em>) directly back to Meta's machine learning delivery system to stop getting junk form fills and optimize for paying customers.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button
+                      type="button"
+                      className={`meta-btn-secondary ${capiEnabled ? 'active' : ''}`}
+                      onClick={() => {
+                        const next = !capiEnabled;
+                        setCapiEnabled(next);
+                        handleSaveCapiSettings({ capi_enabled: next });
+                      }}
+                      style={{
+                        padding: '7px 16px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        backgroundColor: capiEnabled ? '#eff6ff' : '#ffffff',
+                        borderColor: capiEnabled ? '#93c5fd' : '#cbd5e1',
+                        color: capiEnabled ? '#1d4ed8' : '#475569'
+                      }}
+                    >
+                      {capiEnabled ? (
+                        <>
+                          <Check size={14} strokeWidth={2.5} style={{ marginRight: 6 }} /> CAPI Enabled
+                        </>
+                      ) : (
+                        'Enable CAPI'
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* CAPI Config Form & Controls */}
+                <div style={{ padding: '24px 24px 20px 24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {capiTestFeedback && (
+                    <div className={`meta-sync-banner ${capiTestFeedback.type === 'error' ? 'error' : 'success'}`} style={{ margin: 0 }}>
+                      {capiTestFeedback.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
+                      <div style={{ flex: 1 }}>{capiTestFeedback.message}</div>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                    {/* Dataset / Pixel Selector */}
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                        Meta Dataset / Pixel ID
+                      </label>
+                      {availableDatasets.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <CustomDropdown
+                            value={datasetId}
+                            onChange={(val) => setDatasetId(val)}
+                            options={availableDatasets.map(d => ({
+                              value: d.id,
+                              label: `${d.name} (${d.id})`,
+                              sublabel: d.type
+                            }))}
+                            placeholder="Select connected Dataset or Pixel..."
+                          />
+                          <input
+                            type="text"
+                            className="meta-input"
+                            value={datasetId}
+                            onChange={(e) => setDatasetId(e.target.value)}
+                            placeholder="Or paste Dataset ID manually..."
+                            style={{ fontSize: '13px', padding: '8px 12px' }}
+                          />
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <input
+                            type="text"
+                            className="meta-input"
+                            value={datasetId}
+                            onChange={(e) => setDatasetId(e.target.value)}
+                            placeholder="e.g. 104829103948572"
+                            style={{ fontSize: '13px', padding: '8px 12px', flex: 1 }}
+                          />
+                          {config.ad_account_id && config.access_token && (
+                            <button
+                              type="button"
+                              className="meta-btn-secondary"
+                              onClick={() => loadDatasets(config.ad_account_id, config.access_token, true)}
+                              disabled={isLoadingDatasets}
+                              style={{ padding: '0 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                              title="Fetch datasets from Meta Ad Account"
+                            >
+                              <RefreshCw size={13} className={isLoadingDatasets ? 'meta-loading-spinner' : ''} />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
+                        <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                          Found in Meta Events Manager &gt; Datasets &gt; Settings
+                        </span>
+                        <a
+                          href="https://adsmanager.facebook.com/events_manager2"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ fontSize: '11.5px', color: '#1d4ed8', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px', fontWeight: 500 }}
+                        >
+                          Open Events Manager <ArrowUpRight size={11} />
+                        </a>
+                      </div>
+                    </div>
+
+                    {/* Test Event Code */}
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                        Test Event Code (Optional)
+                      </label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          type="text"
+                          className="meta-input"
+                          value={testEventCode}
+                          onChange={(e) => setTestEventCode(e.target.value)}
+                          placeholder="e.g. TEST12345"
+                          style={{ fontSize: '13px', padding: '8px 12px', flex: 1 }}
+                        />
+                        <button
+                          type="button"
+                          className="meta-btn-secondary"
+                          onClick={handleSendCapiTest}
+                          disabled={isTestingCapi || !datasetId.trim()}
+                          style={{
+                            padding: '0 14px',
+                            fontSize: '12.5px',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          {isTestingCapi ? <RefreshCw size={13} className="meta-loading-spinner" /> : <Send size={13} />}
+                          Send Test
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block', marginTop: '4px' }}>
+                        From Meta Events Manager &gt; Test Events tab. Leave blank for live production ads.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '8px' }}>
+                    <button
+                      type="button"
+                      className="meta-btn-primary"
+                      onClick={() => handleSaveCapiSettings()}
+                      disabled={isSavingCapi}
+                      style={{ padding: '8px 20px', fontSize: '13px' }}
+                    >
+                      {isSavingCapi ? 'Saving...' : 'Save CAPI Settings'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Live Conversions API Audit Log Section */}
+                <div style={{ borderTop: '1px solid #f1f5f9' }}>
+                  <div style={{ padding: '14px 24px', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Database size={15} color="#475569" />
+                      <strong style={{ fontSize: '13px', color: '#334155' }}>Recent Conversions API Activity</strong>
+                      <span style={{ fontSize: '11.5px', color: '#64748b', background: '#e2e8f0', padding: '1px 7px', borderRadius: '10px' }}>
+                        {capiLogs.length} events
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={loadCapiLogs}
+                      disabled={isLoadingCapiLogs}
+                      style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}
+                    >
+                      <RefreshCw size={12} className={isLoadingCapiLogs ? 'meta-loading-spinner' : ''} />
+                      Refresh
+                    </button>
+                  </div>
+
+                  {capiLogs.length === 0 ? (
+                    <div style={{ padding: '32px 24px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+                      No conversion events dispatched yet. Move a lead to a stage configured with Meta CAPI in <strong>Pipelines → Stage Automations</strong> or send a test above.
+                    </div>
+                  ) : (
+                    <div className="meta-forms-table" style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                      {capiLogs.map((log) => (
+                        <div key={log.id} className="meta-form-row-item" style={{ padding: '12px 24px' }}>
+                          <div className="meta-form-identity">
+                            <div className="meta-doc-tile" style={{ background: log.status === 'sent' ? '#eff6ff' : '#fef2f2', color: log.status === 'sent' ? '#1d4ed8' : '#b91c1c' }}>
+                              {log.status === 'sent' ? <CheckCheck size={16} /> : <AlertCircle size={16} />}
+                            </div>
+                            <div className="meta-form-info-col">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#0f172a' }}>
+                                  {log.event_name}
+                                </span>
+                                {log.is_test && (
+                                  <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#7c3aed', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '1px 6px', borderRadius: '4px' }}>
+                                    TEST
+                                  </span>
+                                )}
+                              </div>
+                              <span style={{ fontSize: '12px', color: '#64748b' }}>
+                                Lead: <strong>{log.lead_name || 'Anonymous'}</strong> {log.leadgen_id ? `(Meta Lead ID: ${log.leadgen_id})` : ''}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
+                            <span style={{
+                              fontSize: '11.5px',
+                              fontWeight: 600,
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              background: log.status === 'sent' ? '#dcfce7' : '#fee2e2',
+                              color: log.status === 'sent' ? '#15803d' : '#b91c1c'
+                            }}>
+                              {log.status === 'sent' ? 'Delivered to Meta' : 'Failed'}
+                            </span>
+                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                              {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </>
         )}
 

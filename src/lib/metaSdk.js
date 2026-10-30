@@ -433,6 +433,25 @@ export const fetchAdAccountBudget = async (adAccountId, primaryToken, fallbackTo
     console.warn('Could not fetch today ad insights:', err);
   }
 
+  // Fetch daily breakdown for the last 30 days to power timeline charts
+  let dailyInsights = [];
+  try {
+    const dailyRes = await fetch(
+      `https://graph.facebook.com/${API_VERSION}/${actId}/insights?date_preset=last_30d&time_increment=1&fields=spend,impressions,clicks,date_start&access_token=${activeToken}`
+    );
+    const dailyData = await dailyRes.json();
+    if (dailyData?.data && Array.isArray(dailyData.data)) {
+      dailyInsights = dailyData.data.map((d) => ({
+        date: d.date_start,
+        spend: parseFloat(d.spend || 0),
+        impressions: parseInt(d.impressions || 0, 10),
+        clicks: parseInt(d.clicks || 0, 10)
+      }));
+    }
+  } catch (err) {
+    console.warn('Could not fetch 30-day daily insights:', err);
+  }
+
   // Currency & Amounts (Meta returns monetary amounts in basic units / cents)
   const currency = accountData.currency || 'INR';
   const amountSpent = accountData.amount_spent ? parseFloat(accountData.amount_spent) / 100 : 0;
@@ -500,6 +519,7 @@ export const fetchAdAccountBudget = async (adAccountId, primaryToken, fallbackTo
     statusText,
     statusBadge,
     todayInsights,
+    dailyInsights,
     activeToken,
     lastUpdated: new Date().toISOString()
   };

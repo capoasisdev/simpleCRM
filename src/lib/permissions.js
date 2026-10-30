@@ -26,7 +26,8 @@ export const DEFAULT_MEMBER_PERMISSIONS = {
   },
   analytics: {
     scope: 'assigned', // 'assigned' | 'all'
-    view: true
+    view: true,
+    include_in_leaderboard: true // Sales Rep by default for members
   },
   followups: {
     scope: 'self', // 'self' | 'all'
@@ -36,7 +37,8 @@ export const DEFAULT_MEMBER_PERMISSIONS = {
   admin: {
     manage_users: false,
     manage_routing: false,
-    manage_meta: false
+    manage_meta: false,
+    view_ad_budget: false
   }
 };
 
@@ -64,7 +66,8 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
   },
   analytics: {
     scope: 'all',
-    view: true
+    view: true,
+    include_in_leaderboard: false // Non-sales by default for admins/developers
   },
   followups: {
     scope: 'all',
@@ -74,7 +77,8 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
   admin: {
     manage_users: true,
     manage_routing: true,
-    manage_meta: true
+    manage_meta: true,
+    view_ad_budget: true
   }
 };
 
@@ -84,9 +88,20 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
 export function normalizePermissions(user) {
   if (!user) return DEFAULT_MEMBER_PERMISSIONS;
 
-  // Admins always have full permissions
+  // Admins always have full access, preserving any custom leaderboard toggle
   if (user.role === 'admin') {
-    return DEFAULT_ADMIN_PERMISSIONS;
+    const isLeaderboard = Boolean(
+      user.permissions?.analytics?.include_in_leaderboard ??
+      user.permissions?.include_in_leaderboard ??
+      false
+    );
+    return {
+      ...DEFAULT_ADMIN_PERMISSIONS,
+      analytics: {
+        ...DEFAULT_ADMIN_PERMISSIONS.analytics,
+        include_in_leaderboard: isLeaderboard
+      }
+    };
   }
 
   const raw = user.permissions || {};
@@ -124,7 +139,8 @@ export function normalizePermissions(user) {
       },
       analytics: {
         scope: raw.analytics?.scope === 'all' ? 'all' : (raw.dashboard?.scope === 'all' ? 'all' : (raw.leads?.scope === 'all' ? 'all' : 'assigned')),
-        view: raw.analytics?.view !== false
+        view: raw.analytics?.view !== false,
+        include_in_leaderboard: raw.analytics?.include_in_leaderboard !== false && raw.include_in_leaderboard !== false
       },
       followups: {
         scope: raw.followups?.scope === 'all' ? 'all' : 'self',
@@ -136,7 +152,8 @@ export function normalizePermissions(user) {
       admin: {
         manage_users: raw.admin?.manage_users === true || raw.manage_users === true,
         manage_routing: raw.admin?.manage_routing === true,
-        manage_meta: raw.admin?.manage_meta === true
+        manage_meta: raw.admin?.manage_meta === true,
+        view_ad_budget: raw.admin?.view_ad_budget === true || raw.admin?.manage_meta === true
       }
     };
   }
@@ -176,7 +193,8 @@ export function normalizePermissions(user) {
     admin: {
       manage_users: raw.manage_users === true,
       manage_routing: raw.manage_users === true,
-      manage_meta: raw.manage_users === true
+      manage_meta: raw.manage_users === true,
+      view_ad_budget: raw.manage_users === true
     }
   };
 }
@@ -406,6 +424,25 @@ export function isUserAssignedToPipeline(pipe, user, leads = [], pipelineForms =
   }
 
   return false;
+}
+
+/**
+ * Determines whether a user counts as an active Sales Representative
+ * for Sales Leaderboards, SLA metrics, and Team Allocation charts.
+ */
+export function isUserInSalesLeaderboard(user) {
+  if (!user) return false;
+  const raw = user.permissions || {};
+  if (raw.analytics?.include_in_leaderboard !== undefined) {
+    return Boolean(raw.analytics.include_in_leaderboard);
+  }
+  if (raw.include_in_leaderboard !== undefined) {
+    return Boolean(raw.include_in_leaderboard);
+  }
+  if (raw.is_sales_rep !== undefined) {
+    return Boolean(raw.is_sales_rep);
+  }
+  return user.role !== 'admin';
 }
 
 

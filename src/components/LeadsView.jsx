@@ -8,8 +8,10 @@ import { fetchFollowUps, getStoredFollowUps, getFollowUpUrgency, formatFollowUpT
 import { addNotification } from '../lib/notifications';
 import { sendWhatsAppMessage } from '../lib/whatsapp';
 import { sendEmailViaResend, fetchEmailTemplates } from '../lib/email';
+import { sendMetaCapiEvent } from '../lib/metaCapi';
 import ScheduleFollowUpModal from './common/ScheduleFollowUpModal';
 import Skeleton from './common/Skeleton';
+import ExportReportModal from './ExportReportModal';
 import { getPipelineFields, getLeadFieldValue } from '../lib/pipelineFields';
 import { haptic } from '../lib/haptics';
 import { registerBackHandler } from '../lib/backButton';
@@ -314,6 +316,9 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   const [followUps, setFollowUps] = useState(() => getStoredFollowUps());
   const [isScheduleFollowUpOpen, setIsScheduleFollowUpOpen] = useState(false);
   const [followUpTargetLead, setFollowUpTargetLead] = useState(null);
+
+  // Custom Report & Export Modal State
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
   // Listen for open lead detail event from notification drawer or elsewhere
   useEffect(() => {
@@ -1111,6 +1116,43 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
           console.warn(`Stage automation Email dispatch error for ${lead.name}:`, emailErr);
         }
       }
+
+      // 3. Meta Conversions API (CAPI) Automation
+      if (auto.meta_capi_active && (auto.meta_capi_event || 'QualifiedLead')) {
+        try {
+          const eventToFire = auto.meta_capi_event || 'QualifiedLead';
+          const capiRes = await sendMetaCapiEvent({
+            lead,
+            eventName: eventToFire,
+            stageId: targetStageId,
+            stageName: stageName,
+            pipelineId: pipeId,
+            pipelineName: targetPipe.name,
+            createdBy: currentUser?.name || 'Automation'
+          });
+
+          if (capiRes?.success && !capiRes?.skipped) {
+            recordActivity({
+              type: 'meta_capi_sent',
+              leadId: lead.id,
+              leadName: lead.name,
+              toStage: targetStageId,
+              details: `Synced milestone "${eventToFire}" to Meta Conversions API on entering stage "${stageName}"`,
+              userName: 'Meta CAPI'
+            });
+
+            addNotification({
+              type: 'meta_capi',
+              title: 'Meta CAPI Milestone Synced',
+              message: `Reported "${eventToFire}" to Meta for ${lead.name} on entering "${stageName}".`,
+              leadId: lead.id,
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (capiErr) {
+          console.warn(`Stage automation Meta CAPI dispatch error for ${lead.name}:`, capiErr);
+        }
+      }
     } catch (err) {
       console.warn(`Stage automation dispatch error for ${lead.name}:`, err);
     }
@@ -1374,54 +1416,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   }, [leads, activePipelineId, pipelineForms, pipelinesList, filterType, searchQuery, currentUser, canViewAllLeads, dateFilter, customStartDate, customEndDate]);
 
   const handleExportCSV = () => {
-    if (!filteredLeads || filteredLeads.length === 0) {
-      alert('No leads to export matching the current filters.');
-      return;
-    }
-
-    const headers = [
-      'ID',
-      'Name',
-      'Phone',
-      'Email',
-      'Stage',
-      'Deal Value',
-      'Assigned To',
-      'Source',
-      'City',
-      'Created Date'
-    ];
-
-    const escapeCSV = (str) => {
-      if (str === null || str === undefined) return '""';
-      const s = String(str).replace(/"/g, '""');
-      return `"${s}"`;
-    };
-
-    const rows = filteredLeads.map((l) => [
-      escapeCSV(l.id),
-      escapeCSV(l.name || ''),
-      escapeCSV(l.phone || ''),
-      escapeCSV(l.email || ''),
-      escapeCSV(l.stage || ''),
-      escapeCSV(l.value || l.deal_value || ''),
-      escapeCSV(l.assigned_to || l.assignedTo || 'Unassigned'),
-      escapeCSV(l.source || 'Direct'),
-      escapeCSV(l.city || ''),
-      escapeCSV(l.created_at || l.date || '')
-    ]);
-
-    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    const dateTag = new Date().toISOString().slice(0, 10);
-    link.setAttribute('download', `crm-leads-${filterType}-${dateTag}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    setIsExportModalOpen(true);
   };
 
   const resolveAssignee = (assignedTo) => {
@@ -4034,6 +4029,25 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
         </div>,
         document.body
       )}
+
+      {/* Custom Excel / CSV Report Builder Modal */}
+      <ExportReportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        allLeads={leads}
+        filteredLeads={filteredLeads}
+        selectedLeadIds={selectedLeadIds}
+        pipelinesList={pipelinesList}
+        activePipelineName={activePipeline?.name}
+        onSuccess={(msg) => {
+          addNotification({
+            type: 'success',
+            title: 'Report Downloaded',
+            message: msg,
+            timestamp: new Date().toISOString()
+          });
+        }}
+      />
     </div>
   );
 }

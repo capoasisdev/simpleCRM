@@ -86,6 +86,7 @@ export default function DashboardView({ currentUser, onLogout }) {
   const canManageUsers = hasPermission(user, 'admin', 'manage_users');
   const canManageRouting = hasPermission(user, 'admin', 'manage_routing');
   const canManageMeta = hasPermission(user, 'admin', 'manage_meta');
+  const canViewAdBudget = user.role === 'admin' || hasPermission(user, 'admin', 'view_ad_budget') || canManageMeta;
   const hasAdminAccess = user.role === 'admin' || canManageUsers || canManageRouting || canManageMeta;
   const toolsList = [
     { name: 'LaterOn', label: 'LaterOn', icon: CalendarClock }
@@ -631,19 +632,62 @@ export default function DashboardView({ currentUser, onLogout }) {
     return scopedDeals;
   }, [deals, scopedDeals, isAnalyticsGlobal]);
 
-  // Pipeline metrics computed dynamically from scoped deals
+  // Pipeline metrics computed dynamically from scoped deals and leads with pipeline stage triggers
   const pipelineMetrics = useMemo(() => {
-    const totalVal = scopedDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
-    const activeCount = scopedDeals.filter((d) => d.stage !== 'Closed Lost').length;
-    const closedWonCount = scopedDeals.filter((d) => d.stage === 'Closed Won').length;
-    const winRate = scopedDeals.length > 0 ? Math.round((closedWonCount / scopedDeals.length) * 100) : 0;
+    const wonStageSet = new Set();
+    const lostStageSet = new Set();
+    (pipelinesList || []).forEach((p) => {
+      (p.stages || []).forEach((st) => {
+        if (!st) return;
+        const sId = String(st.id || '').trim().toLowerCase();
+        const sLabel = String(st.label || st.name || '').trim().toLowerCase();
+        if (st.is_won || /(won|onboarded|converted|partner onboarded)/i.test(sLabel)) {
+          if (sId) wonStageSet.add(sId);
+          if (sLabel) wonStageSet.add(sLabel);
+        }
+        if (st.is_lost || /(lost|not interested|disqualified|rejected)/i.test(sLabel)) {
+          if (sId) lostStageSet.add(sId);
+          if (sLabel) lostStageSet.add(sLabel);
+        }
+      });
+    });
+
+    const isWon = (item) => {
+      const st = String(item.stage || '').toLowerCase().trim();
+      const status = String(item.status || '').toLowerCase().trim();
+      return status === 'won' || st === 'closed won' || st === 'won' || wonStageSet.has(st);
+    };
+
+    const isLost = (item) => {
+      const st = String(item.stage || '').toLowerCase().trim();
+      const status = String(item.status || '').toLowerCase().trim();
+      return status === 'lost' || st === 'closed lost' || st === 'lost' || lostStageSet.has(st);
+    };
+
+    const totalVal =
+      scopedDeals.filter((d) => !isLost(d)).reduce((sum, d) => sum + (Number(d.value) || 0), 0) +
+      scopedLeads.filter((l) => !isLost(l)).reduce((sum, l) => sum + (Number(l.value || l.deal_value) || 0), 0);
+
+    const wonCount = scopedDeals.filter(isWon).length + scopedLeads.filter(isWon).length;
+    const lostCount = scopedDeals.filter(isLost).length + scopedLeads.filter(isLost).length;
+    const totalClosed = wonCount + lostCount;
+    const winRate =
+      totalClosed > 0
+        ? Math.round((wonCount / totalClosed) * 100)
+        : scopedLeads.length > 0
+          ? Math.round((wonCount / scopedLeads.length) * 100)
+          : 0;
+
+    const activeCount =
+      scopedDeals.filter((d) => !isLost(d) && !isWon(d)).length +
+      scopedLeads.filter((l) => !isLost(l) && !isWon(l)).length;
 
     return {
       totalValFormatted: formatINR(totalVal),
-      activeDealsCount: activeCount,
+      activeDealsCount: activeCount > 0 ? activeCount : scopedLeads.length,
       winRateFormatted: `${winRate}%`
     };
-  }, [scopedDeals]);
+  }, [scopedDeals, scopedLeads, pipelinesList]);
 
   // Lead conversion metrics computed dynamically from scoped leads
   const conversionMetrics = useMemo(() => {
@@ -808,8 +852,15 @@ export default function DashboardView({ currentUser, onLogout }) {
       return null;
     }
   });
-  const [isLoadingAdBudget, setIsLoadingAdBudget] = useState(false);
+  const [isLoadingAdBudget, setIsLoadingAdBudget] = useState(() => {
+    try {
+      return !localStorage.getItem('crm_cached_ad_budget');
+    } catch {
+      return true;
+    }
+  });
   const [adBudgetError, setAdBudgetError] = useState('');
+  const isBudgetLoading = isLoadingAdBudget || (!adBudget && (isLoadingData || !adBudgetError));
 
   const formatCurrency = (val, curr = 'INR') => {
     if (val === null || val === undefined || isNaN(val)) return '—';
@@ -918,8 +969,10 @@ export default function DashboardView({ currentUser, onLogout }) {
   };
 
   useEffect(() => {
-    loadAdAccountBudget(false);
-  }, []);
+    if (canViewAdBudget) {
+      loadAdAccountBudget(false);
+    }
+  }, [canViewAdBudget]);
 
   // October 2026 starts on Thursday (index 4) and has 31 days
   const calendarDays = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -968,31 +1021,35 @@ export default function DashboardView({ currentUser, onLogout }) {
         </div>
 
         <div className="header-right-cluster">
-          {adBudget && (
-            <div
-              className={`header-meta-budget-chip ${adBudget.statusBadge}`}
-              onClick={() => {
-                if (adBudget.isExhausted) {
-                  window.open(
-                    `https://adsmanager.facebook.com/billing_hub/payment_settings?act=${adBudget.accountId.replace(/^act_/, '')}`,
-                    '_blank'
-                  );
-                } else if (hasAdminAccess) {
-                  navigateTo('Admin', 'integrations');
+          {canViewAdBudget && (
+            isBudgetLoading ? (
+              <Skeleton width="130px" height="28px" borderRadius="14px" />
+            ) : adBudget ? (
+              <div
+                className={`header-meta-budget-chip ${adBudget.statusBadge}`}
+                onClick={() => {
+                  if (adBudget.isExhausted) {
+                    window.open(
+                      `https://adsmanager.facebook.com/billing_hub/payment_settings?act=${adBudget.accountId.replace(/^act_/, '')}`,
+                      '_blank'
+                    );
+                  } else if (hasAdminAccess) {
+                    navigateTo('Admin', 'integrations');
+                  }
+                }}
+                title={
+                  adBudget.isExhausted
+                    ? 'Meta Ad Budget Exhausted! Click to top up in Ads Manager'
+                    : `Meta Ad Budget: ${formatCurrency(adBudget.prepaidBalance ?? adBudget.remainingSpendCap ?? adBudget.amountSpent, adBudget.currency)}`
                 }
-              }}
-              title={
-                adBudget.isExhausted
-                  ? 'Meta Ad Budget Exhausted! Click to top up in Ads Manager'
-                  : `Meta Ad Budget: ${formatCurrency(adBudget.prepaidBalance ?? adBudget.remainingSpendCap ?? adBudget.amountSpent, adBudget.currency)}`
-              }
-            >
-              <span className="chip-dot" />
-              <span className="chip-label-prefix">Ad Budget:</span>
-              <strong>
-                {formatCurrency(adBudget.prepaidBalance ?? adBudget.remainingSpendCap ?? 0, adBudget.currency)}
-              </strong>
-            </div>
+              >
+                <span className="chip-dot" />
+                <span className="chip-label-prefix">Ad Budget:</span>
+                <strong>
+                  {formatCurrency(adBudget.prepaidBalance ?? adBudget.remainingSpendCap ?? 0, adBudget.currency)}
+                </strong>
+              </div>
+            ) : null
           )}
           <button
             type="button"
@@ -1128,7 +1185,7 @@ export default function DashboardView({ currentUser, onLogout }) {
 
         {/* Center Main Section */}
         <main
-          className={`dashboard-main-section ${activeTab === 'Dashboard' ? 'is-dashboard' : 'is-other-section'} ${activeTab !== 'Dashboard' && activeTab !== 'Analytics' ? 'full-width' : ''}`}
+          className={`dashboard-main-section ${activeTab === 'Dashboard' || activeTab === 'Analytics' ? 'is-dashboard' : 'is-other-section'} ${activeTab !== 'Dashboard' && activeTab !== 'Analytics' ? 'full-width' : ''}`}
           aria-label="Dashboard Content Area"
         >
           {/* Mobile Section Tabs (Dashboard, Analytics, Activity) */}
@@ -1251,95 +1308,106 @@ export default function DashboardView({ currentUser, onLogout }) {
                 </section>
 
                 {/* Card 2: Meta Ad Account Budget & Health */}
-                <section className="dashboard-card" aria-label="Meta Ad Budget & Status">
-                  <div className="card-header-row">
-                    <div className="card-title-group" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="#1877F2">
-                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                      </svg>
-                      <h2 className="card-title">Meta Ad Budget</h2>
-                    </div>
-
-                    <button
-                      type="button"
-                      className="card-action-link"
-                      onClick={() => loadAdAccountBudget(true)}
-                      disabled={isLoadingAdBudget}
-                    >
-                      {isLoadingAdBudget ? 'Syncing...' : 'Refresh'}
-                    </button>
-                  </div>
-
-                  <div className="metric-tiles-row">
-                    <div className="metric-tile">
-                      <div className="metric-tile-val">
-                        {isLoadingAdBudget && !adBudget ? (
-                          <Skeleton width="50px" height="22px" />
-                        ) : (
-                          <span className="fade-in-value">
-                            {formatCurrency(adBudget?.prepaidBalance ?? adBudget?.remainingSpendCap ?? 0, adBudget?.currency || 'INR')}
-                          </span>
-                        )}
+                {canViewAdBudget && (
+                  <section className="dashboard-card" aria-label="Meta Ad Budget & Status">
+                    <div className="card-header-row">
+                      <div className="card-title-group" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="#1877F2">
+                          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                        </svg>
+                        <h2 className="card-title">Meta Ad Budget</h2>
                       </div>
-                      <div className="metric-tile-lbl">Available Balance</div>
-                    </div>
 
-                    <div className="metric-tile">
-                      <div className="metric-tile-val">
-                        {isLoadingAdBudget && !adBudget ? (
-                          <Skeleton width="50px" height="22px" />
-                        ) : (
-                          <span className="fade-in-value">
-                            {formatCurrency(adBudget?.todayInsights?.spend || 0, adBudget?.currency || 'INR')}
-                          </span>
-                        )}
-                      </div>
-                      <div className="metric-tile-lbl">Today's Spend</div>
-                    </div>
-
-                    <div
-                      className="metric-tile"
-                      data-tooltip={adBudget?.amountSpent ? `Lifetime: ₹${Math.round(adBudget.amountSpent).toLocaleString('en-IN')}` : undefined}
-                    >
-                      <div className="metric-tile-val">
-                        {isLoadingAdBudget && !adBudget ? (
-                          <Skeleton width="65px" height="22px" />
-                        ) : (
-                          <span className="fade-in-value">
-                            {formatCompactCurrency(adBudget?.amountSpent || 0, adBudget?.currency || 'INR')}
-                          </span>
-                        )}
-                      </div>
-                      <div className="metric-tile-lbl">Lifetime Spent</div>
-                    </div>
-                  </div>
-
-                  <div className="card-buttons-row">
-                    <a
-                      href={
-                        adBudget?.accountId
-                          ? `https://adsmanager.facebook.com/billing_hub/payment_settings?act=${adBudget.accountId.replace(/^act_/, '')}`
-                          : 'https://adsmanager.facebook.com/'
-                      }
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="card-btn-primary"
-                      style={{ textDecoration: 'none' }}
-                    >
-                      <span>Top Up</span>
-                      <ArrowUpRight size={14} />
-                    </a>
-                    {hasAdminAccess && (
                       <button
                         type="button"
-                        className="card-btn-secondary"
-                        onClick={() => navigateTo('Admin', 'integrations')}
+                        className="card-action-link"
+                        onClick={() => loadAdAccountBudget(true)}
+                        disabled={isLoadingAdBudget}
                       >
-                        <span>Meta Settings</span>
+                        {isLoadingAdBudget ? 'Syncing...' : 'Refresh'}
                       </button>
-                    )}
-                  </div>
-                </section>
+                    </div>
+
+                    <div className="metric-tiles-row">
+                      <div className="metric-tile">
+                        <div className="metric-tile-val">
+                          {isBudgetLoading ? (
+                            <Skeleton width="65px" height="22px" />
+                          ) : (
+                            <span className="fade-in-value">
+                              {formatCurrency(adBudget?.prepaidBalance ?? adBudget?.remainingSpendCap ?? 0, adBudget?.currency || 'INR')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="metric-tile-lbl">Available Balance</div>
+                      </div>
+
+                      <div className="metric-tile">
+                        <div className="metric-tile-val">
+                          {isBudgetLoading ? (
+                            <Skeleton width="55px" height="22px" />
+                          ) : (
+                            <span className="fade-in-value">
+                              {formatCurrency(adBudget?.todayInsights?.spend || 0, adBudget?.currency || 'INR')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="metric-tile-lbl">Today's Spend</div>
+                      </div>
+
+                      <div
+                        className="metric-tile"
+                        data-tooltip={adBudget?.amountSpent ? `Lifetime: ₹${Math.round(adBudget.amountSpent).toLocaleString('en-IN')}` : undefined}
+                      >
+                        <div className="metric-tile-val">
+                          {isBudgetLoading ? (
+                            <Skeleton width="65px" height="22px" />
+                          ) : (
+                            <span className="fade-in-value">
+                              {formatCompactCurrency(adBudget?.amountSpent || 0, adBudget?.currency || 'INR')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="metric-tile-lbl">Lifetime Spent</div>
+                      </div>
+                    </div>
+
+                    <div className="card-buttons-row">
+                      {isBudgetLoading ? (
+                        <>
+                          <Skeleton width="86px" height="34px" borderRadius="8px" />
+                          {hasAdminAccess && <Skeleton width="115px" height="34px" borderRadius="8px" />}
+                        </>
+                      ) : (
+                        <>
+                          <a
+                            href={
+                              adBudget?.accountId
+                                ? `https://adsmanager.facebook.com/billing_hub/payment_settings?act=${adBudget.accountId.replace(/^act_/, '')}`
+                                : 'https://adsmanager.facebook.com/'
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="card-btn-primary"
+                            style={{ textDecoration: 'none' }}
+                          >
+                            <span>Top Up</span>
+                            <ArrowUpRight size={14} />
+                          </a>
+                          {hasAdminAccess && (
+                            <button
+                              type="button"
+                              className="card-btn-secondary"
+                              onClick={() => navigateTo('Admin', 'integrations')}
+                            >
+                              <span>Meta Settings</span>
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </section>
+                )}
 
                 {/* Card 3: Recent Deals (Dynamic) */}
                 {canViewDashboardDeals && (
@@ -1497,9 +1565,14 @@ export default function DashboardView({ currentUser, onLogout }) {
                 deals={analyticsDeals}
                 users={usersList}
                 pipelines={pipelinesList}
+                activities={activities}
                 isLoading={isLoadingData}
                 isGlobal={isAnalyticsGlobal}
                 currentUser={user}
+                canViewAdBudget={canViewAdBudget}
+                adBudget={adBudget}
+                isLoadingAdBudget={isLoadingAdBudget}
+                onNavigate={navigateTo}
               />
             )}
 

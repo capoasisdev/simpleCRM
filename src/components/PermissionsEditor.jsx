@@ -42,7 +42,7 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
   const perms = normalizePermissions({ role, permissions });
 
   const updateSection = (section, updates) => {
-    if (isAdmin) return;
+    if (isAdmin && !(section === 'analytics' && 'include_in_leaderboard' in updates)) return;
     onChange({
       ...perms,
       [section]: {
@@ -265,6 +265,15 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
               {perms.analytics?.view !== false && <Check size={11} strokeWidth={2.5} />}
               <span>View</span>
             </button>
+            <button
+              type="button"
+              className={`perm-pill-toggle perm-leaderboard-btn ${perms.analytics?.include_in_leaderboard ? 'active' : ''}`}
+              onClick={() => updateSection('analytics', { include_in_leaderboard: !perms.analytics?.include_in_leaderboard })}
+              title="Include in Sales Leaderboard, SLA metrics, and Team Allocation"
+            >
+              {perms.analytics?.include_in_leaderboard && <Check size={11} strokeWidth={2.5} />}
+              <span>Leaderboard</span>
+            </button>
           </div>
         </div>
 
@@ -341,6 +350,16 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
             >
               {perms.admin.manage_meta && <Check size={11} strokeWidth={2.5} />}
               <span>Meta Ads</span>
+            </button>
+            <button
+              type="button"
+              className={`perm-pill-toggle ${perms.admin.view_ad_budget ? 'active' : ''}`}
+              onClick={() => updateAdminField('view_ad_budget', !perms.admin.view_ad_budget)}
+              disabled={isAdmin}
+              title="Allow viewing Meta ad budget and spend metrics"
+            >
+              {perms.admin.view_ad_budget && <Check size={11} strokeWidth={2.5} />}
+              <span>Ad Budget</span>
             </button>
           </div>
         </div>

@@ -27,8 +27,7 @@
 
 .brand-heading {
   font-size: 32px;
-  font-weight: var(--font-weight-semibold); /* Exactly 600, never higher */
-  letter-spacing: -0.03em;
+  font-weight: var(--font-weight-medium);
   color: var(--color-black);
   margin-bottom: 48px;
   line-height: 1.2;

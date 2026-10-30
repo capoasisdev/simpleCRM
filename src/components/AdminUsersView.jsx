@@ -21,7 +21,8 @@ import PermissionsEditor from './PermissionsEditor';
 import {
   normalizePermissions,
   DEFAULT_MEMBER_PERMISSIONS,
-  DEFAULT_ADMIN_PERMISSIONS
+  DEFAULT_ADMIN_PERMISSIONS,
+  isUserInSalesLeaderboard
 } from '../lib/permissions';
 import Skeleton from './common/Skeleton';
 import CustomSelect from './common/CustomSelect';
@@ -482,7 +483,7 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                 p.pipeline.view && 'Pipeline',
                 p.dashboard.view && `Dashboard (${p.dashboard.scope === 'all' ? 'All' : 'Assigned'})`,
                 p.analytics?.view !== false && `Analytics (${p.analytics?.scope === 'all' ? 'All' : 'Assigned'})`,
-                (p.admin.manage_users || p.admin.manage_routing || p.admin.manage_meta) && 'Admin'
+                (p.admin.manage_users || p.admin.manage_routing || p.admin.manage_meta || p.admin.view_ad_budget) && 'Admin'
               ].filter(Boolean);
 
               return (
@@ -505,9 +506,15 @@ export default function AdminUsersView({ currentUser, onLogout }) {
 
                   {/* Col 3: Role Pill */}
                   <div className="admin-col-role">
-                    <span className={`admin-role-pill ${user.role || 'member'}`}>
-                      {user.role === 'admin' ? 'Admin' : 'Member'}
-                    </span>
+                    {user.role === 'admin' ? (
+                      <span className="admin-role-pill admin">
+                        {isUserInSalesLeaderboard(user) ? 'Admin • Rep' : 'Admin'}
+                      </span>
+                    ) : (
+                      <span className="admin-role-pill member">
+                        {isUserInSalesLeaderboard(user) ? 'Sales Rep' : 'Member'}
+                      </span>
+                    )}
                   </div>
 
                   {/* Col 4: PIN Pill with Reveal Toggle */}
@@ -721,14 +728,47 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                     onChange={(role) => {
                       setAddRole(role);
                       if (role === 'admin') {
-                        setAddPerms(DEFAULT_ADMIN_PERMISSIONS);
+                        setAddPerms({
+                          ...DEFAULT_ADMIN_PERMISSIONS,
+                          analytics: { ...DEFAULT_ADMIN_PERMISSIONS.analytics, include_in_leaderboard: false }
+                        });
                       } else {
-                        setAddPerms(DEFAULT_MEMBER_PERMISSIONS);
+                        setAddPerms({
+                          ...DEFAULT_MEMBER_PERMISSIONS,
+                          analytics: { ...DEFAULT_MEMBER_PERMISSIONS.analytics, include_in_leaderboard: true }
+                        });
                       }
                     }}
                     options={ROLE_OPTIONS}
                     className="admin-role-select"
                   />
+                </div>
+
+                {/* Sales Representative Setting */}
+                <div className="admin-modal-toggle-row">
+                  <div className="admin-modal-toggle-left">
+                    <span className="admin-modal-toggle-title">Sales Representative</span>
+                    <span className="admin-modal-toggle-desc">
+                      Include in Sales Leaderboard, SLA metrics, and Team Allocation.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`admin-switch-btn ${(addPerms?.analytics?.include_in_leaderboard ?? (addRole !== 'admin')) ? 'active' : ''}`}
+                    onClick={() => {
+                      const currentVal = addPerms?.analytics?.include_in_leaderboard ?? (addRole !== 'admin');
+                      setAddPerms((prev) => ({
+                        ...prev,
+                        analytics: {
+                          ...(prev?.analytics || {}),
+                          include_in_leaderboard: !currentVal
+                        }
+                      }));
+                    }}
+                    aria-label="Toggle Sales Representative"
+                  >
+                    <span className="admin-switch-thumb" />
+                  </button>
                 </div>
 
                 <div style={{ marginTop: '12px' }}>
@@ -884,15 +924,49 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                       setSelectedUser({
                         ...selectedUser,
                         role: newRole,
-                        permissions:
-                          newRole === 'admin'
-                            ? DEFAULT_ADMIN_PERMISSIONS
-                            : selectedUser.permissions
+                        permissions: {
+                          ...(newRole === 'admin' ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_MEMBER_PERMISSIONS),
+                          analytics: {
+                            ...((newRole === 'admin' ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_MEMBER_PERMISSIONS).analytics),
+                            include_in_leaderboard: newRole !== 'admin'
+                          }
+                        }
                       });
                     }}
                     options={ROLE_OPTIONS}
                     className="admin-role-select"
                   />
+                </div>
+
+                {/* Sales Representative Setting */}
+                <div className="admin-modal-toggle-row">
+                  <div className="admin-modal-toggle-left">
+                    <span className="admin-modal-toggle-title">Sales Representative</span>
+                    <span className="admin-modal-toggle-desc">
+                      Include in Sales Leaderboard, SLA metrics, and Team Allocation.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`admin-switch-btn ${isUserInSalesLeaderboard(selectedUser) ? 'active' : ''}`}
+                    onClick={() => {
+                      const currentVal = isUserInSalesLeaderboard(selectedUser);
+                      const currentPerms = selectedUser.permissions || {};
+                      setSelectedUser({
+                        ...selectedUser,
+                        permissions: {
+                          ...currentPerms,
+                          analytics: {
+                            ...(currentPerms.analytics || {}),
+                            include_in_leaderboard: !currentVal
+                          }
+                        }
+                      });
+                    }}
+                    aria-label="Toggle Sales Representative"
+                  >
+                    <span className="admin-switch-thumb" />
+                  </button>
                 </div>
 
                 <PermissionsEditor
@@ -1047,7 +1121,7 @@ export default function AdminUsersView({ currentUser, onLogout }) {
           p.pipeline?.view && 'Pipeline',
           p.dashboard?.view && `Dashboard (${p.dashboard?.scope === 'all' ? 'All' : 'Assigned'})`,
           p.analytics?.view !== false && `Analytics (${p.analytics?.scope === 'all' ? 'All' : 'Assigned'})`,
-          (p.admin?.manage_users || p.admin?.manage_routing || p.admin?.manage_meta) && 'Admin'
+          (p.admin?.manage_users || p.admin?.manage_routing || p.admin?.manage_meta || p.admin?.view_ad_budget) && 'Admin'
         ].filter(Boolean);
 
         return createPortal(

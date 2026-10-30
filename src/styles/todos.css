@@ -718,8 +718,60 @@
   color: #64748b;
 }
 
+/* ----------------- DESKTOP SKELETON CTA CARD ----------------- */
+.sticky-note-skeleton-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 150px;
+  background-color: transparent;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 0;
+  cursor: pointer;
+  padding: 18px 16px;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  color: #64748b;
+  box-sizing: border-box;
+}
+
+.sticky-note-skeleton-cta:hover {
+  border-color: #0f172a;
+  background-color: #f8fafc;
+  color: #0f172a;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+}
+
+.sticky-skeleton-plus-circle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1.5px solid #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  transition: all 0.18s ease;
+  background-color: #ffffff;
+  color: #64748b;
+}
+
+.sticky-note-skeleton-cta:hover .sticky-skeleton-plus-circle {
+  border-color: #0f172a;
+  background-color: #0f172a;
+  color: #ffffff;
+}
+
+.sticky-skeleton-text {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
 /* ----------------- FLOATING ACTION BUTTON (FAB) ----------------- */
 .sticky-fab-add {
+  display: none; /* Hidden on desktop view */
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -730,7 +782,6 @@
   color: #ffffff;
   border: 1.5px solid #0f172a;
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.28), 0 2px 6px rgba(0, 0, 0, 0.12);
-  display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
@@ -1051,6 +1102,7 @@
 
   /* Mobile FAB elevated above fixed bottom navbar */
   .sticky-fab-add {
+    display: flex !important;
     right: 18px !important;
     bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
     width: 50px !important;

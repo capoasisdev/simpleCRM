@@ -785,9 +785,13 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
         <div className="messages-toolbar-left">
           <div className="messages-title-group">
             <h2 className="messages-title">Messages</h2>
-            <span className="messages-count-badge" title="Total active conversations">
-              {filteredConversations.length}
-            </span>
+            {isLoading ? (
+              <Skeleton width="34px" height="20px" borderRadius="999px" />
+            ) : (
+              <span className="messages-count-badge" title="Total active conversations">
+                {filteredConversations.length}
+              </span>
+            )}
           </div>
 
           {/* Omnichannel Channel Selector Dropdown */}
@@ -1151,17 +1155,27 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
           )}
 
           {isLoading ? (
-            <div style={{ padding: '16px' }}>
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-                  <Skeleton width="38px" height="38px" borderRadius="50%" />
-                  <div style={{ flex: 1 }}>
-                    <Skeleton width="120px" height="15px" borderRadius="4px" />
-                    <Skeleton width="180px" height="12px" borderRadius="3px" style={{ marginTop: '6px' }} />
+            <ul className="messages-contacts-list messages-skeleton-list" aria-label="Loading contacts">
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                <li key={i} className="messages-contact-item messages-skeleton-item">
+                  <div className="messages-avatar" style={{ background: 'transparent' }}>
+                    <Skeleton circle width="40px" height="40px" />
                   </div>
-                </div>
+                  <div className="messages-contact-details">
+                    <div className="messages-contact-row-top" style={{ marginBottom: '6px' }}>
+                      <Skeleton width={i % 3 === 0 ? '55%' : i % 2 === 0 ? '46%' : '38%'} height="15px" borderRadius="4px" />
+                      <Skeleton width="46px" height="11px" borderRadius="3px" />
+                    </div>
+                    <div className="messages-contact-row-bottom">
+                      <Skeleton width={i % 2 === 0 ? '42%' : '32%'} height="12px" borderRadius="3px" />
+                      <div className="messages-contact-channel-icons">
+                        <Skeleton width="16px" height="16px" borderRadius="4px" />
+                      </div>
+                    </div>
+                  </div>
+                </li>
               ))}
-            </div>
+            </ul>
           ) : filteredConversations.length === 0 ? (
             <div className="messages-contacts-empty">
               {searchQuery.trim() ? (

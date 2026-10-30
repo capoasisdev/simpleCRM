@@ -78,13 +78,76 @@ export function getLeadTimestamp(lead) {
   if (lead.date) {
     const m = String(lead.date).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
     if (m) {
-      const t = new Date(`${m[3]}-${m[2]}-${m[1]}T00:00:00Z`).getTime();
+      const day = m[1].padStart(2, '0');
+      const month = m[2].padStart(2, '0');
+      const t = new Date(`${m[3]}-${month}-${day}T00:00:00Z`).getTime();
       if (!isNaN(t)) return t;
     }
     const t = new Date(lead.date).getTime();
     if (!isNaN(t)) return t;
   }
   return null;
+}
+
+/**
+ * Resolve stage IDs (e.g. "stage 1792581059922" or "stage_123") to friendly human-readable stage names
+ */
+export function resolveStageName(stageIdOrName, pipelinesList = []) {
+  if (!stageIdOrName) return 'New';
+  const raw = String(stageIdOrName).trim();
+  if (!raw) return 'New';
+
+  // 1. Look up in pipelinesList stages
+  if (Array.isArray(pipelinesList)) {
+    for (const pipe of pipelinesList) {
+      if (Array.isArray(pipe?.stages)) {
+        const found = pipe.stages.find((s) => {
+          if (!s) return false;
+          const sId = String(s.id || '').trim();
+          const sLabel = String(s.label || s.name || '').trim();
+          return (
+            sId === raw ||
+            sId === `stage_${raw}` ||
+            sId === raw.replace(/^stage_/, '') ||
+            sId.toLowerCase() === raw.toLowerCase() ||
+            (sLabel && sLabel.toLowerCase() === raw.toLowerCase())
+          );
+        });
+        if (found) {
+          return found.label || found.name || raw;
+        }
+      }
+    }
+  }
+
+  // 2. Canonical standard names
+  const lower = raw.toLowerCase().replace(/[-_]/g, ' ');
+  if (lower === 'new' || lower === 'new leads' || lower === 'new lead') return 'New';
+  if (lower === 'contacted' || lower === 'contact') return 'Contacted';
+  if (
+    lower.includes('call not rec') ||
+    lower.includes('not connected') ||
+    lower.includes('missed') ||
+    lower.includes('rnr') ||
+    lower.includes('no response')
+  ) {
+    return 'Call Not Rec.';
+  }
+  if (lower.includes('follow up') || lower.includes('followup') || lower.includes('in progress')) return 'Follow Up';
+  if (lower.includes('interested') || lower.includes('hot lead')) return 'Interested';
+  if (lower.includes('meeting') || lower.includes('demo') || lower.includes('pitch')) return 'Meeting Scheduled';
+  if (lower.includes('converted') || lower.includes('won') || lower.includes('closed won') || lower.includes('deal closed')) return 'Converted';
+  if (lower.includes('lost') || lower.includes('junk') || lower.includes('dropped') || lower.includes('not interested') || lower.includes('closed lost')) return 'Lost';
+
+  // 3. If raw looks like a generated ID e.g. "stage 1792581059922" or "stage_1792..."
+  if (/^stage[\s_-]*\d+/i.test(raw) || /^\d{10,}/.test(raw)) {
+    return 'Custom Stage';
+  }
+
+  // 4. Default: title case with underscores replaced
+  return raw
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /**
@@ -129,10 +192,21 @@ export function findRelevantLeads(query, leadsList = []) {
   if (!query || !Array.isArray(leadsList) || leadsList.length === 0) return [];
 
   const q = query.toLowerCase().trim();
+
+  // If the query is an aggregate or analytical question without a specific person inquiry, do not match individual leads
+  const isBroadAnalytical = /\b(how many|distribution|breakdown|statistics|stats|pipeline summary|overview|summary|today|yesterday|this week|stale leads|deal value|total leads|revenue)\b/i.test(q);
+  if (isBroadAnalytical && !/\b(who is|details for|about|contact|call|phone|email)\b/i.test(q)) {
+    return [];
+  }
+
   const stopWords = new Set([
-    'give', 'details', 'tell', 'about', 'lead', 'show', 'info', 'what', 'who',
-    'the', 'for', 'of', 'me', 'please', 'is', 'are', 'there', 'any', 'find',
-    'search', 'status', 'view', 'check', 'can', 'you'
+    'give', 'details', 'tell', 'about', 'lead', 'leads', 'show', 'info', 'what', 'who',
+    'the', 'for', 'of', 'me', 'please', 'is', 'are', 'was', 'were', 'there', 'any', 'find',
+    'search', 'status', 'view', 'check', 'can', 'you', 'how', 'many', 'much', 'came',
+    'come', 'arrived', 'today', 'yesterday', 'tomorrow', 'week', 'month', 'year', 'distribution',
+    'breakdown', 'split', 'ratio', 'count', 'total', 'stats', 'statistics', 'number', 'numbers',
+    'percentage', 'incoming', 'received', 'added', 'created', 'got', 'and', 'with', 'from',
+    'stage', 'stages', 'pipeline', 'pipelines', 'all'
   ]);
 
   const words = q
@@ -240,10 +314,10 @@ export function buildCrmContext({ leads = [], deals = [], pipelinesList = [], us
     scopedDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0) +
     scopedLeads.reduce((sum, l) => sum + (Number(l.value) || 0), 0);
 
-  // Group leads by stage
+  // Group leads by stage (resolving internal stage IDs to human labels)
   const stageCounts = {};
   scopedLeads.forEach((l) => {
-    const st = l.stage || 'new';
+    const st = resolveStageName(l.stage, pipelinesList);
     stageCounts[st] = (stageCounts[st] || 0) + 1;
   });
 
@@ -263,6 +337,20 @@ export function buildCrmContext({ leads = [], deals = [], pipelinesList = [], us
   const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
   const twoDaysMs = 48 * 60 * 60 * 1000;
   const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+  // Time boundaries for Today & Yesterday in local time
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayStartMs = todayStart.getTime();
+
+  const yesterdayStart = new Date(todayStartMs - 24 * 60 * 60 * 1000);
+  const yesterdayStartMs = yesterdayStart.getTime();
+
+  const leadsToday = [];
+  const todayStageCounts = {};
+  const leadsYesterday = [];
+  const yesterdayStageCounts = {};
+  const leadsPast7Days = [];
 
   const staleLeads = scopedLeads.filter((l) => {
     const age = now - (getLeadTimestamp(l) || now);
@@ -284,11 +372,19 @@ export function buildCrmContext({ leads = [], deals = [], pipelinesList = [], us
       };
     }
     repBreakdown[rep].total += 1;
-    const st = l.stage || 'new';
+    const st = resolveStageName(l.stage, pipelinesList);
     repBreakdown[rep].stages[st] = (repBreakdown[rep].stages[st] || 0) + 1;
 
     const leadTime = getLeadTimestamp(l);
     if (leadTime) {
+      if (leadTime >= todayStartMs) {
+        leadsToday.push(l);
+        todayStageCounts[st] = (todayStageCounts[st] || 0) + 1;
+      } else if (leadTime >= yesterdayStartMs && leadTime < todayStartMs) {
+        leadsYesterday.push(l);
+        yesterdayStageCounts[st] = (yesterdayStageCounts[st] || 0) + 1;
+      }
+
       const age = now - leadTime;
       if (age <= twoDaysMs) {
         repBreakdown[rep].newPast2Days += 1;
@@ -298,6 +394,7 @@ export function buildCrmContext({ leads = [], deals = [], pipelinesList = [], us
       }
       if (age <= sevenDaysMs) {
         repBreakdown[rep].newPast7Days += 1;
+        leadsPast7Days.push(l);
       }
     }
   });
@@ -339,8 +436,8 @@ export function buildCrmContext({ leads = [], deals = [], pipelinesList = [], us
       repWorkedOnLeads2Days[rep].set(leadKey, {
         leadName: act.lead_name || 'Lead',
         type: act.type,
-        fromStage: act.from_stage,
-        toStage: act.to_stage,
+        fromStage: resolveStageName(act.from_stage, pipelinesList),
+        toStage: resolveStageName(act.to_stage, pipelinesList),
         details: act.details,
         time: act.created_at
       });
@@ -372,6 +469,15 @@ export function buildCrmContext({ leads = [], deals = [], pipelinesList = [], us
     totalPipelineValue,
     stageCounts,
     pipelineCounts,
+    pipelineMap,
+    leadsToday,
+    leadsTodayCount: leadsToday.length,
+    todayStageCounts,
+    leadsYesterday,
+    leadsYesterdayCount: leadsYesterday.length,
+    yesterdayStageCounts,
+    leadsPast7Days,
+    leadsPast7DaysCount: leadsPast7Days.length,
     staleLeadsCount: staleLeads.length,
     staleLeads: staleLeads.slice(0, 8),
     repWorkload,
@@ -387,7 +493,7 @@ export function buildCrmContext({ leads = [], deals = [], pipelinesList = [], us
     pipelines: pipelinesList.map((p) => ({
       id: p.id,
       name: p.name,
-      stages: (p.stages || []).map((s) => s.label || s.id)
+      stages: (p.stages || []).map((s) => s.label || s.name || s.id)
     }))
   };
 }
@@ -482,7 +588,127 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
     }
   }
 
-  // 1. Pipeline Summary / Status
+  // 1. Time-Based Inflow & Distribution Engine (Today, Yesterday, This Week, General Distribution)
+  const isAskingToday = /\b(today|today's)\b/i.test(q);
+  const isAskingYesterday = /\b(yesterday|yesterday's)\b/i.test(q);
+  const isAskingThisWeek = /\b(this week|past week|past 7 days|last 7 days|weekly)\b/i.test(q);
+  const isAskingDistribution = /\b(distribution|breakdown|split|ratio|by stage|spread|funnel)\b/i.test(q);
+  const isAskingInflowCount = /\b(how many|count|total|number of|inflow|came|arrived|received|incoming|new)\b/i.test(q) && /\b(lead|leads)\b/i.test(q);
+
+  if (
+    (isAskingToday || isAskingYesterday || isAskingThisWeek || isAskingDistribution) &&
+    (isAskingInflowCount || isAskingDistribution || /\b(lead|leads|came|new)\b/i.test(q))
+  ) {
+    let targetLeads = [];
+    let periodTitle = '';
+    let periodSubtitle = '';
+
+    if (isAskingToday) {
+      targetLeads = context.leadsToday || [];
+      periodTitle = "Today's Lead Inflow & Distribution";
+      periodSubtitle = new Date().toLocaleDateString('en-IN', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+    } else if (isAskingYesterday) {
+      targetLeads = context.leadsYesterday || [];
+      periodTitle = "Yesterday's Lead Inflow & Distribution";
+      const yDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      periodSubtitle = yDate.toLocaleDateString('en-IN', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+    } else if (isAskingThisWeek) {
+      targetLeads = context.leadsPast7Days || [];
+      periodTitle = "Past 7 Days Lead Inflow & Distribution";
+      periodSubtitle = "Rolling 7-day window";
+    } else {
+      // General all-time distribution
+      targetLeads = scopedLeads;
+      periodTitle = "CRM Lead & Stage Distribution";
+      periodSubtitle = `All ${scopedLeads.length} accessible leads`;
+    }
+
+    const totalInPeriod = targetLeads.length;
+
+    // Stage Distribution (resolving raw stage IDs e.g. "stage 1792581059922")
+    const periodStageMap = {};
+    targetLeads.forEach((l) => {
+      const st = resolveStageName(l.stage, pipelinesList);
+      periodStageMap[st] = (periodStageMap[st] || 0) + 1;
+    });
+
+    const stageLines = Object.entries(periodStageMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([st, cnt]) => {
+        const pct = totalInPeriod > 0 ? Math.round((cnt / totalInPeriod) * 100) : 0;
+        return `• **${st}**: ${cnt} ${cnt === 1 ? 'lead' : 'leads'} (${pct}%)`;
+      })
+      .join('\n');
+
+    // Rep Distribution
+    const periodRepMap = {};
+    targetLeads.forEach((l) => {
+      const rep = (l.assigned_to || l.assignedTo || 'Unassigned').trim();
+      periodRepMap[rep] = (periodRepMap[rep] || 0) + 1;
+    });
+
+    const repLines = Object.entries(periodRepMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([r, cnt]) => `• **${r}**: ${cnt} ${cnt === 1 ? 'lead' : 'leads'}`)
+      .join('\n');
+
+    // Pipeline Distribution (if multiple pipelines)
+    const periodPipeMap = {};
+    targetLeads.forEach((l) => {
+      const pName = context.pipelineMap?.get(l.pipeline_id) || 'Default Pipeline';
+      periodPipeMap[pName] = (periodPipeMap[pName] || 0) + 1;
+    });
+    const pipeLines = Object.entries(periodPipeMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([p, cnt]) => `• **${p}**: ${cnt} ${cnt === 1 ? 'lead' : 'leads'}`)
+      .join('\n');
+
+    if (totalInPeriod === 0) {
+      const overallStageLines = Object.entries(context.stageCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([st, cnt]) => `• **${st}**: ${cnt} leads`)
+        .join('\n');
+
+      return {
+        text: `### 📥 ${periodTitle} *(${periodSubtitle})*${scopeNotice}\n\n` +
+          `• **Leads Received**: **0 leads**\n` +
+          (isAskingToday ? `• **Yesterday's Inflow**: **${context.leadsYesterdayCount} leads**\n• **Past 7 Days**: **${context.leadsPast7DaysCount} leads**\n\n` : '\n') +
+          `#### 📊 Current Overall Pipeline Stages (${context.totalLeads} Total Leads):\n${overallStageLines || 'No leads in pipeline.'}\n\n` +
+          `💡 *Tip: New incoming leads via Meta Lead Forms or Webhooks will appear here in real time.*`,
+        action: null
+      };
+    }
+
+    // Recent 5 leads table
+    const sampleRows = targetLeads.slice(0, 5).map((l) => {
+      const st = resolveStageName(l.stage, pipelinesList);
+      const rep = l.assigned_to || 'Unassigned';
+      const city = l.city || 'N/A';
+      const phone = l.phone || 'N/A';
+      return `| **${l.name || 'Unnamed'}** | ${st} | ${rep} | ${city} | ${phone} |`;
+    }).join('\n');
+
+    let responseText = `### 📥 ${periodTitle} *(${periodSubtitle})*${scopeNotice}\n\n` +
+      `• **Total Leads Received**: **${totalInPeriod} leads**\n` +
+      `• **Total CRM Leads**: ${context.totalLeads}\n\n` +
+      `#### 📊 Stage Distribution\n${stageLines || 'No stages recorded'}\n\n` +
+      `#### 👤 Sales Rep Allocation\n${repLines || 'No assignments'}\n\n`;
+
+    if (Object.keys(periodPipeMap).length > 1) {
+      responseText += `#### 📁 Pipeline Breakdown\n${pipeLines}\n\n`;
+    }
+
+    responseText += `#### 🕒 Recent Inflow Sample (${Math.min(totalInPeriod, 5)} of ${totalInPeriod}):\n` +
+      `| Lead Name | Stage | Rep | City | Phone |\n|---|---|---|---|---|\n${sampleRows}\n\n` +
+      `💡 *Tip: You can ask for full details on any lead or ask me to draft a follow-up anytime.*`;
+
+    return {
+      text: responseText,
+      action: null
+    };
+  }
+
+  // 2. Pipeline Summary / Status
   if (q.includes('pipeline') || q.includes('summary') || q.includes('overview') || q.includes('status')) {
     const pipeList = Object.entries(context.pipelineCounts)
       .map(([name, count]) => `• **${name}**: ${count} leads`)
@@ -505,7 +731,7 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
     };
   }
 
-  // 2. Stale Leads / Attention Needed
+  // 3. Stale Leads / Attention Needed
   if (q.includes('stale') || q.includes('inactive') || q.includes('attention') || q.includes('neglected')) {
     if (context.staleLeads.length === 0) {
       return {
@@ -516,7 +742,7 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
 
     const leadItems = context.staleLeads.map((l) => {
       const days = Math.floor((now - (getLeadTimestamp(l) || now)) / (24 * 60 * 60 * 1000));
-      return `• **${l.name || 'Unnamed'}** (${l.phone || 'No phone'}) - ${days} days old in *${l.stage || 'new'}* [Rep: ${l.assigned_to || 'Unassigned'}]`;
+      return `• **${l.name || 'Unnamed'}** (${l.phone || 'No phone'}) - ${days} days old in *${resolveStageName(l.stage, pipelinesList)}* [Rep: ${l.assigned_to || 'Unassigned'}]`;
     }).join('\n');
 
     return {
@@ -527,16 +753,16 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
         description: `Create reminder sticky notes for ${Math.min(context.staleLeads.length, 5)} stalled leads.`,
         payload: context.staleLeads.slice(0, 5).map((l) => ({
           title: `Follow up with ${l.name || 'Lead'}`,
-          description: `Lead stalled for >5 days in ${l.stage || 'New'}. Phone: ${l.phone || 'N/A'}`
+          description: `Lead stalled for >5 days in ${resolveStageName(l.stage, pipelinesList)}. Phone: ${l.phone || 'N/A'}`
         }))
       }
     };
   }
 
-  // 3. Top Deals / Revenue
+  // 4. Top Deals / Revenue
   if (q.includes('deal') || q.includes('revenue') || q.includes('value') || q.includes('top leads')) {
     const list = context.topLeads.map((l) =>
-      `• **${l.name || 'Lead'}**: ₹${Number(l.value || 0).toLocaleString('en-IN')} (Stage: *${l.stage || 'New'}*, Rep: *${l.assigned_to || 'Unassigned'}*)`
+      `• **${l.name || 'Lead'}**: ₹${Number(l.value || 0).toLocaleString('en-IN')} (Stage: *${resolveStageName(l.stage, pipelinesList)}*, Rep: *${l.assigned_to || 'Unassigned'}*)`
     ).join('\n');
 
     return {
@@ -548,7 +774,7 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
     };
   }
 
-  // 4. Team Workload / Reps
+  // 5. Team Workload / Reps
   if (q.includes('team') || q.includes('rep') || q.includes('workload') || q.includes('assign')) {
     if (!context.isScopeAll) {
       return {
@@ -565,7 +791,7 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
     };
   }
 
-  // 5. Draft Follow-up Message
+  // 6. Draft Follow-up Message
   if (q.includes('draft') || q.includes('message') || q.includes('whatsapp') || q.includes('sms') || q.includes('email')) {
     const foundLead = scopedLeads.find((l) => l.name && q.includes(l.name.toLowerCase())) || scopedLeads[0];
     const leadName = foundLead?.name || 'Valued Client';
@@ -585,7 +811,7 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
     };
   }
 
-  // 6. Create Task / Follow-up Request
+  // 7. Create Task / Follow-up Request
   if (q.includes('task') || q.includes('remind') || q.includes('todo')) {
     const titleMatch = userQuery.replace(/create task|add task|remind me to|create a task/gi, '').trim();
     const taskTitle = titleMatch ? titleMatch.charAt(0).toUpperCase() + titleMatch.slice(1) : 'Follow up with priority leads';
@@ -601,7 +827,7 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
     };
   }
 
-  // 7. Search for a specific lead in user's permitted scope
+  // 8. Search for a specific lead in user's permitted scope
   const searchMatchedLeads = findRelevantLeads(userQuery, scopedLeads);
   if (searchMatchedLeads.length > 0) {
     // Check if one of them is an exact full name match
@@ -613,7 +839,7 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
     // If multiple leads match and user didn't specify a full name, ask to disambiguate
     if (searchMatchedLeads.length > 1 && !exactMatch) {
       const listRows = searchMatchedLeads.slice(0, 5).map((l) => {
-        return `| **${l.name}** | ${l.stage ? l.stage.replace(/_/g, ' ') : 'New'} | ${l.assigned_to || 'Unassigned'} | ${l.city || 'N/A'} | ${l.phone || 'N/A'} |`;
+        return `| **${l.name}** | ${resolveStageName(l.stage, pipelinesList)} | ${l.assigned_to || 'Unassigned'} | ${l.city || 'N/A'} | ${l.phone || 'N/A'} |`;
       }).join('\n');
 
       const options = searchMatchedLeads.slice(0, 3).map((l) => `**${l.name}**`).join(' or ');
@@ -638,7 +864,7 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
         `• **Phone**: ${lead.phone || 'N/A'}\n` +
         `• **Email**: ${lead.email || 'N/A'}\n` +
         `• **City**: ${lead.city || 'N/A'}\n` +
-        `• **Stage**: **${lead.stage ? lead.stage.toUpperCase() : 'NEW'}**\n` +
+        `• **Stage**: **${resolveStageName(lead.stage, pipelinesList).toUpperCase()}**\n` +
         `• **Assigned Representative**: **${lead.assigned_to || 'Unassigned'}**\n` +
         `• **Date Created**: ${new Date(lead.created_at || lead.date).toLocaleDateString()}\n\n` +
         (customFieldsText ? `#### 📋 Franchise Inquiry Details:\n${customFieldsText}\n\n` : '') +
@@ -925,7 +1151,7 @@ export async function askAiAssistant(userMessage, { leads = [], deals = [], pipe
           phone: l.phone,
           email: l.email,
           city: l.city,
-          stage: l.stage,
+          stage: resolveStageName(l.stage, pipelinesList),
           assigned_to: l.assigned_to,
           created_at: l.created_at || l.date,
           custom_fields: l.custom_fields,
@@ -941,7 +1167,7 @@ export async function askAiAssistant(userMessage, { leads = [], deals = [], pipe
       .join('\n');
 
     const compactLeadsRoster = scopedLeads
-      .map((l) => `${l.id} | ${l.name || 'Unknown'} | ${l.stage || 'new'} | ${l.assigned_to || '-'} | ${l.city || '-'} | ${l.phone || '-'} | ${l.email || '-'}`)
+      .map((l) => `${l.id} | ${l.name || 'Unknown'} | ${resolveStageName(l.stage, pipelinesList)} | ${l.assigned_to || '-'} | ${l.city || '-'} | ${l.phone || '-'} | ${l.email || '-'}`)
       .join('\n');
 
     const systemPrompt = `You are the executive AI Sales & Operations Assistant for SimpleCRM (CapOasis).
@@ -965,7 +1191,9 @@ ${compactActivities || 'No recent events recorded.'}
 
 LIVE OVERALL CRM METRICS:
 - Total Accessible Leads: ${context.totalLeads}
-- Total Accessible Deals: ${context.totalDeals}
+- Leads Received Today: ${context.leadsTodayCount} (${JSON.stringify(context.todayStageCounts)})
+- Leads Received Yesterday: ${context.leadsYesterdayCount} (${JSON.stringify(context.yesterdayStageCounts)})
+- Leads Received Past 7 Days: ${context.leadsPast7DaysCount}
 - Accessible Pipeline Value: ₹${context.totalPipelineValue.toLocaleString('en-IN')}
 - Stale Leads (>5 days in early stages): ${context.staleLeadsCount}
 - Overall Stage Breakdown: ${JSON.stringify(context.stageCounts)}
@@ -974,7 +1202,13 @@ LIVE OVERALL CRM METRICS:
 ${compactLeadsRoster}
 
 CRITICAL RESPONSE GUIDELINES:
-1. DISAMBIGUATION RULE FOR MULTIPLE MATCHES (CRITICAL):
+1. LEAD INFLOW & DISTRIBUTION QUERIES:
+   - When asked how many leads arrived or came today, yesterday, or this week, or asked about stage/pipeline distribution:
+     * State the EXACT count of leads received in that period using the live metrics above.
+     * Break down the stage distribution clearly with counts and percentages.
+     * Mention sales rep assignment and pipeline breakdown.
+     * NEVER confuse an analytical question (e.g. "how many leads came today ? and what was the distribution ?") with searching for an individual lead.
+2. DISAMBIGUATION RULE FOR MULTIPLE MATCHES (CRITICAL):
    - When the user's inquiry matches MULTIPLE distinct leads (e.g., asking "Kaushik" matches both "Vinay Kaushik" and "Koushik Dutta") and the user did NOT specify the full name:
      DO NOT pick or present full details for only one of them arbitrarily!
      You MUST present both matching candidates in a clean summary table:
@@ -984,16 +1218,16 @@ CRITICAL RESPONSE GUIDELINES:
      a) Only ONE lead matches the query, OR
      b) The user specifically asked for a full name (e.g. "Vinay Kaushik" or "Koushik Dutta").
    - When providing a full breakdown for a single lead, present their details in clean Markdown tables (Name, Phone, Email, City, Stage, Assigned Rep, Date, and franchise custom fields).
-2. When asked about a specific representative (e.g. Dipak Rajhans, Nikita, etc.):
+3. When asked about a specific representative (e.g. Dipak Rajhans, Nikita, etc.):
    - Use the EXACT numbers from 'EXACT REPRESENTATIVE LEAD & ACTIVITY BREAKDOWN'. For instance, if asked "how many new leads does Dipak have?", state the exact number of leads in the 'new' stage from his breakdown.
    - When asked what they worked on or contacted in the past 2 days (or follow-up questions referencing "he/she/they"), look at 'ACTIVITIES & ACTIONS IN PAST 48 HOURS' and 'RECENT RAW ACTIVITIES'. Name the specific leads they moved stages or logged activities for, along with newly arrived leads assigned to them.
-3. Answer questions concisely, executive, helpful, and formatted in clean GitHub Markdown with emojis, tables, and bold key numbers.
-4. When drafting messages, write them ready to send.
-5. If stage changes are requested and the user has edit permissions, suggest an action block:
+4. Answer questions concisely, executive, helpful, and formatted in clean GitHub Markdown with emojis, tables, and bold key numbers.
+5. When drafting messages, write them ready to send.
+6. If stage changes are requested and the user has edit permissions, suggest an action block:
 \`\`\`action:update_lead_stage
 {"leadId": "uuid", "leadName": "Name", "newStage": "Contacted"}
 \`\`\`
-6. If the user asks to create a task, include an action block at the bottom:
+7. If the user asks to create a task, include an action block at the bottom:
 \`\`\`action:create_task
 {"title": "Task title", "description": "Details"}
 \`\`\``;

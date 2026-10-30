@@ -99,7 +99,11 @@ create table if not exists public.meta_config (
   whatsapp_auto_welcome boolean default false,
   whatsapp_templates jsonb default '[]'::jsonb,
   whatsapp_is_connected boolean default false,
-  whatsapp_account_name text default ''
+  whatsapp_account_name text default '',
+  dataset_id text default '',
+  capi_enabled boolean default false,
+  test_event_code text default '',
+  capi_access_token text default null
 );
 
 alter table public.meta_config enable row level security;
@@ -288,3 +292,38 @@ create policy "Allow public access to connected_forms" on public.connected_forms
   for all using (true) with check (true);
 
 alter publication supabase_realtime add table public.connected_forms;
+
+-- 14. META CONVERSIONS API LOGS (CAPI Downstream Milestones)
+create table if not exists public.meta_capi_logs (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  lead_id uuid references public.leads(id) on delete set null,
+  lead_name text,
+  leadgen_id text,
+  pipeline_id uuid references public.pipelines(id) on delete set null,
+  stage_id text,
+  event_name text not null,
+  event_time timestamptz default timezone('utc'::text, now()) not null,
+  event_id text not null,
+  dataset_id text not null,
+  status text not null default 'pending', -- 'sent' | 'failed' | 'skipped'
+  meta_trace_id text,
+  events_received integer default 0,
+  error_message text,
+  request_payload jsonb,
+  response_payload jsonb,
+  is_test boolean default false,
+  created_by text default 'automation'
+);
+
+create index if not exists idx_meta_capi_logs_lead_id on public.meta_capi_logs(lead_id);
+create index if not exists idx_meta_capi_logs_created_at on public.meta_capi_logs(created_at desc);
+create index if not exists idx_meta_capi_logs_status on public.meta_capi_logs(status);
+create index if not exists idx_meta_capi_logs_event_name on public.meta_capi_logs(event_name);
+
+alter table public.meta_capi_logs enable row level security;
+drop policy if exists "Allow public access to meta_capi_logs" on public.meta_capi_logs;
+create policy "Allow public access to meta_capi_logs" on public.meta_capi_logs
+  for all using (true) with check (true);
+
+alter publication supabase_realtime add table public.meta_capi_logs;

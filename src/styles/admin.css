@@ -123,7 +123,7 @@
 
 .admin-user-numbered-item {
   display: grid;
-  grid-template-columns: 32px minmax(180px, 1fr) 88px 96px 124px 104px;
+  grid-template-columns: 32px minmax(180px, 1fr) 96px 96px 124px 104px;
   align-items: center;
   gap: 16px;
   min-height: 54px;
@@ -706,7 +706,8 @@
   background-color: #ffffff;
 }
 
-.settings-content-pane:has(.meta-container) {
+.settings-content-pane:has(.meta-container),
+.settings-content-pane:has(.pipeline-view-container) {
   overflow: hidden;
 }
 
@@ -1005,6 +1006,68 @@
   font-size: 13px;
 }
 
+/* Clean Frameless Setting Toggle Row */
+.admin-modal-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.admin-modal-toggle-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-modal-toggle-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.admin-modal-toggle-desc {
+  font-size: 11.5px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.admin-switch-btn {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 22px;
+  background-color: #cbd5e1;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: background-color 0.2s ease;
+  outline: none;
+}
+
+.admin-switch-btn.active {
+  background-color: #0f172a;
+}
+
+.admin-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.admin-switch-btn.active .admin-switch-thumb {
+  transform: translateX(16px);
+}
+
 /* Modal Footer */
 .admin-modal-footer {
   padding: 14px 24px;
@@ -1202,6 +1265,12 @@
 .perm-sections-stack.disabled-view {
   opacity: 0.55;
   pointer-events: none;
+}
+
+.perm-sections-stack.disabled-view .perm-leaderboard-btn {
+  opacity: 1;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 /* Frameless Grid Row */

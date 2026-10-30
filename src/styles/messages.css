@@ -259,6 +259,16 @@
   padding-left: 11px;
 }
 
+.messages-skeleton-item {
+  pointer-events: none;
+  cursor: default !important;
+}
+
+.messages-skeleton-item:hover,
+.messages-skeleton-item:active {
+  background-color: transparent !important;
+}
+
 .messages-avatar {
   width: 36px;
   height: 36px;
