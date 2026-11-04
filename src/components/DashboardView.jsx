@@ -39,7 +39,8 @@ import {
   RefreshCw,
   Wallet,
   CreditCard,
-  Compass
+  Compass,
+  Headphones
 } from 'lucide-react';
 import ProspectingView from './ProspectingView';
 import { checkAndRunDiscoveryAutopilot } from '../lib/coldDiscoveryScraper';
@@ -57,6 +58,7 @@ import CsvImportView from './CsvImportView';
 import BackupsView from './BackupsView';
 import AnalyticsView from './AnalyticsView';
 import NotificationDrawer from './NotificationDrawer';
+import SupportDrawer from './SupportDrawer';
 import AiAssistantWidget from './AiAssistantWidget';
 import { getStoredNotifications, clearAllNotifications, markAllNotificationsRead, addNotification } from '../lib/notifications';
 import { fetchAdAccountBudget } from '../lib/metaSdk';
@@ -306,6 +308,9 @@ export default function DashboardView({ currentUser, onLogout }) {
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
   const [notifications, setNotifications] = useState(() => getStoredNotifications());
 
+  // In-app Support & Help Hub State
+  const [isSupportDrawerOpen, setIsSupportDrawerOpen] = useState(false);
+
   // Handle in-app back navigation event dispatched by hardware/gesture back button
   useEffect(() => {
     const handleInAppBack = (e) => {
@@ -324,6 +329,12 @@ export default function DashboardView({ currentUser, onLogout }) {
       // 3. Close open notifications drawer
       if (isNotifDrawerOpen) {
         setIsNotifDrawerOpen(false);
+        e.detail?.handled?.();
+        return;
+      }
+      // 3b. Close open support drawer
+      if (isSupportDrawerOpen) {
+        setIsSupportDrawerOpen(false);
         e.detail?.handled?.();
         return;
       }
@@ -357,7 +368,7 @@ export default function DashboardView({ currentUser, onLogout }) {
     return () => {
       window.removeEventListener('crm-in-app-back', handleInAppBack);
     };
-  }, [activeTab, adminSubTab, isPipelineConfiguring, isMobileMoreOpen, isMobileActivityOpen, isNotifDrawerOpen, showUserMenu]);
+  }, [activeTab, adminSubTab, isPipelineConfiguring, isMobileMoreOpen, isMobileActivityOpen, isNotifDrawerOpen, isSupportDrawerOpen, showUserMenu]);
 
   // Register specific back handlers when sheets/drawers are open
   useEffect(() => {
@@ -386,6 +397,15 @@ export default function DashboardView({ currentUser, onLogout }) {
       });
     }
   }, [isNotifDrawerOpen]);
+
+  useEffect(() => {
+    if (isSupportDrawerOpen) {
+      return registerBackHandler(() => {
+        setIsSupportDrawerOpen(false);
+        return true;
+      });
+    }
+  }, [isSupportDrawerOpen]);
 
   useEffect(() => {
     if (showUserMenu) {
@@ -1118,6 +1138,16 @@ export default function DashboardView({ currentUser, onLogout }) {
               </div>
             ) : null
           )}
+          <button
+            type="button"
+            className="header-icon-btn"
+            aria-label="Help & Support"
+            onClick={() => setIsSupportDrawerOpen(true)}
+            title="Help, Suggestions & Support"
+          >
+            <Headphones size={18} strokeWidth={1.5} />
+          </button>
+
           <button
             type="button"
             className="header-icon-btn"
@@ -1933,6 +1963,13 @@ export default function DashboardView({ currentUser, onLogout }) {
         }}
       />
 
+      {/* Slide-in Support & Help Hub */}
+      <SupportDrawer
+        isOpen={isSupportDrawerOpen}
+        onClose={() => setIsSupportDrawerOpen(false)}
+        currentUser={user}
+      />
+
       {/* 3D Floating AI Assistant Widget */}
       <AiAssistantWidget
         leads={leads}
@@ -2065,6 +2102,22 @@ export default function DashboardView({ currentUser, onLogout }) {
                 <Sparkles size={18} strokeWidth={1.75} />
               </div>
               <span>AI Assistant</span>
+            </button>
+
+            {/* Help & Support */}
+            <button
+              type="button"
+              className="mobile-more-item"
+              onClick={() => {
+                setIsMobileMoreOpen(false);
+                setIsSupportDrawerOpen(true);
+              }}
+              role="menuitem"
+            >
+              <div className="mobile-more-icon-wrap">
+                <Headphones size={18} strokeWidth={1.75} />
+              </div>
+              <span>Help & Support</span>
             </button>
             {hasAdminAccess && (
               <>
