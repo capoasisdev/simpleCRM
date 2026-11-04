@@ -90,11 +90,13 @@ function calculateNextDiscoveryRun(scheduleDaysOrCadence: any = [1, 2, 3, 4, 5],
     targetDays = [1, 2, 3, 4, 5];
   }
 
-  const [hours, minutes] = (timeStr || "09:00").split(":").map(Number);
+  const [rawHours, rawMinutes] = (timeStr || "09:00").split(":").map(Number);
+  const hours = Number.isFinite(rawHours) ? rawHours : 9;
+  const minutes = Number.isFinite(rawMinutes) ? rawMinutes : 0;
   const now = new Date();
 
   for (let offset = 0; offset <= 14; offset++) {
-    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, hours || 9, minutes || 0, 0, 0);
+    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, hours, minutes, 0, 0);
     if (targetDays.includes(candidate.getDay())) {
       if (candidate > now) {
         return candidate.toISOString();
@@ -102,7 +104,7 @@ function calculateNextDiscoveryRun(scheduleDaysOrCadence: any = [1, 2, 3, 4, 5],
     }
   }
 
-  const fallback = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, hours || 9, minutes || 0, 0, 0);
+  const fallback = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, hours, minutes, 0, 0);
   return fallback.toISOString();
 }
 
