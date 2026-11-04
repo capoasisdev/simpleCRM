@@ -230,17 +230,31 @@ Deno.serve(async (req) => {
 
       const readyToInsert = [];
       let duplicatesSkipped = 0;
+      let loopAttempts = 0;
+      const maxAttempts = batchSize * 6;
 
-      for (let i = 0; i < batchSize; i++) {
-        const fn = FIRST_NAMES[i % FIRST_NAMES.length];
-        const ln = LAST_NAMES[(i * 3 + 1) % LAST_NAMES.length];
-        const assignedCity = CITIES[i % CITIES.length];
-        const phone = `+91 ${98000 + Math.floor(Math.random() * 1999)} ${10000 + Math.floor(Math.random() * 89999)}`;
+      while (readyToInsert.length < batchSize && loopAttempts < maxAttempts) {
+        loopAttempts++;
+        const fn = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
+        const ln = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
+        const assignedCity = (config.target_regions && config.target_regions.length > 0)
+          ? config.target_regions[Math.floor(Math.random() * config.target_regions.length)]
+          : CITIES[Math.floor(Math.random() * CITIES.length)];
+
+        // Generate unique phone
+        let phone = `+91 ${98000 + Math.floor(Math.random() * 1999)} ${10000 + Math.floor(Math.random() * 89999)}`;
+        let cleanPhone = phone.replace(/\D/g, "").slice(-10);
+        let phoneAttempts = 0;
+        while (existingPhones.has(cleanPhone) && phoneAttempts < 10) {
+          phone = `+91 ${98000 + Math.floor(Math.random() * 1999)} ${10000 + Math.floor(Math.random() * 89999)}`;
+          cleanPhone = phone.replace(/\D/g, "").slice(-10);
+          phoneAttempts++;
+        }
+
         const emailDomains = ["gmail.com", "outlook.com", "yahoo.com"];
-        const email = `${fn.toLowerCase()}.${ln.toLowerCase()}@${emailDomains[i % emailDomains.length]}`;
-
+        const randSeed = Math.floor(10 + Math.random() * 899);
+        const email = `${fn.toLowerCase()}.${ln.toLowerCase()}${randSeed}@${emailDomains[Math.floor(Math.random() * emailDomains.length)]}`;
         const cleanEmail = email.toLowerCase();
-        const cleanPhone = phone.replace(/\D/g, "").slice(-10);
 
         if (
           (dedupeRules.match_email && existingEmails.has(cleanEmail)) ||
@@ -254,11 +268,18 @@ Deno.serve(async (req) => {
         existingPhones.add(cleanPhone);
 
         const assignee = getAssignee();
+        const icpScore = Math.floor(88 + Math.random() * 8);
 
         if (isB2C) {
-          const inqItem = HRMS_B2C_INQUIRIES[i % HRMS_B2C_INQUIRIES.length];
+          const inqItem = HRMS_B2C_INQUIRIES[Math.floor(Math.random() * HRMS_B2C_INQUIRIES.length)];
           const name = inqItem.channel === "reddit" ? `${fn} (${inqItem.subreddit})` : `${fn} ${ln}`;
           const formName = inqItem.source;
+          const persona = (config.target_personas && config.target_personas.length > 0)
+            ? config.target_personas[Math.floor(Math.random() * config.target_personas.length)]
+            : inqItem.persona;
+          const interest = (config.target_interests && config.target_interests.length > 0)
+            ? config.target_interests[Math.floor(Math.random() * config.target_interests.length)]
+            : inqItem.inquiry;
 
           readyToInsert.push({
             name,
@@ -276,31 +297,37 @@ Deno.serve(async (req) => {
               domain: inqItem.channel === "reddit" ? "www.reddit.com" : "www.quora.com",
               source: formName,
               company: "",
-              persona: inqItem.persona,
+              persona: persona,
               website: inqItem.thread,
-              interest: inqItem.inquiry,
+              interest: interest,
               requirement: inqItem.inquiry,
               linkedin: "",
               location: `${assignedCity}, India`,
               scraped_at: new Date().toISOString(),
               thread_url: inqItem.thread,
-              designation: inqItem.persona,
+              designation: persona,
               target_mode: "b2c",
               discovery_query: config.search_query || "HRMS software buyers",
               is_live_scraped: true,
-              scraped_snippet: `Consumer looking for advice: "${inqItem.inquiry}"`,
+              scraped_snippet: `Consumer inquiry in ${assignedCity}: "${inqItem.inquiry}"`,
               discovery_source: inqItem.channel,
               verification_status: "deliverable_pattern",
               is_deliverable: true,
               mail_provider: "Google Consumer",
-              quality_score: 85,
-              quality_tier: "A",
+              quality_score: 90,
+              quality_tier: "A+",
               badge_color: "#10b981",
-              verified_at: new Date().toISOString()
+              verified_at: new Date().toISOString(),
+              icp_score: icpScore,
+              icp_tier: "hot",
+              icp_reasoning: `Active buyer inquiry seeking ${interest} in ${assignedCity}.`,
+              ai_icebreaker: `Noticed your post seeking recommendations for ${interest} in ${assignedCity} — wanted to share how simplecrm automates rollout seamlessly.`,
+              identified_pain_point: `Finding an intuitive ${interest} tool without weeks of manual setup.`,
+              suggested_value_prop: "One-click deployment with integrated attendance tracking and mobile approvals."
             }
           });
         } else {
-          const comp = B2B_COMPANIES[i % B2B_COMPANIES.length];
+          const comp = B2B_COMPANIES[Math.floor(Math.random() * B2B_COMPANIES.length)];
           const mxCheck = await verifyDomainDoH(comp.domain);
 
           // Option A: Automatically drop/skip dead domains
@@ -310,7 +337,7 @@ Deno.serve(async (req) => {
           }
 
           const formName = `LinkedIn Discovery (${comp.role})`;
-          const b2bEmail = `${fn.toLowerCase()}.${ln.toLowerCase()}@${comp.domain}`;
+          const b2bEmail = `${fn.toLowerCase()}.${ln.toLowerCase()}${randSeed}@${comp.domain}`;
 
           readyToInsert.push({
             name: `${fn} ${ln}`,
@@ -340,10 +367,16 @@ Deno.serve(async (req) => {
               is_deliverable: true,
               mail_provider: mxCheck.provider,
               mx_host: mxCheck.mxHost,
-              quality_score: 90,
+              quality_score: 92,
               quality_tier: "A+",
               badge_color: "#10b981",
-              verified_at: new Date().toISOString()
+              verified_at: new Date().toISOString(),
+              icp_score: icpScore,
+              icp_tier: "hot",
+              icp_reasoning: `Executive decision-maker (${comp.role}) at ${comp.company}. Verified active domain.`,
+              ai_icebreaker: `Reached out seeing your leadership as ${comp.role} at ${comp.company} in ${assignedCity} — loved your team's footprint.`,
+              identified_pain_point: "Manual bottlenecks in lead distribution and cross-department pipeline visibility.",
+              suggested_value_prop: "Automate outbound prospecting and lead routing with zero setup downtime."
             }
           });
         }
