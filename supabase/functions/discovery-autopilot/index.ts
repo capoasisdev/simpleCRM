@@ -65,7 +65,7 @@ async function verifyDomainDoH(domain: string): Promise<{ isValid: boolean; prov
         }
       }
     }
-  } catch {}
+  } catch { }
 
   return { isValid: false, provider: 'None', mxHost: null };
 }
@@ -222,8 +222,8 @@ Deno.serve(async (req) => {
       const entryStage = (pipe.stages && pipe.stages[0]?.id)
         ? pipe.stages[0].id
         : (pipe.stages && pipe.stages[0]?.name)
-        ? pipe.stages[0].name
-        : "prospect";
+          ? pipe.stages[0].name
+          : "prospect";
 
       const today = new Date();
       const dateStr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
