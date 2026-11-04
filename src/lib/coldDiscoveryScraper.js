@@ -383,8 +383,8 @@ export async function runColdDiscoveryBatch({
 
   const dedupeIndex = buildLeadsDedupeIndex(existingLeads || [], pipeline.id);
 
-  // 2. Fetch live web discovery candidates
-  const rawCandidates = await fetchLiveDiscoveryCandidates(config, batchSize);
+  // 2. Fetch live web discovery candidates with buffer for deduplication
+  const rawCandidates = await fetchLiveDiscoveryCandidates(config, Math.max(batchSize * 2, 25));
 
   // 3. Process Deduplication & Allocation
   const pipeDist = pipeline.lead_distribution || {};
@@ -426,6 +426,8 @@ export async function runColdDiscoveryBatch({
   const enrichmentsToUpdate = [];
 
   for (const candidate of rawCandidates) {
+    if (readyToInsert.length >= batchSize) break;
+
     const dedupeResult = evaluateCandidateDeduplication(candidate, dedupeIndex, dedupeRules, pipeline.id);
 
     if (dedupeResult.isDuplicate) {
@@ -597,11 +599,17 @@ export async function runColdDiscoveryBatch({
 /**
  * Calculates the next scheduled run timestamp based on selected days and sweep time.
  * Supports both an array of day numbers ([1, 2, 3, 4, 5]) and legacy cadence strings.
+ * Accurately accounts for client/pipeline timezone offset.
  * @param {Array<number>|string} scheduleDaysOrCadence - [1, 2, 3, 4, 5] (0=Sun..6=Sat) or legacy string
  * @param {string} timeStr - 'HH:MM' (default '09:00')
+ * @param {number|null} tzOffsetMinutes - Timezone offset in minutes (e.g. -330 for IST)
  * @returns {string} ISO Date string
  */
-export function calculateNextDiscoveryRun(scheduleDaysOrCadence = [1, 2, 3, 4, 5], timeStr = '09:00') {
+export function calculateNextDiscoveryRun(
+  scheduleDaysOrCadence = [1, 2, 3, 4, 5],
+  timeStr = '09:00',
+  tzOffsetMinutes = null
+) {
   let targetDays = [];
   if (Array.isArray(scheduleDaysOrCadence)) {
     targetDays = scheduleDaysOrCadence.map(Number);
@@ -622,19 +630,30 @@ export function calculateNextDiscoveryRun(scheduleDaysOrCadence = [1, 2, 3, 4, 5
   const [rawHours, rawMinutes] = (timeStr || '09:00').split(':').map(Number);
   const hours = Number.isFinite(rawHours) ? rawHours : 9;
   const minutes = Number.isFinite(rawMinutes) ? rawMinutes : 0;
+  const offsetMins = Number.isFinite(tzOffsetMinutes) ? tzOffsetMinutes : new Date().getTimezoneOffset();
   const now = new Date();
+
+  // Local now based on offset
+  const localNowMs = now.getTime() - offsetMins * 60000;
+  const localNow = new Date(localNowMs);
 
   // Search through upcoming days (up to 14 days) to find the next matching day and time
   for (let offset = 0; offset <= 14; offset++) {
-    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, hours, minutes, 0, 0);
-    if (targetDays.includes(candidate.getDay())) {
-      if (candidate > now) {
-        return candidate.toISOString();
-      }
+    const candidateLocalYear = localNow.getUTCFullYear();
+    const candidateLocalMonth = localNow.getUTCMonth();
+    const candidateLocalDate = localNow.getUTCDate() + offset;
+
+    const candidateLocalMs = Date.UTC(candidateLocalYear, candidateLocalMonth, candidateLocalDate, hours, minutes, 0, 0);
+    const candidateUtcMs = candidateLocalMs + offsetMins * 60000;
+    const candidateUtc = new Date(candidateUtcMs);
+    const localDayOfWeek = new Date(candidateLocalMs).getUTCDay();
+
+    if (targetDays.includes(localDayOfWeek) && candidateUtcMs > now.getTime()) {
+      return candidateUtc.toISOString();
     }
   }
 
-  const fallback = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, hours, minutes, 0, 0);
+  const fallback = new Date(now.getTime() + 86400000);
   return fallback.toISOString();
 }
 
@@ -699,46 +718,89 @@ export async function checkAndRunDiscoveryAutopilot({ pipelines = [], usersList 
       const config = pipe.discovery_config || {};
       try {
         console.log(`[Discovery Autopilot] Executing automated discovery sweep for "${pipe.name}"...`);
-        const result = await runColdDiscoveryBatch({
-          pipeline: pipe,
-          usersList,
-          dryRun: false
-        });
 
-        // Compute next run timestamp
-        const nextRunTimestamp = calculateNextDiscoveryRun(
-          config.schedule_days || config.schedule_cadence || [1, 2, 3, 4, 5],
-          config.schedule_time || '09:00'
-        );
+        let cloudHandled = false;
+        const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL;
+        const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY;
 
-        // Atomically update pipeline record with new next_run_at AND latest run stats
-        const updatedConfig = {
-          ...config,
-          last_run_at: new Date().toISOString(),
-          last_run_stats: {
-            total_scraped: result.totalFound || 0,
-            inserted: result.insertedCount || 0,
-            duplicates_skipped: result.duplicatesCount || 0,
-            enriched: result.enrichedCount || 0
-          },
-          next_run_at: nextRunTimestamp
-        };
+        // 1. Attempt serverless cloud execution via Edge Function first
+        if (supabaseUrl && supabaseAnonKey) {
+          try {
+            const edgeRes = await fetch(`${supabaseUrl}/functions/v1/discovery-autopilot`, {
+              method: 'POST',
+              headers: {
+                'apikey': supabaseAnonKey,
+                'Authorization': `Bearer ${supabaseAnonKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ pipeline_id: pipe.id })
+            });
 
-        await supabase
-          .from('pipelines')
-          .update({
-            discovery_config: updatedConfig,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', pipe.id);
+            if (edgeRes.ok) {
+              const edgeData = await edgeRes.json();
+              if (Array.isArray(edgeData.executed_runs) && edgeData.executed_runs.length > 0) {
+                const run = edgeData.executed_runs[0];
+                cloudHandled = true;
+                executedRuns.push({
+                  pipelineId: pipe.id,
+                  pipelineName: pipe.name,
+                  insertedCount: run.inserted || 0,
+                  duplicatesCount: run.duplicates_skipped || 0,
+                  nextRun: run.next_run_at,
+                  cloudExecuted: true
+                });
+                console.log(`[Discovery Autopilot] Cloud edge execution completed for "${pipe.name}": +${run.inserted} leads.`);
+              }
+            }
+          } catch (edgeErr) {
+            console.warn('[Discovery Autopilot] Cloud edge execution unreachable, falling back to local client:', edgeErr);
+          }
+        }
 
-        executedRuns.push({
-          pipelineId: pipe.id,
-          pipelineName: pipe.name,
-          insertedCount: result.insertedCount || 0,
-          duplicatesCount: result.duplicatesCount || 0,
-          nextRun: nextRunTimestamp
-        });
+        // 2. Fall back to local client execution if cloud edge execution was not handled
+        if (!cloudHandled) {
+          const result = await runColdDiscoveryBatch({
+            pipeline: pipe,
+            usersList,
+            dryRun: false
+          });
+
+          // Compute next run timestamp
+          const nextRunTimestamp = calculateNextDiscoveryRun(
+            config.schedule_days || config.schedule_cadence || [1, 2, 3, 4, 5],
+            config.schedule_time || '09:00',
+            config.timezone_offset
+          );
+
+          // Atomically update pipeline record with new next_run_at AND latest run stats
+          const updatedConfig = {
+            ...config,
+            last_run_at: new Date().toISOString(),
+            last_run_stats: {
+              total_scraped: result.totalFound || 0,
+              inserted: result.insertedCount || 0,
+              duplicates_skipped: result.duplicatesCount || 0,
+              enriched: result.enrichedCount || 0
+            },
+            next_run_at: nextRunTimestamp
+          };
+
+          await supabase
+            .from('pipelines')
+            .update({
+              discovery_config: updatedConfig,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', pipe.id);
+
+          executedRuns.push({
+            pipelineId: pipe.id,
+            pipelineName: pipe.name,
+            insertedCount: result.insertedCount || 0,
+            duplicatesCount: result.duplicatesCount || 0,
+            nextRun: nextRunTimestamp
+          });
+        }
       } catch (err) {
         console.error(`[Discovery Autopilot] Error during automated run for "${pipe.name}":`, err);
       }

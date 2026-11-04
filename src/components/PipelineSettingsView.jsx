@@ -1021,6 +1021,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     try {
       const payload = {
         ...(discoveryConfig || DEFAULT_DISCOVERY_CONFIG),
+        timezone_offset: new Date().getTimezoneOffset(),
         ...overrides,
         dedupe: {
           ...((discoveryConfig || DEFAULT_DISCOVERY_CONFIG).dedupe || {}),

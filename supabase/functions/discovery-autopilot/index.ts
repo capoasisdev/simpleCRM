@@ -72,8 +72,13 @@ async function verifyDomainDoH(domain: string): Promise<{ isValid: boolean; prov
 
 /**
  * Calculates the next scheduled run timestamp based on selected days and sweep time.
+ * Accounts for client/pipeline timezone offset so cloud server (UTC) matches local schedule.
  */
-function calculateNextDiscoveryRun(scheduleDaysOrCadence: any = [1, 2, 3, 4, 5], timeStr = "09:00"): string {
+function calculateNextDiscoveryRun(
+  scheduleDaysOrCadence: any = [1, 2, 3, 4, 5],
+  timeStr = "09:00",
+  tzOffsetMinutes: number = -330
+): string {
   let targetDays: number[] = [];
   if (Array.isArray(scheduleDaysOrCadence)) {
     targetDays = scheduleDaysOrCadence.map(Number);
@@ -93,18 +98,29 @@ function calculateNextDiscoveryRun(scheduleDaysOrCadence: any = [1, 2, 3, 4, 5],
   const [rawHours, rawMinutes] = (timeStr || "09:00").split(":").map(Number);
   const hours = Number.isFinite(rawHours) ? rawHours : 9;
   const minutes = Number.isFinite(rawMinutes) ? rawMinutes : 0;
+  const offsetMins = Number.isFinite(tzOffsetMinutes) ? tzOffsetMinutes : -330;
   const now = new Date();
 
+  // Local now:
+  const localNowMs = now.getTime() - offsetMins * 60000;
+  const localNow = new Date(localNowMs);
+
   for (let offset = 0; offset <= 14; offset++) {
-    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, hours, minutes, 0, 0);
-    if (targetDays.includes(candidate.getDay())) {
-      if (candidate > now) {
-        return candidate.toISOString();
-      }
+    const candidateLocalYear = localNow.getUTCFullYear();
+    const candidateLocalMonth = localNow.getUTCMonth();
+    const candidateLocalDate = localNow.getUTCDate() + offset;
+
+    const candidateLocalMs = Date.UTC(candidateLocalYear, candidateLocalMonth, candidateLocalDate, hours, minutes, 0, 0);
+    const candidateUtcMs = candidateLocalMs + offsetMins * 60000;
+    const candidateUtc = new Date(candidateUtcMs);
+    const localDayOfWeek = new Date(candidateLocalMs).getUTCDay();
+
+    if (targetDays.includes(localDayOfWeek) && candidateUtcMs > now.getTime()) {
+      return candidateUtc.toISOString();
     }
   }
 
-  const fallback = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, hours, minutes, 0, 0);
+  const fallback = new Date(now.getTime() + 86400000);
   return fallback.toISOString();
 }
 
@@ -396,7 +412,8 @@ Deno.serve(async (req) => {
 
       const nextRunTimestamp = calculateNextDiscoveryRun(
         config.schedule_days || config.schedule_cadence || [1, 2, 3, 4, 5],
-        config.schedule_time || "09:00"
+        config.schedule_time || "09:00",
+        config.timezone_offset
       );
 
       const updatedConfig = {

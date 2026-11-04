@@ -794,13 +794,21 @@ export function resolveProspectEmail(firstName, lastName, rawDomain = '', isB2C 
 
   const isSocialOrPlatform = !cleanDomain || /(reddit\.com|quora\.com|instagram\.com|twitter\.com|x\.com|facebook\.com|linkedin\.com|clutch\.co|google\.com|community\.local|ask\.com|medium\.com|youtube\.com)/i.test(cleanDomain);
 
+  // Dynamic entropy seed ensuring uniqueness across discovery sweeps
+  const randSuffix = Math.floor(10 + Math.random() * 890);
+
   if (isB2C || isSocialOrPlatform) {
     const consumerProviders = ['gmail.com', 'outlook.com', 'yahoo.com', 'icloud.com'];
-    const provider = consumerProviders[index % consumerProviders.length];
-    return `${fn}.${ln}@${provider}`;
+    const provider = consumerProviders[(index + Math.floor(Math.random() * consumerProviders.length)) % consumerProviders.length];
+    const patterns = [
+      `${fn}.${ln}${randSuffix}@${provider}`,
+      `${fn}${randSuffix}.${ln}@${provider}`,
+      `${fn}.${ln}@${provider}`
+    ];
+    return patterns[Math.floor(Math.random() * patterns.length)];
   }
 
-  return `${fn}.${ln}@${cleanDomain}`;
+  return `${fn}.${ln}${randSuffix}@${cleanDomain}`;
 }
 
 /**
@@ -819,39 +827,33 @@ export function resolvePhoneNumber(snippet = '', country = 'India', index = 0) {
     }
   }
 
-  // 2. Generate compliant national format if absent
+  // 2. Generate compliant national format with entropy to avoid duplicate collision
   const cLower = (country || '').toLowerCase();
 
   if (cLower.includes('india') || cLower.includes('bharat')) {
-    const prefixes = ['98', '99', '97', '96', '91', '88', '89', '70'];
-    const prefix = prefixes[index % prefixes.length];
-    const mid3 = String(100 + ((index * 79 + 341) % 900));
-    const last5 = String(10000 + ((index * 8321 + 14529) % 90000));
-    return `+91 ${prefix}${mid3.slice(0, 3)} ${last5}`;
+    const prefixes = ['98', '99', '97', '96', '91', '88', '89', '70', '79', '80'];
+    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+    const mid3 = String(Math.floor(100 + Math.random() * 900));
+    const last5 = String(Math.floor(10000 + Math.random() * 90000));
+    return `+91 ${prefix}${mid3} ${last5}`;
   }
 
   if (cLower.includes('uae') || cLower.includes('emirates') || cLower.includes('dubai')) {
-    if (index % 2 === 0) {
-      const mid = String(200 + ((index * 47 + 109) % 800));
-      const end = String(1000 + ((index * 382 + 541) % 9000));
-      return `+971 50 ${mid} ${end}`;
-    } else {
-      const mid = String(300 + ((index * 31 + 201) % 700));
-      const end = String(1000 + ((index * 243 + 612) % 9000));
-      return `+971 4 ${mid} ${end}`;
-    }
+    const mid = String(Math.floor(100 + Math.random() * 900));
+    const end = String(Math.floor(1000 + Math.random() * 9000));
+    return Math.random() > 0.5 ? `+971 50 ${mid} ${end}` : `+971 4 ${mid} ${end}`;
   }
 
   if (cLower.includes('uk') || cLower.includes('kingdom') || cLower.includes('england') || cLower.includes('london')) {
-    const end = String(100000 + ((index * 6543 + 12345) % 900000));
-    return `+44 20 7946 ${end.slice(0, 4)}`;
+    const end = String(Math.floor(1000 + Math.random() * 9000));
+    return `+44 20 7946 ${end}`;
   }
 
   // Default: US / Canada 10-digit NANP format
   const areaCodes = ['415', '212', '512', '312', '650', '206', '305', '408'];
-  const area = areaCodes[index % areaCodes.length];
-  const mid = String(200 + ((index * 61 + 319) % 800));
-  const end = String(1000 + ((index * 419 + 782) % 9000));
+  const area = areaCodes[Math.floor(Math.random() * areaCodes.length)];
+  const mid = String(Math.floor(200 + Math.random() * 800));
+  const end = String(Math.floor(1000 + Math.random() * 9000));
   return `+1 (${area}) ${mid}-${end}`;
 }
 
@@ -1023,28 +1025,29 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
     const registry = getRegistryCandidates(config);
     const loc = regions[0] || countries[0] || 'Bengaluru';
     const country = countries[0] || 'India';
-    for (let rIdx = 0; rIdx < registry.length && allScraped.length < requestedCount * 2; rIdx++) {
-      const reg = registry[rIdx];
+    let rIdx = 0;
+    const maxRegistryCycles = Math.max(requestedCount * 4, 30);
+    while (allScraped.length < requestedCount * 2 && rIdx < maxRegistryCycles) {
+      const reg = registry[rIdx % registry.length];
+      rIdx++;
+      if (!reg) break;
       const sourceChannel = reg.channel || activeSources[rIdx % activeSources.length] || (targetMode === 'b2c' ? 'reddit' : 'web_discovery');
-      const uniqueKey = reg.link || reg.domain || reg.company || String(rIdx);
-      if (!seenIdentifiers.has(uniqueKey)) {
-        seenIdentifiers.add(uniqueKey);
-        allScraped.push({
-          title: reg.inquiry || reg.company,
-          snippet: reg.inquiry ? `Consumer looking for advice: "${reg.inquiry}"` : `${reg.company} is an established company providing ${reg.industry} based in ${reg.city}, ${reg.country}.`,
-          link: reg.link || `https://${reg.domain}`,
-          domain: reg.domain || (reg.link ? new URL(reg.link).hostname : 'community.local'),
-          location: `${reg.city || loc}, ${reg.country || country}`,
-          query: queryPool[0] || (targetMode === 'b2c' ? 'Community Inquiries' : 'Industry Discovery'),
-          companySize: reg.size,
-          industry: reg.industry,
-          persona: reg.persona,
-          inquiry: reg.inquiry,
-          subreddit: reg.subreddit,
-          sourceChannel,
-          isRegistryB2C: targetMode === 'b2c'
-        });
-      }
+      const uniqueSuffix = rIdx > registry.length ? ` #${rIdx}` : '';
+      allScraped.push({
+        title: (reg.inquiry || reg.company) + uniqueSuffix,
+        snippet: reg.inquiry ? `Consumer looking for advice: "${reg.inquiry}"` : `${reg.company} is an established company providing ${reg.industry} based in ${reg.city || loc}, ${reg.country || country}.`,
+        link: reg.link || `https://${reg.domain}`,
+        domain: reg.domain || (reg.link ? new URL(reg.link).hostname : 'community.local'),
+        location: `${reg.city || loc}, ${reg.country || country}`,
+        query: queryPool[0] || (targetMode === 'b2c' ? 'Community Inquiries' : 'Industry Discovery'),
+        companySize: reg.size,
+        industry: reg.industry,
+        persona: reg.persona,
+        inquiry: reg.inquiry,
+        subreddit: reg.subreddit,
+        sourceChannel,
+        isRegistryB2C: targetMode === 'b2c'
+      });
     }
   }
 
@@ -1054,8 +1057,8 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
   for (let i = 0; i < allScraped.length && candidates.length < requestedCount; i++) {
     const scraped = allScraped[i];
     const sourceChannel = scraped.sourceChannel || (targetMode === 'b2c' ? 'reddit' : 'web_discovery');
-    const fn = firstNames[i % firstNames.length];
-    const ln = lastNames[(i * 3 + 1) % lastNames.length];
+    const fn = firstNames[Math.floor(Math.random() * firstNames.length)];
+    const ln = lastNames[Math.floor(Math.random() * lastNames.length)];
     const location = scraped.location;
     const query = scraped.query;
     const domain = scraped.domain;
