@@ -38,8 +38,11 @@ import {
   AlertTriangle,
   RefreshCw,
   Wallet,
-  CreditCard
+  CreditCard,
+  Compass
 } from 'lucide-react';
+import ProspectingView from './ProspectingView';
+import { checkAndRunDiscoveryAutopilot } from '../lib/coldDiscoveryScraper';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getDashboardScope, getAnalyticsScope } from '../lib/permissions';
 import { getStoredActivities } from '../lib/activities';
@@ -87,7 +90,7 @@ export default function DashboardView({ currentUser, onLogout }) {
   const canManageRouting = hasPermission(user, 'admin', 'manage_routing');
   const canManageMeta = hasPermission(user, 'admin', 'manage_meta');
   const canViewAdBudget = user.role === 'admin' || hasPermission(user, 'admin', 'view_ad_budget') || canManageMeta;
-  const hasAdminAccess = user.role === 'admin' || canManageUsers || canManageRouting || canManageMeta;
+  const hasAdminAccess = user.role === 'admin' || canManageUsers || canManageRouting || canManageMeta || canViewPipelines;
   const toolsList = [
     { name: 'LaterOn', label: 'LaterOn', icon: CalendarClock }
   ];
@@ -98,6 +101,9 @@ export default function DashboardView({ currentUser, onLogout }) {
     dashboard: 'Dashboard',
     analytics: 'Analytics',
     leads: 'Leads',
+    prospecting: 'Prospecting',
+    coldleads: 'Prospecting',
+    discovery: 'Prospecting',
     messages: 'Messages',
     todos: 'Todos',
     tasks: 'Todos',
@@ -106,7 +112,11 @@ export default function DashboardView({ currentUser, onLogout }) {
   };
 
   const getRouteForTab = (tab, adminSub = 'users') => {
+    if (tab === 'Prospecting') {
+      return '/discovery';
+    }
     if (tab === 'Admin') {
+      if (adminSub === 'discovery' || adminSub === 'cold_engine') return '/admin/discovery';
       return adminSub === 'users' ? '/admin' : `/admin/${adminSub}`;
     }
     if (tab === 'Messages') {
@@ -148,6 +158,7 @@ export default function DashboardView({ currentUser, onLogout }) {
       const parts = path.split('/').filter(Boolean);
       let sub = parts[1] || 'users';
       if (sub === 'routing' || sub === 'automations' || sub === 'meta') sub = 'integrations';
+      if (sub === 'discovery' || sub === 'cold-engine' || sub === 'cold_engine' || sub === 'coldengine' || sub === 'cold-pipelines' || sub === 'coldpipelines') sub = 'discovery';
       return { tab: 'Admin', adminSub: sub };
     }
     const clean = path.replace(/^\//, '');
@@ -181,6 +192,14 @@ export default function DashboardView({ currentUser, onLogout }) {
   const [isPipelineConfiguring, setIsPipelineConfiguring] = useState(false);
   const [laterOnPrefill, setLaterOnPrefill] = useState(null);
   const [hasVisitedLaterOn, setHasVisitedLaterOn] = useState(validInitialTab === 'LaterOn');
+  const [toastMessage, setToastMessage] = useState(null);
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((cur) => (cur === msg ? null : cur));
+    }, 4500);
+  };
 
   const handleScheduleWithLaterOn = (lead, channel = 'whatsapp') => {
     if (!lead) return;
@@ -378,11 +397,8 @@ export default function DashboardView({ currentUser, onLogout }) {
   }, [showUserMenu]);
 
   useEffect(() => {
-    const handleNotifAdded = (e) => {
+    const handleNotifAdded = () => {
       setNotifications(getStoredNotifications());
-      if (e.detail?.openDrawer) {
-        setIsNotifDrawerOpen(true);
-      }
     };
     const handleNotifsUpdated = (e) => {
       setNotifications(e.detail || getStoredNotifications());
@@ -462,6 +478,21 @@ export default function DashboardView({ currentUser, onLogout }) {
               localStorage.setItem('crm_cached_users', JSON.stringify(usersRes.data));
             } catch (e) {}
           }
+
+          // Trigger Discovery Autopilot catch-up check
+          if (pipesRes.data && usersRes.data) {
+            checkAndRunDiscoveryAutopilot({
+              pipelines: pipesRes.data,
+              usersList: usersRes.data
+            }).then((runs) => {
+              if (runs && runs.length > 0) {
+                const totalInserted = runs.reduce((acc, r) => acc + (r.insertedCount || 0), 0);
+                if (totalInserted > 0) {
+                  showToast(`Discovery Autopilot dripped ${totalInserted} new prospect(s) into your pipeline!`);
+                }
+              }
+            }).catch(e => console.warn('[Discovery Autopilot] Check error:', e));
+          }
         }
       } catch (err) {
         console.warn('Dashboard data fetch note:', err);
@@ -525,8 +556,41 @@ export default function DashboardView({ currentUser, onLogout }) {
     };
   }, []);
 
-  // Subscribe to real-time activity events
+  // Recurring Discovery Autopilot heartbeat: checks for due automated sweeps every 30 seconds
   useEffect(() => {
+    const heartbeatTimer = setInterval(() => {
+      if (!pipelinesList || pipelinesList.length === 0) return;
+      const hasActiveColdAutopilot = pipelinesList.some(
+        p => p.pipeline_type === 'cold' && p.discovery_config?.autopilot_enabled === true
+      );
+      if (!hasActiveColdAutopilot) return;
+
+      checkAndRunDiscoveryAutopilot({
+        pipelines: pipelinesList,
+        usersList: usersList || []
+      }).then((runs) => {
+        if (runs && runs.length > 0) {
+          const totalInserted = runs.reduce((acc, r) => acc + (r.insertedCount || 0), 0);
+          if (totalInserted > 0) {
+            showToast(`Discovery Autopilot dripped ${totalInserted} new prospect(s) into your pipeline!`);
+          }
+        }
+      }).catch((e) => console.warn('[Discovery Autopilot] Heartbeat check note:', e));
+    }, 30000);
+
+    return () => clearInterval(heartbeatTimer);
+  }, [pipelinesList, usersList]);
+
+  // Subscribe to real-time activity events & pipeline creation
+  useEffect(() => {
+    const handlePipelineCreated = (e) => {
+      const pipe = e.detail?.pipeline || e.detail;
+      if (pipe && pipe.id) {
+        setPipelinesList((prev) => [pipe, ...prev.filter(p => p.id !== pipe.id)]);
+      }
+    };
+    window.addEventListener('crm:pipeline_created', handlePipelineCreated);
+
     const handleActivityLogged = (e) => {
       if (e.detail) {
         setActivities((prev) => [e.detail, ...prev.filter((a) => a.id !== e.detail.id)].slice(0, 50));
@@ -566,6 +630,7 @@ export default function DashboardView({ currentUser, onLogout }) {
     })();
 
     return () => {
+      window.removeEventListener('crm:pipeline_created', handlePipelineCreated);
       window.removeEventListener('crm-activity-logged', handleActivityLogged);
       window.removeEventListener('storage', handleStorage);
     };
@@ -1009,12 +1074,14 @@ export default function DashboardView({ currentUser, onLogout }) {
                     ? 'Integrations'
                     : adminSubTab === 'users'
                     ? 'Users'
+                    : adminSubTab === 'discovery' || adminSubTab === 'cold_engine'
+                    ? 'Discovery'
                     : adminSubTab.charAt(0).toUpperCase() + adminSubTab.slice(1)}
                 </span>
               </>
             ) : (
               <span className="breadcrumb-current">
-                {activeTab === 'Todos' ? "To-Do's" : activeTab === 'LaterOn' ? 'LaterOn' : activeTab}
+                {activeTab === 'Todos' ? "To-Do's" : activeTab === 'LaterOn' ? 'LaterOn' : activeTab === 'Prospecting' ? 'Discovery' : activeTab}
               </span>
             )}
           </nav>
@@ -1119,6 +1186,7 @@ export default function DashboardView({ currentUser, onLogout }) {
                   canViewDashboard && { name: 'Dashboard', label: 'Dashboard', icon: LayoutDashboard },
                   canViewAnalytics && { name: 'Analytics', label: 'Analytics', icon: BarChart3 },
                   canViewLeads && { name: 'Leads', label: 'Leads', icon: UserCheck },
+                  { name: 'Prospecting', label: 'Discovery', icon: Compass },
                   canViewMessages && { name: 'Messages', label: 'Messages', icon: MessageSquare },
                   { name: 'Todos', label: "To-Do's", icon: StickyNote }
                 ]
@@ -1599,11 +1667,18 @@ export default function DashboardView({ currentUser, onLogout }) {
             />
           )}
           {activeTab === 'Todos' && <TodosView currentUser={user} />}
+          {activeTab === 'Prospecting' && (
+            <ProspectingView
+              currentUser={user}
+              onNavigate={navigateTo}
+              onScheduleLaterOn={handleScheduleWithLaterOn}
+            />
+          )}
           {activeTab === 'Admin' && (
             <div className="settings-workspace-layout">
               {/* Secondary Settings Sub-navigation inside Settings Main Section */}
               {(() => {
-                const isSettingsSubnavCollapsed = (adminSubTab === 'stages' && isPipelineConfiguring) || adminSubTab === 'integrations' || adminSubTab === 'meta';
+                const isSettingsSubnavCollapsed = ((adminSubTab === 'stages' || adminSubTab === 'discovery' || adminSubTab === 'cold_engine') && isPipelineConfiguring) || adminSubTab === 'integrations' || adminSubTab === 'meta';
                 return (
                   <div
                     className={`settings-subnav-pane ${isSettingsSubnavCollapsed ? 'settings-subnav-collapsed' : ''}`}
@@ -1614,6 +1689,7 @@ export default function DashboardView({ currentUser, onLogout }) {
                         ...(user.role === 'admin' ? [{ id: 'import', label: 'Import Leads', icon: UploadCloud }] : []),
                         ...(canManageMeta || user.role === 'admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
                         ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : []),
+                        ...(canViewPipelines || user.role === 'admin' ? [{ id: 'discovery', label: 'Discovery', icon: Compass }] : []),
                         ...(user.role === 'admin' ? [{ id: 'backups', label: 'Backups', icon: Database }] : [])
                       ].map((sub) => {
                         const SubIcon = sub.icon;
@@ -1621,7 +1697,7 @@ export default function DashboardView({ currentUser, onLogout }) {
                           <li key={sub.id}>
                             <button
                               type="button"
-                              className={`settings-subnav-btn ${adminSubTab === sub.id ? 'active' : ''}`}
+                              className={`settings-subnav-btn ${(adminSubTab === sub.id || (sub.id === 'discovery' && adminSubTab === 'cold_engine')) ? 'active' : ''}`}
                               onClick={() => navigateTo('Admin', sub.id)}
                               data-tooltip={isSettingsSubnavCollapsed ? sub.label : undefined}
                             >
@@ -1650,6 +1726,14 @@ export default function DashboardView({ currentUser, onLogout }) {
                 {adminSubTab === 'stages' && (
                   <PipelineSettingsView
                     currentUser={user}
+                    pipelineType="sales"
+                    onConfigureStateChange={setIsPipelineConfiguring}
+                  />
+                )}
+                {(adminSubTab === 'discovery' || adminSubTab === 'cold_engine') && (
+                  <PipelineSettingsView
+                    currentUser={user}
+                    pipelineType="cold"
                     onConfigureStateChange={setIsPipelineConfiguring}
                   />
                 )}
@@ -1658,7 +1742,7 @@ export default function DashboardView({ currentUser, onLogout }) {
             </div>
           )}
 
-          {activeTab !== 'Dashboard' && activeTab !== 'Analytics' && activeTab !== 'Leads' && activeTab !== 'Messages' && activeTab !== 'Todos' && activeTab !== 'LaterOn' && activeTab !== 'Admin' && (
+          {activeTab !== 'Dashboard' && activeTab !== 'Analytics' && activeTab !== 'Leads' && activeTab !== 'Messages' && activeTab !== 'Todos' && activeTab !== 'LaterOn' && activeTab !== 'Admin' && activeTab !== 'Prospecting' && (
             <div className="tab-placeholder-view">
               <h2 className="placeholder-title">{activeTab}</h2>
               <p className="placeholder-desc">This section is currently under development.</p>
@@ -1931,6 +2015,21 @@ export default function DashboardView({ currentUser, onLogout }) {
           />
           <div className="mobile-more-popover" role="menu">
             <div className="mobile-more-header">Tools & More</div>
+            {/* Discovery */}
+            <button
+              type="button"
+              className={`mobile-more-item ${activeTab === 'Prospecting' ? 'active' : ''}`}
+              onClick={() => {
+                setIsMobileMoreOpen(false);
+                navigateTo('Prospecting');
+              }}
+              role="menuitem"
+            >
+              <div className="mobile-more-icon-wrap">
+                <Compass size={18} strokeWidth={1.75} />
+              </div>
+              <span>Discovery</span>
+            </button>
             {toolsList.map((tool) => {
               const ToolIcon = tool.icon;
               return (
@@ -2065,7 +2164,7 @@ export default function DashboardView({ currentUser, onLogout }) {
           <button
             type="button"
             aria-label="More Tools & Admin"
-            className={`mobile-nav-cell ${isMobileMoreOpen || activeTab === 'Admin' || toolsList.some((t) => t.name === activeTab) ? 'active' : ''}`}
+            className={`mobile-nav-cell ${isMobileMoreOpen || activeTab === 'Admin' || activeTab === 'Prospecting' || toolsList.some((t) => t.name === activeTab) ? 'active' : ''}`}
             onClick={() => {
               haptic.selection();
               setIsMobileActivityOpen(false);
@@ -2073,7 +2172,7 @@ export default function DashboardView({ currentUser, onLogout }) {
             }}
           >
             <div className="mobile-nav-icon-wrap">
-              <MoreHorizontal size={22} strokeWidth={1.75} fill={isMobileMoreOpen || activeTab === 'Admin' || toolsList.some((t) => t.name === activeTab) ? 'currentColor' : 'none'} />
+              <MoreHorizontal size={22} strokeWidth={1.75} fill={isMobileMoreOpen || activeTab === 'Admin' || activeTab === 'Prospecting' || toolsList.some((t) => t.name === activeTab) ? 'currentColor' : 'none'} />
             </div>
           </button>
         ) : toolsList.length === 1 ? (
@@ -2099,6 +2198,32 @@ export default function DashboardView({ currentUser, onLogout }) {
           })()
         ) : null}
       </nav>
+
+      {/* Discovery Autopilot Notification Toast */}
+      {toastMessage && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            background: '#0f172a',
+            color: '#ffffff',
+            padding: '12px 20px',
+            borderRadius: '10px',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.2)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            fontSize: 14,
+            fontWeight: 500,
+            pointerEvents: 'none'
+          }}
+        >
+          <Sparkles size={16} style={{ color: '#38bdf8', flexShrink: 0 }} />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }

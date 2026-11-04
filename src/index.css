@@ -30,6 +30,13 @@ h1, h2, h3, h4, h5, h6, b, strong, button, input {
   font-weight: var(--font-weight-semibold);
 }
 
+/* Ensure placeholder text is always light and subtle */
+input::placeholder,
+textarea::placeholder {
+  font-weight: 400 !important;
+  color: #94a3b8;
+}
+
 input, button {
   font-family: inherit;
 }

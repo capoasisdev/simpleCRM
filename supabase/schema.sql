@@ -133,8 +133,12 @@ create table if not exists public.pipelines (
   created_at timestamptz default timezone('utc'::text, now()) not null,
   updated_at timestamptz default timezone('utc'::text, now()) not null,
   name text not null default 'Sales Pipeline',
+  pipeline_type text not null default 'sales', -- 'sales' | 'cold'
   is_default boolean default true,
-  stages jsonb not null default '[]'::jsonb
+  stages jsonb not null default '[]'::jsonb,
+  lead_distribution jsonb default null,
+  pipeline_fields jsonb default '[]'::jsonb,
+  discovery_config jsonb default null
 );
 
 alter table public.pipelines enable row level security;

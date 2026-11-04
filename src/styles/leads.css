@@ -5,6 +5,7 @@
   width: 100%;
   max-width: 100%;
   height: 100%;
+  flex: 1;
   min-height: 0;
   box-sizing: border-box;
 }
@@ -822,6 +823,324 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.lead-card-email-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lead-card-verify-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+  margin-left: auto;
+  flex-shrink: 0;
+  line-height: 1.3;
+}
+
+.lead-card-verify-badge.is-phone {
+  background: #f8fafc;
+  color: #475569;
+  border-color: #e2e8f0;
+}
+
+.lead-card-verify-check {
+  color: #16a34a;
+  flex-shrink: 0;
+}
+
+/* AI ICP Scoring & Dynamic Icebreaker Styles */
+.lead-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.lead-card-icp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  line-height: 1.35;
+}
+
+.lead-card-icp-pill.is-hot {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+
+.lead-card-icp-pill.is-warm {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.lead-card-icp-pill.is-mid {
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.icp-pill-symbol {
+  font-size: 9.5px;
+  line-height: 1;
+}
+
+/* Lead Drawer: AI Prospect Intelligence Card */
+.lead-ai-intelligence-card {
+  background: linear-gradient(135deg, #f8fafc 0%, #f5f3ff 100%);
+  border: 1px solid #e0e7ff;
+  border-radius: 10px;
+  padding: 13px 15px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.lead-ai-intelligence-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.lead-ai-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #4338ca;
+}
+
+.lead-ai-sparkle-icon {
+  color: #7c3aed;
+  flex-shrink: 0;
+}
+
+.lead-ai-score-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #ffffff;
+  padding: 2.5px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+}
+
+.lead-ai-reasoning {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #475569;
+  font-style: italic;
+  margin-bottom: 10px;
+}
+
+.lead-ai-hook-box {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.lead-ai-hook-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 6px;
+}
+
+.lead-ai-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lead-ai-copy-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.lead-ai-hook-text {
+  font-size: 12.5px;
+  line-height: 1.5;
+  font-weight: 500;
+  color: #1e293b;
+  user-select: text;
+}
+
+.lead-ai-pain-point-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: #64748b;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.lead-ai-sub-label {
+  font-weight: 600;
+  color: #475569;
+  flex-shrink: 0;
+}
+
+.lead-ai-sub-text {
+  color: #334155;
+}
+
+/* Google Maps & Rating Badge Styles */
+.lead-card-rating-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2.5px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #fefce8;
+  color: #854d0e;
+  border: 1px solid #fef08a;
+  flex-shrink: 0;
+  line-height: 1.35;
+}
+
+.lead-card-rating-star {
+  font-size: 9px;
+  line-height: 1;
+}
+
+.lead-card-rating-count {
+  font-size: 9px;
+  font-weight: 500;
+  color: #a16207;
+}
+
+/* Lead Drawer: Local Business & Location Card */
+.lead-local-business-card {
+  background: linear-gradient(135deg, #f8fafc 0%, #f0fdf4 100%);
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 13px 15px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.lead-local-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.lead-local-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #166534;
+}
+
+.lead-local-map-icon {
+  color: #15803d;
+  flex-shrink: 0;
+}
+
+.lead-local-rating-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #ffffff;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #854d0e;
+  border: 1px solid #fef08a;
+}
+
+.lead-local-category-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 1.5px 7px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.lead-local-address-text {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #334155;
+  margin-bottom: 10px;
+}
+
+.lead-local-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lead-local-maps-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #ffffff;
+  border: 1px solid #86efac;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #166534;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lead-local-maps-btn:hover {
+  background: #f0fdf4;
+  border-color: #4ade80;
+  color: #14532d;
 }
 
 .lead-contact-icon {
@@ -2311,6 +2630,228 @@
   background-color: #fecaca;
   color: #991b1b;
   font-weight: 700;
+}
+
+/* =========================================================
+   LEAD CARD DELAYED AUTOMATION FOOTER STRIPS (LINEAR STYLE)
+   ========================================================= */
+.lead-card-automation-strips {
+  display: flex;
+  flex-direction: column;
+  margin: 6px -10px -8px -10px;
+  overflow: hidden;
+  border-bottom-left-radius: 7px;
+  border-bottom-right-radius: 7px;
+  animation: autoStripSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  z-index: 2;
+  transition: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lead-card-automation-strips.has-followup-below {
+  margin-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+@keyframes autoStripSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lead-card-auto-strip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6.5px 11px;
+  font-size: 11px;
+  line-height: 1.3;
+  border-top: 1px solid #f1f5f9;
+  user-select: none;
+  transition: background-color 0.28s ease, border-color 0.28s ease, color 0.28s ease;
+}
+
+/* Buttery morph cross-fade on state change */
+.strip-morph-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6.5px;
+  min-width: 0;
+  flex: 1;
+  animation: stripMorphIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes stripMorphIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lead-card-auto-strip-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+.lead-card-auto-strip-text {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+}
+
+.lead-card-auto-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Refined Linear-style Undo Button */
+.lead-card-auto-strip-undo {
+  background: none;
+  border: none;
+  padding: 1px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  color: #64748b;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.lead-card-auto-strip-undo:hover {
+  color: #0f172a;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Minimalist Micro-Spinner */
+.strip-micro-spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: microSpin 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes microSpin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* 1. WHATSAPP STRIP */
+.lead-card-auto-strip.auto-strip-whatsapp {
+  background-color: #f0fdf4;
+  border-top-color: #dcfce7;
+  color: #166534;
+}
+.lead-card-auto-strip.auto-strip-whatsapp .lead-card-auto-strip-icon {
+  color: #16a34a;
+}
+
+/* 2. EMAIL STRIP */
+.lead-card-auto-strip.auto-strip-email {
+  background-color: #f8faff;
+  border-top-color: #e2e8f0;
+  color: #2563eb;
+}
+.lead-card-auto-strip.auto-strip-email .lead-card-auto-strip-icon {
+  color: #3b82f6;
+}
+
+/* 3. META STRIP */
+.lead-card-auto-strip.auto-strip-meta {
+  background-color: #faf5ff;
+  border-top-color: #f3e8ff;
+  color: #6b21a8;
+}
+.lead-card-auto-strip.auto-strip-meta .lead-card-auto-strip-icon {
+  color: #7c3aed;
+}
+
+/* STATUS STATES */
+/* A. Sending (Subtle, focused in-flight state) */
+.lead-card-auto-strip.is-sending {
+  background-color: #f8fafc !important;
+  border-top-color: #e2e8f0 !important;
+  color: #475569 !important;
+}
+.lead-card-auto-strip.is-sending .lead-card-auto-strip-icon {
+  color: #64748b !important;
+}
+
+/* B. Sent (Refined mint wash + delicate checkmark) */
+.lead-card-auto-strip.is-sent {
+  background-color: #ecfdf5 !important;
+  border-top-color: #a7f3d0 !important;
+  color: #065f46 !important;
+}
+.lead-card-auto-strip.is-sent .lead-card-auto-strip-icon {
+  color: #10b981 !important;
+}
+
+.lead-card-auto-strip.is-sent .strip-check-icon {
+  animation: checkSpring 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes checkSpring {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.lead-card-auto-strip.is-sent .lead-card-auto-strip-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #047857;
+  background-color: #d1fae5;
+  padding: 1px 6px;
+  border-radius: 999px;
+  letter-spacing: 0.01em;
+}
+
+/* C. Failed (Subtle coral alert) */
+.lead-card-auto-strip.is-failed {
+  background-color: #fef2f2 !important;
+  border-top-color: #fecaca !important;
+  color: #991b1b !important;
+}
+.lead-card-auto-strip.is-failed .lead-card-auto-strip-icon {
+  color: #dc2626 !important;
+}
+.lead-card-auto-strip.is-failed .lead-card-auto-strip-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #991b1b;
+  background-color: #fee2e2;
+  padding: 1px 6px;
+  border-radius: 999px;
 }
 
 /* =========================================================

@@ -213,34 +213,17 @@ export default function EmailIntegrationView({ currentUser }) {
     setIsSendingTest(true);
     setTestFeedback(null);
     try {
-      const response = await fetch(`${RESEND_API_BASE}/emails`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${config.api_key}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from: `${config.from_name || 'SimpleCRM'} <${config.from_email || 'onboarding@resend.dev'}>`,
-          to: [testRecipient.trim()],
-          reply_to: config.reply_to?.trim() || undefined,
-          subject: `✓ Connection Verified - ${config.from_name || 'SimpleCRM'}`,
-          html: generateTestEmailHtml({
-            senderName: config.from_name,
-            senderEmail: config.from_email,
-            replyTo: config.reply_to,
-            testRecipient: testRecipient.trim()
-          })
-        })
+      const data = await testResendCredentials({
+        apiKey: config.api_key,
+        fromEmail: config.from_email,
+        fromName: config.from_name,
+        replyTo: config.reply_to,
+        testRecipient: testRecipient.trim()
       });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Resend error response');
-      }
 
       setTestFeedback({
         type: 'success',
-        text: `Test email dispatched! Resend ID: ${data.id}`
+        text: `Test email dispatched! Resend ID: ${data.id || 'ok'}`
       });
       setFeedback({
         type: 'success',

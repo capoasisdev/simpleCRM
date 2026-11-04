@@ -20,6 +20,10 @@ import {
   getDashboardScope,
   getAnalyticsScope
 } from './permissions';
+import {
+  generatePipelineConfigFromPrompt,
+  generateHeuristicPipelineConfig
+} from './pipelineAiGenerator';
 
 const OPENROUTER_STORAGE_KEY = 'crm_openrouter_api_key';
 const GEMINI_STORAGE_KEY = 'crm_gemini_api_key';
@@ -811,6 +815,51 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
     };
   }
 
+  // 6.5 Pipeline & Targeting Generation Intent (e.g. "I want to target customers in India who want HRMS software")
+  const isPipelineCreationIntent =
+    (q.includes('target') && (q.includes('customer') || q.includes('who') || q.includes('want') || q.includes('in') || q.includes('software') || q.includes('leads') || q.includes('buyers'))) ||
+    q.includes('create a pipeline') ||
+    q.includes('create pipeline') ||
+    q.includes('setup pipeline') ||
+    q.includes('set up pipeline') ||
+    q.includes('build pipeline') ||
+    q.includes('discovery pipeline') ||
+    (q.includes('pipeline') && q.includes('for '));
+
+  if (isPipelineCreationIntent) {
+    const generated = generateHeuristicPipelineConfig(userQuery);
+    const modeBadge = generated.target_mode === 'b2c' ? '👤 B2C Consumer' : '🏢 B2B Enterprise';
+
+    let targetingDetails = `• **Geography**: ${generated.target_countries.join(', ')} (${generated.target_regions.join(', ')})\n`;
+    if (generated.target_mode === 'b2c') {
+      targetingDetails += `• **Customer Personas**: ${generated.target_personas.join(', ')}\n`;
+      targetingDetails += `• **Interests & Needs**: ${generated.target_interests.join(', ')}\n`;
+    } else {
+      targetingDetails += `• **Target Roles**: ${generated.target_roles.join(', ')}\n`;
+      targetingDetails += `• **Industries**: ${generated.target_industries.join(', ')}\n`;
+      targetingDetails += `• **Company Headcount**: ${generated.target_company_sizes.join(', ')} employees\n`;
+    }
+    targetingDetails += `• **Search Queries**: *${generated.search_queries.join(', ')}*`;
+
+    const stagesList = generated.stages
+      .map((s, idx) => `${idx + 1}. **${s.name}** ${s.is_won ? '🏆 *(Won)*' : s.is_lost ? '❌ *(Lost)*' : ''}`)
+      .join('\n');
+
+    return {
+      text: `### ✨ AI Pipeline Blueprint: **${generated.name}**\n\n` +
+        `**Mode**: \`${modeBadge}\`\n\n` +
+        `*${generated.explanation}*\n\n` +
+        `#### 🎯 Target Audience Scopes:\n${targetingDetails}\n\n` +
+        `#### 📊 Custom Stages (${generated.stages.length}):\n${stagesList}\n\n` +
+        `Click **Confirm & Create Pipeline** below to automatically generate this pipeline in your CRM!`,
+      action: {
+        type: 'create_pipeline',
+        title: `Create Pipeline: "${generated.name}"`,
+        payload: generated
+      }
+    };
+  }
+
   // 7. Create Task / Follow-up Request
   if (q.includes('task') || q.includes('remind') || q.includes('todo')) {
     const titleMatch = userQuery.replace(/create task|add task|remind me to|create a task/gi, '').trim();
@@ -979,6 +1028,88 @@ export async function executeCrmAction(action, { currentUser = {} }) {
       };
     }
 
+    // 4. Create Discovery Pipeline from AI Blueprint
+    if (action.type === 'create_pipeline' && action.payload) {
+      const p = action.payload;
+      const formattedStages = (p.stages || []).map((st, idx) => ({
+        id: `stage_${Date.now()}_${idx}`,
+        name: st.name,
+        is_entry: idx === 0,
+        is_won: Boolean(st.is_won),
+        is_lost: Boolean(st.is_lost)
+      }));
+
+      const starterFields = p.target_mode === 'b2c'
+        ? [
+            { key: 'name', label: 'Full Name', show_on_card: false, is_core: true },
+            { key: 'phone', label: 'Phone Number', show_on_card: true, is_core: true },
+            { key: 'email', label: 'Email Address', show_on_card: false, is_core: true },
+            { key: 'city', label: 'City / Area', show_on_card: true, is_core: false }
+          ]
+        : [
+            { key: 'name', label: 'Full Name', show_on_card: false, is_core: true },
+            { key: 'company', label: 'Company', show_on_card: true, is_core: false },
+            { key: 'designation', label: 'Job Title / Designation', show_on_card: true, is_core: false },
+            { key: 'phone', label: 'Phone Number', show_on_card: false, is_core: true },
+            { key: 'email', label: 'Email Address', show_on_card: false, is_core: true },
+            { key: 'linkedin', label: 'LinkedIn Profile', show_on_card: false, is_core: false }
+          ];
+
+      const discoveryConfigPayload = {
+        enabled: true,
+        target_mode: p.target_mode || 'b2b',
+        autopilot_enabled: false,
+        schedule_cadence: 'weekdays',
+        schedule_time: '09:00',
+        source: 'web_discovery',
+        target_countries: p.target_countries || [],
+        target_regions: p.target_regions || [],
+        target_industries: p.target_industries || [],
+        target_company_sizes: p.target_company_sizes || [],
+        target_roles: p.target_roles || [],
+        target_personas: p.target_personas || [],
+        target_interests: p.target_interests || [],
+        search_queries: p.search_queries || [],
+        batch_size: 25,
+        dedupe: {
+          check_cold_leads: true,
+          check_sales_leads: true,
+          match_email: true,
+          match_phone: true,
+          match_domain: p.target_mode !== 'b2c',
+          match_linkedin: true,
+          on_duplicate: 'skip'
+        }
+      };
+
+      const { data: newPipe, error: insertErr } = await supabase
+        .from('pipelines')
+        .insert([{
+          name: p.name,
+          pipeline_type: 'cold',
+          is_default: false,
+          stages: formattedStages,
+          pipeline_fields: starterFields,
+          discovery_config: discoveryConfigPayload,
+          updated_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
+
+      if (insertErr) throw insertErr;
+
+      // Broadcast event so active views immediately reload pipelines
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('crm:pipeline_created', { detail: { pipeline: newPipe, ...newPipe } }));
+      }
+
+      return {
+        success: true,
+        message: `Discovery Pipeline "${p.name}" has been created with ${formattedStages.length} custom stages and targeted discovery scopes!`,
+        pipeline: newPipe
+      };
+    }
+
     return { success: false, message: 'Unsupported action type' };
   } catch (err) {
     console.error('Error executing CRM action:', err);
@@ -1105,6 +1236,55 @@ export async function askAiAssistant(userMessage, { leads = [], deals = [], pipe
 
   // Fetch complete activities from DB + localStorage
   const completeActivities = await fetchFullActivities(activities);
+
+  // Check for AI Pipeline Creation Intent
+  const qLower = userMessage.toLowerCase();
+  const isPipelineCreationIntent =
+    (qLower.includes('target') && (qLower.includes('customer') || qLower.includes('who') || qLower.includes('want') || qLower.includes('in') || qLower.includes('software') || qLower.includes('leads') || qLower.includes('buyers'))) ||
+    qLower.includes('create a pipeline') ||
+    qLower.includes('create pipeline') ||
+    qLower.includes('setup pipeline') ||
+    qLower.includes('set up pipeline') ||
+    qLower.includes('build pipeline') ||
+    qLower.includes('discovery pipeline') ||
+    (qLower.includes('pipeline') && qLower.includes('for '));
+
+  if (isPipelineCreationIntent) {
+    const generated = await generatePipelineConfigFromPrompt(userMessage);
+    const modeBadge = generated.target_mode === 'b2c' ? '👤 B2C Consumer' : '🏢 B2B Enterprise';
+
+    let targetingDetails = `• **Geography**: ${generated.target_countries.join(', ')} (${generated.target_regions.join(', ')})\n`;
+    if (generated.target_mode === 'b2c') {
+      targetingDetails += `• **Customer Personas**: ${generated.target_personas.join(', ')}\n`;
+      targetingDetails += `• **Interests & Needs**: ${generated.target_interests.join(', ')}\n`;
+    } else {
+      targetingDetails += `• **Target Roles**: ${generated.target_roles.join(', ')}\n`;
+      targetingDetails += `• **Industries**: ${generated.target_industries.join(', ')}\n`;
+      targetingDetails += `• **Company Headcount**: ${generated.target_company_sizes.join(', ')} employees\n`;
+    }
+    targetingDetails += `• **Search Queries**: *${generated.search_queries.join(', ')}*`;
+
+    const stagesList = (generated.stages || [])
+      .map((st, idx) => `${idx + 1}. **${st.name}**${st.is_won ? ' *(Won)*' : ''}${st.is_lost ? ' *(Lost)*' : ''}`)
+      .join('\n');
+
+    const res = {
+      text: `### ✨ AI Pipeline Blueprint: **${generated.name}**\n\n` +
+        `**Mode**: \`${modeBadge}\`\n\n` +
+        `*${generated.explanation}*\n\n` +
+        `#### 🎯 Target Audience Scopes:\n${targetingDetails}\n\n` +
+        `#### 📊 Custom Stages (${generated.stages.length}):\n${stagesList}\n\n` +
+        `Click **Confirm & Create Pipeline** below to automatically generate this pipeline in your CRM!`,
+      action: {
+        type: 'create_pipeline',
+        title: `Create Pipeline: "${generated.name}"`,
+        payload: generated
+      },
+      model: apiKey ? 'AI Pipeline Architect' : 'Local Heuristic Engine'
+    };
+    if (onChunk && res.text) onChunk(res.text);
+    return res;
+  }
 
   // If no OpenRouter API key configured, use local analytical intelligence engine with conversational memory
   if (!apiKey) {

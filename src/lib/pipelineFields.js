@@ -5,12 +5,35 @@ export const DEFAULT_PIPELINE_FIELDS = [
   { key: 'city', label: 'City', mapped_question: 'city', show_on_card: false, is_core: false }
 ];
 
+export const DEFAULT_COLD_PIPELINE_FIELDS = [
+  { key: 'name', label: 'Full Name', show_on_card: false, is_core: true },
+  { key: 'company', label: 'Company', show_on_card: true, is_core: false },
+  { key: 'designation', label: 'Job Title / Designation', show_on_card: true, is_core: false },
+  { key: 'phone', label: 'Phone Number', show_on_card: false, is_core: true },
+  { key: 'email', label: 'Email Address', show_on_card: false, is_core: true },
+  { key: 'linkedin', label: 'LinkedIn Profile', show_on_card: false, is_core: false }
+];
+
+export const DEFAULT_COLD_B2C_PIPELINE_FIELDS = [
+  { key: 'name', label: 'Full Name / Member', show_on_card: false, is_core: true },
+  { key: 'interest', label: 'Inquiry & Need', show_on_card: true, is_core: false },
+  { key: 'persona', label: 'Customer Persona', show_on_card: true, is_core: false },
+  { key: 'city', label: 'City / Location', show_on_card: true, is_core: false },
+  { key: 'phone', label: 'Phone Number', show_on_card: false, is_core: true },
+  { key: 'email', label: 'Email Address', show_on_card: false, is_core: true }
+];
+
 /**
  * Returns the effective fields for a pipeline, falling back to default core fields
  */
-export function getPipelineFields(pipeline) {
+export function getPipelineFields(pipeline, pipelineType = 'sales') {
   if (pipeline && Array.isArray(pipeline.pipeline_fields) && pipeline.pipeline_fields.length > 0) {
     return pipeline.pipeline_fields;
+  }
+  const effectiveType = pipeline?.pipeline_type || pipelineType;
+  if (effectiveType === 'cold') {
+    const isB2C = pipeline?.discovery_config?.target_mode === 'b2c';
+    return isB2C ? DEFAULT_COLD_B2C_PIPELINE_FIELDS : DEFAULT_COLD_PIPELINE_FIELDS;
   }
   return DEFAULT_PIPELINE_FIELDS;
 }
@@ -38,6 +61,12 @@ export function getLeadFieldValue(lead, field) {
   if (field.key === 'email') return lead.email || '';
   if (field.key === 'city') {
     return lead.city || lead.custom_fields?.['City'] || lead.custom_fields?.['city'] || '';
+  }
+  if (field.key === 'interest') {
+    return lead.custom_fields?.interest || lead.custom_fields?.requirement || lead.designation || '';
+  }
+  if (field.key === 'persona') {
+    return lead.custom_fields?.persona || (lead.custom_fields?.target_mode === 'b2c' ? lead.designation : '') || '';
   }
 
   // Check mapped question first

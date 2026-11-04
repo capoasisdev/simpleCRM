@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, UserCheck, CalendarClock, RotateCcw, Download, GitFork, FolderInput, Menu } from 'lucide-react';
+import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, ArrowUpRight, UserCheck, CalendarClock, RotateCcw, Download, GitFork, FolderInput, Menu, Compass, Loader2, Share2, Send, Sparkles } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission, getLeadScope, getFollowUpScope, canDeleteFollowUp, isLeadAssignedToUser, isUserAssignedToPipeline } from '../lib/permissions';
 import { recordActivity, fetchLeadActivities } from '../lib/activities';
@@ -123,10 +123,18 @@ const formatPhoneNumber = (phone) => {
   return trimmed;
 };
 
-export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }) {
+export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, pipelineType = 'sales' }) {
+  const activePipelineIdKey = pipelineType === 'cold' ? 'crm_active_cold_pipeline_id' : 'crm_active_pipeline_id';
+  const cachedPipelinesKey = pipelineType === 'cold' ? 'crm_cached_pipelines_cold' : 'crm_cached_pipelines';
+  const pipelineColumnsKey = pipelineType === 'cold' ? 'crm_cold_pipeline_columns' : 'crm_pipeline_columns';
+  const cachedLeadsKey = pipelineType === 'cold' ? 'crm_cached_cold_leads' : 'crm_cached_leads';
+
+  const entitySingular = pipelineType === 'cold' ? 'Prospect' : 'Lead';
+  const entityPlural = pipelineType === 'cold' ? 'Prospects' : 'Leads';
+
   const [leads, setLeads] = useState(() => {
     try {
-      const cached = localStorage.getItem('crm_cached_leads');
+      const cached = localStorage.getItem(cachedLeadsKey);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -136,7 +144,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   });
   const [columns, setColumns] = useState(() => {
     try {
-      const cached = localStorage.getItem('crm_pipeline_columns');
+      const cached = localStorage.getItem(pipelineColumnsKey);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -603,6 +611,52 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   const [dragOverColumnId, setDragOverColumnId] = useState(null);
   const justDraggedRef = useRef(false);
   const inFlightAutomationsRef = useRef(new Set());
+  // Lead Card Automation Countdown Strips State: { [leadId]: { leadId, targetStageId, stageName, items: { whatsapp, email, meta } } }
+  const [cardAutomations, setCardAutomations] = useState({});
+  const [copiedHookLeadId, setCopiedHookLeadId] = useState(null);
+  const automationTimersRef = useRef({});
+
+  // Flush any pending card automations immediately (e.g. on unmount or tab close)
+  const flushPendingAutomations = useCallback(() => {
+    Object.entries(automationTimersRef.current).forEach(([leadId, timer]) => {
+      if (timer && !timer.isFlushed && typeof timer.runDispatches === 'function') {
+        timer.isFlushed = true;
+        if (timer.intervalId) {
+          clearInterval(timer.intervalId);
+          timer.intervalId = null;
+        }
+        try {
+          console.log(`[Auto-Flush] Flushing pending automation for lead: ${leadId}`);
+          timer.runDispatches();
+        } catch (err) {
+          console.error(`[Auto-Flush] Failed for lead ${leadId}:`, err);
+        }
+      }
+    });
+  }, []);
+
+  // Clean up and auto-flush active automations on component unmount (tab switch) or browser exit
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushPendingAutomations();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
+
+      // Immediately flush and dispatch any pending automations when navigating away from LeadsView
+      flushPendingAutomations();
+
+      // Clear any remaining dismiss timeouts
+      Object.values(automationTimersRef.current).forEach((t) => {
+        if (t?.dismissTimeoutId) clearTimeout(t.dismissTimeoutId);
+      });
+    };
+  }, [flushPendingAutomations]);
 
   const draggedLead = useMemo(() => {
     if (!draggedLeadId) return null;
@@ -828,14 +882,19 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   // Multi-Pipeline States
   const [pipelinesList, setPipelinesList] = useState(() => {
     try {
-      const cached = localStorage.getItem('crm_cached_pipelines');
-      if (cached) return JSON.parse(cached);
+      const cached = localStorage.getItem(cachedPipelinesKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return Array.isArray(parsed)
+          ? parsed.filter((p) => (pipelineType === 'cold' ? p.pipeline_type === 'cold' : (!p.pipeline_type || p.pipeline_type === 'sales')))
+          : [];
+      }
     } catch (e) { }
     return [];
   });
   const [activePipelineId, setActivePipelineId] = useState(() => {
     try {
-      return localStorage.getItem('crm_active_pipeline_id') || null;
+      return localStorage.getItem(activePipelineIdKey) || null;
     } catch (e) { }
     return null;
   });
@@ -864,8 +923,8 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   }, [visiblePipelines, pipelinesList, activePipelineId]);
 
   const activePipelineFields = useMemo(() => {
-    return getPipelineFields(activePipeline);
-  }, [activePipeline]);
+    return getPipelineFields(activePipeline, pipelineType);
+  }, [activePipeline, pipelineType]);
 
   const cardFields = useMemo(() => {
     return activePipelineFields.filter((f) => f.show_on_card && f.key !== 'name');
@@ -892,32 +951,46 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
           setPipelineForms(formsData);
         }
 
-        if (!error && isMounted && data && Array.isArray(data) && data.length > 0) {
-          setPipelinesList(data);
+        const matchesType = (p) => {
+          if (pipelineType === 'cold') {
+            return p.pipeline_type === 'cold';
+          }
+          return !p.pipeline_type || p.pipeline_type === 'sales';
+        };
+
+        const targetPipelines = (data || []).filter(matchesType);
+
+        if (!error && isMounted) {
+          setPipelinesList(targetPipelines);
           try {
-            localStorage.setItem('crm_cached_pipelines', JSON.stringify(data));
+            localStorage.setItem(cachedPipelinesKey, JSON.stringify(targetPipelines));
           } catch (e) { }
 
-          const savedId = localStorage.getItem('crm_active_pipeline_id');
-          const targetPipe = data.find((p) => p.id === (activePipelineId || savedId)) || data.find((p) => p.is_default) || data[0];
+          if (targetPipelines.length > 0) {
+            const savedId = localStorage.getItem(activePipelineIdKey);
+            const targetPipe = targetPipelines.find((p) => p.id === (activePipelineId || savedId)) || targetPipelines.find((p) => p.is_default) || targetPipelines[0];
 
-          if (targetPipe) {
-            setActivePipelineId(targetPipe.id);
-            try {
-              localStorage.setItem('crm_active_pipeline_id', targetPipe.id);
-            } catch (e) { }
-
-            if (targetPipe.stages && Array.isArray(targetPipe.stages) && targetPipe.stages.length > 0) {
-              const sorted = [...targetPipe.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-              setColumns(sorted);
+            if (targetPipe) {
+              setActivePipelineId(targetPipe.id);
               try {
-                localStorage.setItem('crm_pipeline_columns', JSON.stringify(sorted));
+                localStorage.setItem(activePipelineIdKey, targetPipe.id);
               } catch (e) { }
-              const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
-              if (entryCol?.id) {
-                setNewLeadStage((prev) => (sorted.some((c) => c.id === prev) ? prev : entryCol.id));
+
+              if (targetPipe.stages && Array.isArray(targetPipe.stages) && targetPipe.stages.length > 0) {
+                const sorted = [...targetPipe.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+                setColumns(sorted);
+                try {
+                  localStorage.setItem(pipelineColumnsKey, JSON.stringify(sorted));
+                } catch (e) { }
+                const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
+                if (entryCol?.id) {
+                  setNewLeadStage((prev) => (sorted.some((c) => c.id === prev) ? prev : entryCol.id));
+                }
               }
             }
+          } else {
+            setActivePipelineId(null);
+            setColumns([]);
           }
         }
       } catch (err) {
@@ -928,7 +1001,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
     fetchPipelines();
 
     const pipeChannel = supabase
-      .channel('pipeline-stages-realtime')
+      .channel(`pipeline-stages-realtime-${pipelineType}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'pipelines' },
@@ -943,13 +1016,13 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
       isMounted = false;
       supabase.removeChannel(pipeChannel);
     };
-  }, []);
+  }, [pipelineType, cachedPipelinesKey, activePipelineIdKey, pipelineColumnsKey]);
 
   const handleSelectPipeline = (pipeId) => {
     setActivePipelineId(pipeId);
     setIsPipelineDropdownOpen(false);
     try {
-      localStorage.setItem('crm_active_pipeline_id', pipeId);
+      localStorage.setItem(activePipelineIdKey, pipeId);
     } catch (e) { }
 
     const pipe = pipelinesList.find((p) => p.id === pipeId);
@@ -957,7 +1030,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
       const sorted = [...pipe.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       setColumns(sorted);
       try {
-        localStorage.setItem('crm_pipeline_columns', JSON.stringify(sorted));
+        localStorage.setItem(pipelineColumnsKey, JSON.stringify(sorted));
       } catch (e) { }
       const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
       if (entryCol?.id) {
@@ -979,11 +1052,33 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
     }
   }, [visiblePipelines, activePipelineId]);
 
-  // Trigger Stage Automations (WhatsApp & Email) if configured for target pipeline stage
+  // Handle manual cancel of active automation countdown on lead card
+  const handleCancelCardAutomation = (leadId, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (automationTimersRef.current[leadId]) {
+      if (automationTimersRef.current[leadId].intervalId) {
+        clearInterval(automationTimersRef.current[leadId].intervalId);
+      }
+      if (automationTimersRef.current[leadId].dismissTimeoutId) {
+        clearTimeout(automationTimersRef.current[leadId].dismissTimeoutId);
+      }
+      delete automationTimersRef.current[leadId];
+    }
+    setCardAutomations((prev) => {
+      const next = { ...prev };
+      delete next[leadId];
+      return next;
+    });
+  };
+
+  // Trigger Stage Automations (WhatsApp, Email & Meta CAPI) with visual countdown on card footer
   const triggerStageAutomation = async (lead, targetStageId) => {
     if (!lead || !targetStageId) return;
 
-    // Deduplication lock: block duplicate triggers for the same lead + stage within 5s
+    // Deduplication lock: block duplicate triggers for the same lead + stage within 6s
     const lockKey = `${lead.id || lead.phone || lead.email}_${targetStageId}`;
     if (inFlightAutomationsRef.current.has(lockKey)) {
       return;
@@ -991,170 +1086,357 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
     inFlightAutomationsRef.current.add(lockKey);
     setTimeout(() => {
       inFlightAutomationsRef.current.delete(lockKey);
-    }, 5000);
+    }, 6000);
+
     try {
-      const pipeId = lead.pipeline_id || activePipelineId;
-      const targetPipe = pipelinesList.find(p => p.id === pipeId) || pipelinesList.find(p => p.is_default);
-      if (!targetPipe || !Array.isArray(targetPipe.stage_automations)) return;
+      let pipes = pipelinesList;
+      if (!Array.isArray(pipes) || pipes.length === 0) {
+        try {
+          const cached = localStorage.getItem('crm_cached_pipelines');
+          if (cached) pipes = JSON.parse(cached);
+        } catch (_) {}
+      }
+
+      const targetPipe = (pipes || []).find(p => (p.stages || []).some(s => s.id === targetStageId))
+        || (pipes || []).find(p => (p.stage_automations || []).some(a => a.stage_id === targetStageId))
+        || (pipes || []).find(p => p.id === (lead.pipeline_id || activePipelineId))
+        || (pipes || []).find(p => p.id === activePipelineId)
+        || (pipes || []).find(p => p.is_default)
+        || (pipes || [])[0];
+
+      const pipeId = targetPipe?.id || lead.pipeline_id || activePipelineId;
+
+      if (!targetPipe || !Array.isArray(targetPipe.stage_automations)) {
+        inFlightAutomationsRef.current.delete(lockKey);
+        return;
+      }
 
       const auto = targetPipe.stage_automations.find(a => a.stage_id === targetStageId);
-      if (!auto) return;
+      if (!auto) {
+        inFlightAutomationsRef.current.delete(lockKey);
+        return;
+      }
 
       const stageObj = (targetPipe.stages || []).find(s => s.id === targetStageId);
       const stageName = stageObj?.label || targetStageId;
 
-      // 1. WhatsApp Automation
-      if (auto.is_active && auto.template_name && lead.phone) {
-        try {
-          if (lead.id) {
-            const { data: existingAct } = await supabase
-              .from('lead_activities')
-              .select('id')
-              .eq('lead_id', lead.id)
-              .eq('type', 'whatsapp_sent')
-              .eq('to_stage', targetStageId)
-              .limit(1)
-              .maybeSingle();
-            if (existingAct) return;
-          }
+      const isWaActive = Boolean(auto.is_active && auto.template_name && lead.phone);
+      const isEmailActive = Boolean(auto.email_active && auto.email_template_id && lead.email);
+      const isMetaActive = Boolean(auto.meta_capi_active && (auto.meta_capi_event || 'QualifiedLead'));
 
-          await sendWhatsAppMessage({
-            to: lead.phone,
-            leadName: lead.name,
-            templateName: auto.template_name,
-            leadId: lead.id,
-            pipelineId: pipeId,
-            stageId: targetStageId,
-            isAutomated: true
-          });
+      // If no automations are active for this stage & lead, exit
+      if (!isWaActive && !isEmailActive && !isMetaActive) {
+        inFlightAutomationsRef.current.delete(lockKey);
+        return;
+      }
 
-          recordActivity({
-            type: 'whatsapp_sent',
-            leadId: lead.id,
-            leadName: lead.name,
-            toStage: targetStageId,
-            details: `Automated WhatsApp "${auto.template_name}" sent on reaching stage "${stageName}"`,
-            userName: 'Automation'
-          });
+      console.log('[Stage Automation] Triggered for:', lead.name, 'stage:', stageName, {
+        isWaActive,
+        isEmailActive,
+        isMetaActive,
+        pipeline: targetPipe.name
+      });
 
-          addNotification({
-            type: 'whatsapp_automation',
-            title: 'WhatsApp Automation Sent',
-            message: `Sent "${auto.template_name}" to ${lead.name} (${lead.phone}) on entering "${stageName}".`,
-            leadId: lead.id,
-            timestamp: new Date().toISOString()
-          });
-        } catch (waErr) {
-          console.warn(`Stage automation WhatsApp dispatch error for ${lead.name}:`, waErr);
+      // Clean up previous timers if user moved this card repeatedly
+      if (automationTimersRef.current[lead.id]) {
+        if (automationTimersRef.current[lead.id].intervalId) {
+          clearInterval(automationTimersRef.current[lead.id].intervalId);
+        }
+        if (automationTimersRef.current[lead.id].dismissTimeoutId) {
+          clearTimeout(automationTimersRef.current[lead.id].dismissTimeoutId);
         }
       }
 
-      // 2. Email Automation
-      if (auto.email_active && auto.email_template_id && lead.email) {
-        try {
-          if (lead.id) {
-            const { data: existingLog } = await supabase
-              .from('email_logs')
-              .select('id')
-              .eq('lead_id', lead.id)
-              .eq('stage_id', targetStageId)
-              .eq('status', 'sent')
-              .limit(1)
-              .maybeSingle();
-            if (existingLog) return;
+      // Initialize the stacked items for this lead card
+      const initialItems = {};
+      if (isWaActive) {
+        initialItems.whatsapp = {
+          id: 'whatsapp',
+          status: 'countdown',
+          countdown: 5,
+          templateName: auto.template_name,
+          error: null
+        };
+      }
+      if (isEmailActive) {
+        initialItems.email = {
+          id: 'email',
+          status: 'countdown',
+          countdown: 5,
+          templateId: auto.email_template_id,
+          error: null
+        };
+      }
+      if (isMetaActive) {
+        initialItems.meta = {
+          id: 'meta',
+          status: 'countdown',
+          countdown: 5,
+          eventName: auto.meta_capi_event || 'QualifiedLead',
+          error: null
+        };
+      }
+
+      setCardAutomations((prev) => ({
+        ...prev,
+        [lead.id]: {
+          leadId: lead.id,
+          targetStageId,
+          stageName,
+          items: initialItems
+        }
+      }));
+
+      let currentSeconds = 5;
+
+      const runDispatches = async () => {
+        // Mark as flushed to prevent duplicate execution
+        if (automationTimersRef.current[lead.id]) {
+          automationTimersRef.current[lead.id].isFlushed = true;
+          if (automationTimersRef.current[lead.id].intervalId) {
+            clearInterval(automationTimersRef.current[lead.id].intervalId);
+            automationTimersRef.current[lead.id].intervalId = null;
           }
+        }
 
-          const emailTmpls = await fetchEmailTemplates();
-          const targetTmpl = Array.isArray(emailTmpls) ? emailTmpls.find(t => t.id === auto.email_template_id) : null;
-          if (targetTmpl) {
-            const res = await sendEmailViaResend({
-              to: lead.email,
-              leadName: lead.name,
-              template: targetTmpl,
-              templateName: targetTmpl.name,
-              subject: targetTmpl.subject,
-              html: targetTmpl.body_html,
-              lead: {
-                ...lead,
-                stage: stageName
-              },
-              leadId: lead.id,
-              pipelineId: pipeId,
-              stageId: targetStageId,
-              isAutomated: true
-            });
+        // Transition active items to 'sending'
+        setCardAutomations((prev) => {
+          if (!prev[lead.id]) return prev;
+          const currentItems = prev[lead.id].items;
+          const sendingItems = {};
+          for (const key of Object.keys(currentItems)) {
+            sendingItems[key] = { ...currentItems[key], status: 'sending', countdown: 0 };
+          }
+          return {
+            ...prev,
+            [lead.id]: {
+              ...prev[lead.id],
+              items: sendingItems
+            }
+          };
+        });
 
-            if (res.success) {
+        const updateItem = (itemKey, status, error = null) => {
+          setCardAutomations((prev) => {
+            if (!prev[lead.id]) return prev;
+            return {
+              ...prev,
+              [lead.id]: {
+                ...prev[lead.id],
+                items: {
+                  ...prev[lead.id].items,
+                  [itemKey]: {
+                    ...prev[lead.id].items[itemKey],
+                    status,
+                    error
+                  }
+                }
+              }
+            };
+          });
+        };
+
+        const promises = [];
+
+        // 1. WhatsApp Dispatch
+        if (isWaActive) {
+          promises.push((async () => {
+            try {
+              await sendWhatsAppMessage({
+                to: lead.phone,
+                leadName: lead.name,
+                templateName: auto.template_name,
+                leadId: lead.id,
+                pipelineId: pipeId,
+                stageId: targetStageId,
+                isAutomated: true
+              });
+
               recordActivity({
-                type: 'email_sent',
+                type: 'whatsapp_sent',
                 leadId: lead.id,
                 leadName: lead.name,
                 toStage: targetStageId,
-                details: `Automated Email "${targetTmpl.name}" sent to ${lead.email} on reaching stage "${stageName}"`,
+                details: `Automated WhatsApp "${auto.template_name}" sent on reaching stage "${stageName}"`,
                 userName: 'Automation'
               });
 
               addNotification({
-                type: 'email_automation',
-                title: 'Email Automation Sent',
-                message: `Sent "${targetTmpl.name}" to ${lead.name} (${lead.email}) on entering "${stageName}".`,
+                type: 'whatsapp_automation',
+                title: 'WhatsApp Automation Sent',
+                message: `Sent "${auto.template_name}" to ${lead.name} (${lead.phone}) on entering "${stageName}".`,
                 leadId: lead.id,
                 timestamp: new Date().toISOString()
               });
-            } else {
-              console.warn(`Stage automation Email failed for ${lead.name}:`, res.error);
-              addNotification({
-                type: 'email_automation',
-                title: 'Email Automation Failed',
-                message: `Failed sending "${targetTmpl.name}" to ${lead.name}: ${res.error || 'Check Resend settings'}`,
-                leadId: lead.id,
-                timestamp: new Date().toISOString()
-              });
+
+              updateItem('whatsapp', 'sent');
+            } catch (waErr) {
+              console.warn(`Stage automation WhatsApp dispatch error for ${lead.name}:`, waErr);
+              updateItem('whatsapp', 'failed', waErr?.message || 'Failed');
             }
-          }
-        } catch (emailErr) {
-          console.warn(`Stage automation Email dispatch error for ${lead.name}:`, emailErr);
+          })());
         }
-      }
 
-      // 3. Meta Conversions API (CAPI) Automation
-      if (auto.meta_capi_active && (auto.meta_capi_event || 'QualifiedLead')) {
-        try {
-          const eventToFire = auto.meta_capi_event || 'QualifiedLead';
-          const capiRes = await sendMetaCapiEvent({
-            lead,
-            eventName: eventToFire,
-            stageId: targetStageId,
-            stageName: stageName,
-            pipelineId: pipeId,
-            pipelineName: targetPipe.name,
-            createdBy: currentUser?.name || 'Automation'
+        // 2. Email Dispatch
+        if (isEmailActive) {
+          promises.push((async () => {
+            try {
+              const emailTmpls = await fetchEmailTemplates();
+              const targetTmpl = Array.isArray(emailTmpls) ? emailTmpls.find(t => t.id === auto.email_template_id) : null;
+              if (targetTmpl) {
+                const res = await sendEmailViaResend({
+                  to: lead.email,
+                  leadName: lead.name,
+                  template: targetTmpl,
+                  templateName: targetTmpl.name,
+                  subject: targetTmpl.subject,
+                  html: targetTmpl.body_html,
+                  lead: {
+                    ...lead,
+                    stage: stageName
+                  },
+                  leadId: lead.id,
+                  pipelineId: pipeId,
+                  stageId: targetStageId,
+                  isAutomated: true
+                });
+
+                if (res.success) {
+                  recordActivity({
+                    type: 'email_sent',
+                    leadId: lead.id,
+                    leadName: lead.name,
+                    toStage: targetStageId,
+                    details: `Automated Email "${targetTmpl.name}" sent to ${lead.email} on reaching stage "${stageName}"`,
+                    userName: 'Automation'
+                  });
+
+                  addNotification({
+                    type: 'email_automation',
+                    title: 'Email Automation Sent',
+                    message: `Sent "${targetTmpl.name}" to ${lead.name} (${lead.email}) on entering "${stageName}".`,
+                    leadId: lead.id,
+                    timestamp: new Date().toISOString()
+                  });
+
+                  updateItem('email', 'sent');
+                } else {
+                  console.warn(`Stage automation Email failed for ${lead.name}:`, res.error);
+                  addNotification({
+                    type: 'email_automation',
+                    title: 'Email Automation Failed',
+                    message: `Failed sending "${targetTmpl.name}" to ${lead.name}: ${res.error || 'Check Resend settings'}`,
+                    leadId: lead.id,
+                    timestamp: new Date().toISOString()
+                  });
+
+                  updateItem('email', 'failed', res.error || 'Failed');
+                }
+              } else {
+                updateItem('email', 'failed', 'Template not found');
+              }
+            } catch (emailErr) {
+              console.warn(`Stage automation Email dispatch error for ${lead.name}:`, emailErr);
+              updateItem('email', 'failed', emailErr?.message || 'Failed');
+            }
+          })());
+        }
+
+        // 3. Meta Conversions API (CAPI) Dispatch
+        if (isMetaActive) {
+          promises.push((async () => {
+            try {
+              const eventToFire = auto.meta_capi_event || 'QualifiedLead';
+              const capiRes = await sendMetaCapiEvent({
+                lead,
+                eventName: eventToFire,
+                stageId: targetStageId,
+                stageName: stageName,
+                pipelineId: pipeId,
+                pipelineName: targetPipe.name,
+                createdBy: currentUser?.name || 'Automation'
+              });
+
+              if (capiRes?.success && !capiRes?.skipped) {
+                recordActivity({
+                  type: 'meta_capi_sent',
+                  leadId: lead.id,
+                  leadName: lead.name,
+                  toStage: targetStageId,
+                  details: `Synced milestone "${eventToFire}" to Meta Conversions API on entering stage "${stageName}"`,
+                  userName: 'Meta CAPI'
+                });
+
+                addNotification({
+                  type: 'meta_capi',
+                  title: 'Meta CAPI Milestone Synced',
+                  message: `Reported "${eventToFire}" to Meta for ${lead.name} on entering "${stageName}".`,
+                  leadId: lead.id,
+                  timestamp: new Date().toISOString()
+                });
+
+                updateItem('meta', 'sent');
+              } else {
+                updateItem('meta', 'failed', capiRes?.error || 'Failed');
+              }
+            } catch (capiErr) {
+              console.warn(`Stage automation Meta CAPI dispatch error for ${lead.name}:`, capiErr);
+              updateItem('meta', 'failed', capiErr?.message || 'Failed');
+            }
+          })());
+        }
+
+        await Promise.allSettled(promises);
+
+        // Auto-dismiss the completed strips after 3.5 seconds
+        const dismissTimeoutId = setTimeout(() => {
+          setCardAutomations((prev) => {
+            const next = { ...prev };
+            delete next[lead.id];
+            return next;
           });
-
-          if (capiRes?.success && !capiRes?.skipped) {
-            recordActivity({
-              type: 'meta_capi_sent',
-              leadId: lead.id,
-              leadName: lead.name,
-              toStage: targetStageId,
-              details: `Synced milestone "${eventToFire}" to Meta Conversions API on entering stage "${stageName}"`,
-              userName: 'Meta CAPI'
-            });
-
-            addNotification({
-              type: 'meta_capi',
-              title: 'Meta CAPI Milestone Synced',
-              message: `Reported "${eventToFire}" to Meta for ${lead.name} on entering "${stageName}".`,
-              leadId: lead.id,
-              timestamp: new Date().toISOString()
-            });
+          if (automationTimersRef.current[lead.id]) {
+            delete automationTimersRef.current[lead.id];
           }
-        } catch (capiErr) {
-          console.warn(`Stage automation Meta CAPI dispatch error for ${lead.name}:`, capiErr);
+        }, 3500);
+
+        if (automationTimersRef.current[lead.id]) {
+          automationTimersRef.current[lead.id].dismissTimeoutId = dismissTimeoutId;
         }
-      }
+      };
+
+      const intervalId = setInterval(() => {
+        currentSeconds -= 1;
+        if (currentSeconds > 0) {
+          setCardAutomations((prev) => {
+            if (!prev[lead.id]) return prev;
+            const currentItems = prev[lead.id].items;
+            const updated = {};
+            for (const key of Object.keys(currentItems)) {
+              updated[key] = { ...currentItems[key], countdown: currentSeconds };
+            }
+            return {
+              ...prev,
+              [lead.id]: {
+                ...prev[lead.id],
+                items: updated
+              }
+            };
+          });
+        } else {
+          clearInterval(intervalId);
+          runDispatches();
+        }
+      }, 1000);
+
+      automationTimersRef.current[lead.id] = {
+        intervalId,
+        dismissTimeoutId: null,
+        runDispatches,
+        isFlushed: false
+      };
     } catch (err) {
-      console.warn(`Stage automation dispatch error for ${lead.name}:`, err);
+      console.warn(`Stage automation dispatch setup error for ${lead.name}:`, err);
     }
   };
 
@@ -1231,7 +1513,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   const [newLeadEmail, setNewLeadEmail] = useState('');
   const [newLeadStage, setNewLeadStage] = useState(() => {
     try {
-      const cached = localStorage.getItem('crm_pipeline_columns');
+      const cached = localStorage.getItem(pipelineColumnsKey);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed[0]?.id) return parsed[0].id;
@@ -1262,7 +1544,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
           setTableMissing(false);
           setLeads(data);
           try {
-            localStorage.setItem('crm_cached_leads', JSON.stringify(data));
+            localStorage.setItem(cachedLeadsKey, JSON.stringify(data));
           } catch (e) { }
         }
       } catch (err) {
@@ -1276,7 +1558,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
 
     // Subscribe to Realtime Postgres changes
     const channel = supabase
-      .channel('leads-realtime')
+      .channel(`leads-realtime-${pipelineType}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'leads' },
@@ -1310,16 +1592,16 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
       isMounted = false;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [pipelineType, cachedLeadsKey]);
 
   // Persist leads to localStorage cache for instant zero-flicker mounts
   useEffect(() => {
     if (leads && leads.length > 0) {
       try {
-        localStorage.setItem('crm_cached_leads', JSON.stringify(leads));
+        localStorage.setItem(cachedLeadsKey, JSON.stringify(leads));
       } catch (e) { }
     }
-  }, [leads]);
+  }, [leads, cachedLeadsKey]);
 
   const isAdmin = currentUser?.role === 'admin';
 
@@ -1328,22 +1610,26 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   const filteredLeads = useMemo(() => {
     return leads.filter((lead) => {
       // Multi-Pipeline Filter
-      if (activePipelineId) {
-        let leadPipeId = lead.pipeline_id;
-        if (!leadPipeId && lead.form_id && pipelineForms.length > 0) {
-          const matchedForm = pipelineForms.find((f) => String(f.form_id) === String(lead.form_id));
-          if (matchedForm?.pipeline_id) {
-            leadPipeId = matchedForm.pipeline_id;
+      if (pipelineType === 'cold') {
+        if (!activePipelineId || lead.pipeline_id !== activePipelineId) return false;
+      } else {
+        if (activePipelineId) {
+          let leadPipeId = lead.pipeline_id;
+          if (!leadPipeId && lead.form_id && pipelineForms.length > 0) {
+            const matchedForm = pipelineForms.find((f) => String(f.form_id) === String(lead.form_id));
+            if (matchedForm?.pipeline_id) {
+              leadPipeId = matchedForm.pipeline_id;
+            }
           }
-        }
 
-        if (leadPipeId) {
-          if (leadPipeId !== activePipelineId) return false;
-        } else {
-          // If lead does not have a pipeline_id and its form is not mapped,
-          // only show in the designated default pipeline
-          const defaultPipeline = pipelinesList.find((p) => p.is_default);
-          if (!defaultPipeline || activePipelineId !== defaultPipeline.id) return false;
+          if (leadPipeId) {
+            if (leadPipeId !== activePipelineId) return false;
+          } else {
+            // If lead does not have a pipeline_id and its form is not mapped,
+            // only show in the designated default pipeline
+            const defaultPipeline = pipelinesList.find((p) => p.is_default);
+            if (!defaultPipeline || activePipelineId !== defaultPipeline.id) return false;
+          }
         }
       }
 
@@ -1413,7 +1699,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
 
       return true;
     });
-  }, [leads, activePipelineId, pipelineForms, pipelinesList, filterType, searchQuery, currentUser, canViewAllLeads, dateFilter, customStartDate, customEndDate]);
+  }, [leads, activePipelineId, pipelineForms, pipelinesList, filterType, searchQuery, currentUser, canViewAllLeads, dateFilter, customStartDate, customEndDate, pipelineType]);
 
   const handleExportCSV = () => {
     setIsExportModalOpen(true);
@@ -1544,13 +1830,20 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
     const now = new Date();
     const todayStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
 
+    let defaultAssignee = 'pranav';
+    if (activePipeline?.lead_distribution?.default_assignee) {
+      defaultAssignee = activePipeline.lead_distribution.default_assignee;
+    } else if (currentUser?.name) {
+      defaultAssignee = currentUser.name.toLowerCase().split(' ')[0];
+    }
+
     const leadPayload = {
       name: newLeadName.trim(),
       phone: newLeadPhone.trim() || '+91 98201 00000',
       email: newLeadEmail.trim() || `${newLeadName.toLowerCase().replace(/\s+/g, '.')}@client.in`,
       date: todayStr,
       stage: newLeadStage,
-      assigned_to: 'pranav',
+      assigned_to: defaultAssignee,
       pipeline_id: activePipelineId || null,
       custom_fields: newLeadCustomFields
     };
@@ -1593,6 +1886,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
   };
 
   const handleDeleteLead = async (leadId) => {
+    handleCancelCardAutomation(leadId);
     // Optimistic delete
     setLeads((prev) => prev.filter((l) => l.id !== leadId));
 
@@ -1997,6 +2291,87 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
     }
   };
 
+  const renderAutoStrip = (leadId, item, channelType) => {
+    let icon = null;
+    let mainText = '';
+    let statusClass = '';
+
+    const channelName = channelType === 'whatsapp' ? 'Whatsapp' : channelType === 'email' ? 'Email' : 'Meta';
+
+    if (item.status === 'countdown') {
+      statusClass = 'is-countdown';
+      if (channelType === 'whatsapp') {
+        icon = <MessageSquare size={12} strokeWidth={2.2} className="lead-card-auto-strip-icon" />;
+        mainText = `Sending Whatsapp in ${item.countdown}s...`;
+      } else if (channelType === 'email') {
+        icon = <Mail size={12} strokeWidth={2.2} className="lead-card-auto-strip-icon" />;
+        mainText = `Sending Email in ${item.countdown}s...`;
+      } else {
+        icon = <Share2 size={12} strokeWidth={2.2} className="lead-card-auto-strip-icon" />;
+        mainText = `Syncing with Meta in ${item.countdown}s...`;
+      }
+    } else if (item.status === 'sending') {
+      statusClass = 'is-sending';
+      icon = <span className="strip-micro-spinner" />;
+      if (channelType === 'whatsapp') {
+        mainText = 'Sending Whatsapp...';
+      } else if (channelType === 'email') {
+        mainText = 'Sending Email...';
+      } else {
+        mainText = 'Syncing with Meta...';
+      }
+    } else if (item.status === 'sent') {
+      statusClass = 'is-sent';
+      icon = <Check size={12} strokeWidth={2.6} className="lead-card-auto-strip-icon strip-check-icon" />;
+      if (channelType === 'whatsapp') {
+        mainText = 'Whatsapp Sent';
+      } else if (channelType === 'email') {
+        mainText = 'Email Sent';
+      } else {
+        mainText = 'Meta Synced';
+      }
+    } else if (item.status === 'failed') {
+      statusClass = 'is-failed';
+      icon = <AlertCircle size={12} strokeWidth={2.2} className="lead-card-auto-strip-icon" />;
+      if (channelType === 'whatsapp') {
+        mainText = 'Whatsapp Failed';
+      } else if (channelType === 'email') {
+        mainText = 'Email Failed';
+      } else {
+        mainText = 'Meta Sync Failed';
+      }
+    }
+
+    return (
+      <div
+        key={channelType}
+        className={`lead-card-auto-strip auto-strip-${channelType} ${statusClass}`}
+        title={item.error ? `${channelName}: ${item.error}` : undefined}
+      >
+        <div key={item.status} className="strip-morph-content">
+          {icon}
+          <span className="lead-card-auto-strip-text">{mainText}</span>
+        </div>
+        <div className="lead-card-auto-strip-actions">
+          {item.status === 'countdown' ? (
+            <button
+              type="button"
+              className="lead-card-auto-strip-undo"
+              onClick={(e) => handleCancelCardAutomation(leadId, e)}
+              title="Undo automation"
+            >
+              Undo
+            </button>
+          ) : item.status === 'sent' ? (
+            <span className="lead-card-auto-strip-badge">✓ Sent</span>
+          ) : item.status === 'failed' ? (
+            <span className="lead-card-auto-strip-badge">Failed</span>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
   const renderLeadCard = (lead, includeCompletedFollowUp = false, isFollowUpCol = false) => {
     const anim = animatingLeads[lead.id];
     let animClass = 'fade-in-card';
@@ -2037,7 +2412,30 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
           className="lead-card-header-handle"
           title={isFollowUpCol || isMobileScreen ? undefined : "Drag to move card to another column"}
         >
-          <span className="lead-card-name" title={lead.name}>{lead.name}</span>
+          <div className="lead-card-title-group">
+            <span className="lead-card-name" title={lead.name}>{lead.name}</span>
+            {lead.custom_fields?.icp_score && (
+              <span
+                className={`lead-card-icp-pill is-${lead.custom_fields.icp_tier || (lead.custom_fields.icp_score >= 85 ? 'hot' : 'warm')}`}
+                title={`ICP Fit Score: ${lead.custom_fields.icp_score}% · ${lead.custom_fields.icp_reasoning || ''}`}
+              >
+                <span className="icp-pill-symbol">{lead.custom_fields.icp_score >= 85 ? '🔥' : '⚡'}</span>
+                <span>{lead.custom_fields.icp_score}%</span>
+              </span>
+            )}
+            {lead.custom_fields?.rating && (
+              <span
+                className="lead-card-rating-pill"
+                title={`${lead.custom_fields.rating}★ rating on Google Maps (${lead.custom_fields.review_count || 0} reviews)`}
+              >
+                <span className="lead-card-rating-star">⭐</span>
+                <span className="lead-card-rating-num">{lead.custom_fields.rating}</span>
+                {lead.custom_fields.review_count && (
+                  <span className="lead-card-rating-count">({lead.custom_fields.review_count})</span>
+                )}
+              </span>
+            )}
+          </div>
 
           {!isFollowUpCol && isAdmin && (
             <div className="lead-card-assign-wrap" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
@@ -2127,12 +2525,29 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
             <div className="lead-card-contact-row">
               <Phone size={13} strokeWidth={2} className="lead-contact-icon" />
               <span>{formatPhoneNumber(lead.phone)}</span>
+              {lead.custom_fields?.phone_type && lead.custom_fields.phone_type !== 'standard' && (
+                <span
+                  className="lead-card-verify-badge is-phone"
+                  title={lead.custom_fields.phone_type === 'office_landline' ? 'Office Landline / Switchboard' : 'Direct Line'}
+                >
+                  {lead.custom_fields.phone_type === 'office_landline' ? 'Office' : 'Direct'}
+                </span>
+              )}
             </div>
           )}
           {!isFollowUpCol && cardFields.some((f) => f.key === 'email') && lead.email && (
             <div className="lead-card-contact-row">
               <Mail size={13} strokeWidth={2} className="lead-contact-icon" />
-              <span>{lead.email}</span>
+              <span className="lead-card-email-text">{lead.email}</span>
+              {lead.custom_fields?.mail_provider && lead.custom_fields.mail_provider !== 'None' && (
+                <span
+                  className="lead-card-verify-badge is-email"
+                  title={`Deliverability Verified via MX (${lead.custom_fields.mail_provider}) · Score: ${lead.custom_fields.quality_score || 85}/100`}
+                >
+                  <Check size={9} strokeWidth={3} className="lead-card-verify-check" />
+                  <span>{lead.custom_fields.mail_provider.replace('Google Workspace', 'Google').replace('Microsoft 365', 'M365').replace(' Consumer', '')}</span>
+                </span>
+              )}
             </div>
           )}
           {cardFields.some((f) => f.key === 'city') && (lead.city || getLeadFieldValue(lead, { key: 'city', mapped_question: 'city' })) && (
@@ -2305,6 +2720,26 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
           </div>
         </div>
 
+        {/* Stacked Automation Status Strips (WhatsApp, Email, Meta) */}
+        {(() => {
+          const autoState = cardAutomations[lead.id];
+          if (!autoState || !autoState.items) return null;
+          const { whatsapp, email, meta } = autoState.items;
+          if (!whatsapp && !email && !meta) return null;
+          const leadFollowUp = getLeadFollowUp(lead.id, lead.name, includeCompletedFollowUp);
+
+          return (
+            <div
+              className={`lead-card-automation-strips ${leadFollowUp ? 'has-followup-below' : ''}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {whatsapp && renderAutoStrip(lead.id, whatsapp, 'whatsapp')}
+              {email && renderAutoStrip(lead.id, email, 'email')}
+              {meta && renderAutoStrip(lead.id, meta, 'meta')}
+            </div>
+          );
+        })()}
+
         {(() => {
           const leadFollowUp = getLeadFollowUp(lead.id, lead.name, includeCompletedFollowUp);
           if (!leadFollowUp) return null;
@@ -2371,12 +2806,16 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                 type="button"
                 className={`lead-filter-dropdown-btn ${isPipelineDropdownOpen ? 'active' : ''}`}
                 onClick={() => setIsPipelineDropdownOpen((prev) => !prev)}
-                title="Switch Sales Pipeline"
+                title={`Switch ${pipelineType === 'cold' ? 'Cold Pipeline' : 'Sales Pipeline'}`}
                 style={{ borderColor: '#cbd5e1' }}
               >
-                <GitFork size={13} strokeWidth={2} style={{ color: '#2563eb' }} />
+                {pipelineType === 'cold' ? (
+                  <Compass size={13} strokeWidth={2} style={{ color: '#2563eb' }} />
+                ) : (
+                  <GitFork size={13} strokeWidth={2} style={{ color: '#2563eb' }} />
+                )}
                 <span style={{ fontWeight: 600, color: '#0f172a' }}>
-                  {visiblePipelines.find((p) => p.id === activePipelineId)?.name || 'Pipeline'}
+                  {visiblePipelines.find((p) => p.id === activePipelineId)?.name || (pipelineType === 'cold' ? 'Cold Pipeline' : 'Pipeline')}
                 </span>
                 <ChevronDown size={14} strokeWidth={2} className={`filter-chevron ${isPipelineDropdownOpen ? 'open' : ''}`} />
               </button>
@@ -2395,7 +2834,11 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                         onClick={() => handleSelectPipeline(pipe.id)}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <GitFork size={13} style={{ color: isSelected ? '#ffffff' : '#64748b' }} />
+                          {pipelineType === 'cold' ? (
+                            <Compass size={13} style={{ color: isSelected ? '#ffffff' : '#64748b' }} />
+                          ) : (
+                            <GitFork size={13} style={{ color: isSelected ? '#ffffff' : '#64748b' }} />
+                          )}
                           <span>{pipe.name}</span>
                         </div>
                         {isSelected && <Check size={13} strokeWidth={2.5} />}
@@ -2409,11 +2852,15 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
             <div
               className="lead-filter-dropdown-btn"
               style={{ borderColor: '#e2e8f0', cursor: 'default', background: '#f8fafc' }}
-              title="Assigned Pipeline"
+              title={pipelineType === 'cold' ? 'Assigned Cold Pipeline' : 'Assigned Pipeline'}
             >
-              <GitFork size={13} strokeWidth={2} style={{ color: '#2563eb' }} />
+              {pipelineType === 'cold' ? (
+                <Compass size={13} strokeWidth={2} style={{ color: '#2563eb' }} />
+              ) : (
+                <GitFork size={13} strokeWidth={2} style={{ color: '#2563eb' }} />
+              )}
               <span style={{ fontWeight: 600, color: '#0f172a' }}>
-                {visiblePipelines[0]?.name || 'Pipeline'}
+                {visiblePipelines[0]?.name || (pipelineType === 'cold' ? 'Cold Pipeline' : 'Pipeline')}
               </span>
             </div>
           ) : null}
@@ -2459,7 +2906,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
             <input
               type="text"
               className="leads-search-input"
-              placeholder={filterType === 'followups' ? 'Search follow-ups...' : 'Search leads...'}
+              placeholder={filterType === 'followups' ? 'Search follow-ups...' : `Search ${entityPlural.toLowerCase()}...`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -2558,7 +3005,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
             type="button"
             className="lead-export-btn"
             onClick={handleExportCSV}
-            title="Export filtered leads to CSV"
+            title={`Export filtered ${entityPlural.toLowerCase()} to CSV`}
           >
             <Download size={14} strokeWidth={1.8} />
             <span>Export</span>
@@ -2597,7 +3044,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                 onClick={() => setIsModalOpen(true)}
               >
                 <Plus size={15} strokeWidth={2} />
-                <span>New Lead</span>
+                <span>New {entitySingular}</span>
               </button>
             )
           )}
@@ -2652,7 +3099,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                   <input
                     type="text"
                     className="leads-drawer-search-input"
-                    placeholder={filterType === 'followups' ? 'Search follow-ups...' : 'Search leads...'}
+                    placeholder={filterType === 'followups' ? 'Search follow-ups...' : `Search ${entityPlural.toLowerCase()}...`}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
@@ -2784,7 +3231,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                         }}
                       >
                         <Plus size={15} strokeWidth={1.8} />
-                        <span>New Lead</span>
+                        <span>New {entitySingular}</span>
                       </button>
                     )
                   )}
@@ -2798,7 +3245,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                     }}
                   >
                     <Download size={15} strokeWidth={1.8} />
-                    <span>Export Leads to CSV</span>
+                    <span>Export {entityPlural} to CSV</span>
                   </button>
 
                   {currentUser?.role === 'admin' && onNavigate && (
@@ -2860,6 +3307,31 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
               </div>
             );
           })
+        ) : (!isLoading && visiblePipelines.length === 0) ? (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', textAlign: 'center' }}>
+            <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', marginBottom: 16 }}>
+              {pipelineType === 'cold' ? <Compass size={24} strokeWidth={1.8} /> : <GitFork size={24} strokeWidth={1.8} />}
+            </div>
+            <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a', margin: '0 0 6px 0' }}>
+              No {pipelineType === 'cold' ? 'Discovery ' : ''}Pipelines Configured
+            </h3>
+            <p style={{ fontSize: '13px', color: '#64748b', maxWidth: 400, margin: '0 0 16px 0', lineHeight: 1.5 }}>
+              {pipelineType === 'cold'
+                ? 'Create a discovery pipeline in Admin Settings to define stages and start managing prospects.'
+                : 'No sales pipelines found. Please create one in Admin Settings.'}
+            </p>
+            {currentUser?.role === 'admin' && onNavigate && (
+              <button
+                type="button"
+                className="lead-create-btn"
+                onClick={() => onNavigate('Admin', pipelineType === 'cold' ? 'discovery' : 'stages')}
+                style={{ padding: '8px 16px', fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <span>Configure {pipelineType === 'cold' ? 'Discovery Pipelines' : 'Pipelines'}</span>
+                <ArrowRight size={14} strokeWidth={2} />
+              </button>
+            )}
+          </div>
         ) : columns.length === 0 ? (
           [1, 2, 3, 4].map((n) => (
             <div key={n} className="leads-column">
@@ -3048,7 +3520,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
             aria-modal="true"
           >
             <div className="lead-modal-header">
-              <h2 className="lead-modal-title">Create New Lead</h2>
+              <h2 className="lead-modal-title">Create New {entitySingular}</h2>
               <button
                 type="button"
                 className="lead-modal-close-btn"
@@ -3194,7 +3666,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                   className="lead-modal-submit-btn"
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? 'Creating...' : 'Create Lead'}
+                  {isSubmitting ? 'Creating...' : `Create ${entitySingular}`}
                 </button>
               </div>
             </form>
@@ -3300,6 +3772,117 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                     ) : (
                       <div className="lead-modal-followup-card-desc empty">
                         No additional remarks provided.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* AI Prospect Intelligence & Dynamic Icebreaker Card */}
+                {selectedLead.custom_fields && (selectedLead.custom_fields.icp_score !== undefined || selectedLead.custom_fields.ai_icebreaker) && (
+                  <div className="lead-ai-intelligence-card">
+                    <div className="lead-ai-intelligence-header">
+                      <div className="lead-ai-header-left">
+                        <Sparkles size={15} className="lead-ai-sparkle-icon" />
+                        <span>AI Prospect Intelligence</span>
+                      </div>
+                      {selectedLead.custom_fields.icp_score !== undefined && (
+                        <div className="lead-ai-score-pill">
+                          <span className="icp-pill-symbol">⚡</span>
+                          <span>ICP {selectedLead.custom_fields.icp_score}/100</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedLead.custom_fields.icp_reasoning && (
+                      <div className="lead-ai-reasoning">
+                        &ldquo;{selectedLead.custom_fields.icp_reasoning}&rdquo;
+                      </div>
+                    )}
+
+                    {selectedLead.custom_fields.ai_icebreaker && (
+                      <div className="lead-ai-hook-box">
+                        <div className="lead-ai-hook-label">
+                          <span>Personalized Outreach Hook</span>
+                          <button
+                            type="button"
+                            className="lead-ai-copy-btn"
+                            onClick={() => {
+                              navigator.clipboard.writeText(selectedLead.custom_fields.ai_icebreaker);
+                              setCopiedHookLeadId(selectedLead.id);
+                              setTimeout(() => setCopiedHookLeadId(null), 2000);
+                            }}
+                          >
+                            {copiedHookLeadId === selectedLead.id ? (
+                              <>
+                                <Check size={12} color="#16a34a" />
+                                <span style={{ color: '#16a34a' }}>Copied</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy size={12} />
+                                <span>Copy Hook</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <div className="lead-ai-hook-text">
+                          &ldquo;{selectedLead.custom_fields.ai_icebreaker}&rdquo;
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedLead.custom_fields.identified_pain_point && (
+                      <div className="lead-ai-pain-point-row">
+                        <span className="lead-ai-sub-label">Identified Need:</span>
+                        <span className="lead-ai-sub-text">{selectedLead.custom_fields.identified_pain_point}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Local Business & Google Maps Location Panel */}
+                {selectedLead.custom_fields && (selectedLead.custom_fields.is_local_business || selectedLead.custom_fields.google_maps_url || selectedLead.custom_fields.rating) && (
+                  <div className="lead-local-business-card">
+                    <div className="lead-local-card-header">
+                      <div className="lead-local-header-left">
+                        <MapPin size={15} className="lead-local-map-icon" />
+                        <span>Google Maps & Local Presence</span>
+                      </div>
+                      {selectedLead.custom_fields.rating && (
+                        <div className="lead-local-rating-badge">
+                          <span>⭐ {selectedLead.custom_fields.rating}</span>
+                          {selectedLead.custom_fields.review_count && (
+                            <span style={{ opacity: 0.85, fontWeight: 500 }}>
+                              ({selectedLead.custom_fields.review_count} reviews)
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedLead.custom_fields.category && (
+                      <div className="lead-local-category-tag">
+                        {selectedLead.custom_fields.category}
+                      </div>
+                    )}
+
+                    {selectedLead.custom_fields.address && (
+                      <div className="lead-local-address-text">
+                        {selectedLead.custom_fields.address}
+                      </div>
+                    )}
+
+                    {selectedLead.custom_fields.google_maps_url && (
+                      <div className="lead-local-actions-row">
+                        <a
+                          href={selectedLead.custom_fields.google_maps_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="lead-local-maps-btn"
+                        >
+                          <span>Open on Google Maps</span>
+                          <ArrowUpRight size={13} />
+                        </a>
                       </div>
                     )}
                   </div>
@@ -3455,7 +4038,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                   </tbody>
                 </table>
 
-                {/* Unmapped / Form Submission Data */}
+                {/* Unmapped / Form Submission / Discovery Data */}
                 {(() => {
                   const definedKeys = new Set();
                   activePipelineFields.forEach((f) => {
@@ -3470,32 +4053,131 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn }
                   definedKeys.add('City');
                   definedKeys.add('notes');
 
-                  const unmappedEntries = Object.entries(selectedLead.custom_fields || {}).filter(
-                    ([k, v]) => !definedKeys.has(k) && v !== null && v !== undefined && v !== ''
-                  );
+                  const CUSTOM_FIELD_LABELS = {
+                    thread_url: 'Original Post / Thread URL',
+                    website: 'Website / Link',
+                    scraped_snippet: 'Discovered Context / Snippet',
+                    discovery_query: 'Targeting Query',
+                    discovery_source: 'Discovery Channel',
+                    linkedin: 'LinkedIn Profile',
+                    company: 'Company Name',
+                    company_size: 'Company Size',
+                    industry: 'Industry',
+                    domain: 'Source Domain'
+                  };
+
+                  // Internal keys to suppress: system flags or exact duplicates of table 1 fields
+                  const SYSTEM_SUPPRESSED_KEYS = new Set([
+                    'scraped_at',       // Already represented by Created Date in table 1
+                    'is_live_scraped',  // Internal boolean
+                    'target_mode',      // Internal configuration flag
+                    'requirement',      // Duplicate of interest ("Inquiry & Need")
+                    'location',         // Duplicate of city ("City / Location")
+                    'source',           // Duplicate of form_name ("Lead Source")
+                    'domain',           // Duplicate/subsumed by thread_url or website
+                    'date',             // Already in Created Date
+                    'created_at',       // Already in Created Date
+                    'form_id',          // Internal ID
+                    'form_name',        // Already in Lead Source
+                    'leadgen_id',       // Internal ID
+                    'assigned_to',      // Already in Assigned To
+                    'assignedTo',       // Already in Assigned To
+                    'stage',            // Already in Pipeline Stage
+                    'address',          // Rendered in Google Maps & Local Presence Card
+                    'rating',           // Rendered in Google Maps & Local Presence Card
+                    'review_count',     // Rendered in Google Maps & Local Presence Card
+                    'category',         // Rendered in Google Maps & Local Presence Card
+                    'google_maps_url',  // Rendered in Google Maps & Local Presence Card
+                    'is_local_business',// Internal flag
+                    'icp_score',        // Rendered in AI Prospect Intelligence Card
+                    'icp_tier',         // Rendered in AI Prospect Intelligence Card
+                    'icp_reasoning',    // Rendered in AI Prospect Intelligence Card
+                    'ai_icebreaker',    // Rendered in AI Prospect Intelligence Card
+                    'identified_pain_point', // Rendered in AI Prospect Intelligence Card
+                    'suggested_value_prop',  // Rendered in AI Prospect Intelligence Card
+                    'engine',           // Internal discovery engine identifier
+                    'verified_email',   // Shown in email badge
+                    'mail_provider',    // Shown in email badge
+                    'phone_type',       // Shown in phone badge
+                    'is_valid_email',   // Internal flag
+                    'source_domain'     // Internal flag
+                  ]);
+
+                  const cf = selectedLead.custom_fields || {};
+                  const unmappedEntries = [];
+
+                  for (const [k, v] of Object.entries(cf)) {
+                    if (v === null || v === undefined || v === '') continue;
+                    if (definedKeys.has(k)) continue;
+                    if (SYSTEM_SUPPRESSED_KEYS.has(k)) continue;
+
+                    // Deduplicate thread_url and website if identical
+                    if (k === 'website' && cf.thread_url && cf.thread_url === v) continue;
+                    if (k === 'designation' && (v === cf.persona || definedKeys.has('persona'))) continue;
+                    if (k === 'company' && (!v || v === 'Personal Inquiry')) continue;
+
+                    const displayQuestion = CUSTOM_FIELD_LABELS[k] || k.replace(/_+/g, ' ').trim().replace(/^\w/, (c) => c.toUpperCase());
+                    unmappedEntries.push({ key: k, label: displayQuestion, value: v });
+                  }
 
                   if (unmappedEntries.length === 0) return null;
+
+                  const isCold = activePipeline?.pipeline_type === 'cold' || pipelineType === 'cold';
+                  const sectionTitle = isCold ? 'Discovery & Source Context' : 'Form Submission Data';
 
                   return (
                     <div className="lead-prop-table-section">
                       <div className="lead-prop-section-divider-bar">
-                        <span className="lead-prop-section-title">Form Submission Data</span>
+                        <span className="lead-prop-section-title">{sectionTitle}</span>
                         <span className="lead-prop-section-badge">
-                          {unmappedEntries.length} {unmappedEntries.length === 1 ? 'field' : 'fields'}
+                          {unmappedEntries.length} {unmappedEntries.length === 1 ? 'item' : 'items'}
                         </span>
                       </div>
                       <table className="lead-properties-table">
                         <tbody>
-                          {unmappedEntries.map(([question, answer]) => {
-                            const displayQuestion = question
-                              .replace(/_+/g, ' ')
-                              .trim()
-                              .replace(/^\w/, (c) => c.toUpperCase());
-                            const displayAnswer = Array.isArray(answer) ? answer.join(', ') : String(answer);
+                          {unmappedEntries.map(({ key, label, value }) => {
+                            // Humanize answer if ISO date string
+                            let displayAnswer = value;
+                            if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
+                              const dDate = formatDate(value);
+                              const dTime = formatTime(value);
+                              displayAnswer = dTime ? `${dDate} at ${dTime}` : dDate;
+                            } else if (Array.isArray(value)) {
+                              displayAnswer = value.join(', ');
+                            } else if (typeof value === 'string' && (key === 'discovery_source')) {
+                              displayAnswer = value.charAt(0).toUpperCase() + value.slice(1);
+                            } else {
+                              displayAnswer = String(value);
+                            }
+
+                            // If URL, make it a nice clickable link
+                            const isUrl = typeof value === 'string' && /^https?:\/\//i.test(value);
+
                             return (
-                              <tr key={question}>
-                                <td className="lead-prop-label">{displayQuestion}</td>
-                                <td className="lead-prop-value">{displayAnswer}</td>
+                              <tr key={key}>
+                                <td className="lead-prop-label">{label}</td>
+                                <td className="lead-prop-value">
+                                  {isUrl ? (
+                                    <a
+                                      href={value}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      style={{
+                                        color: '#2563eb',
+                                        textDecoration: 'underline',
+                                        wordBreak: 'break-all',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 4
+                                      }}
+                                    >
+                                      <span>{displayAnswer}</span>
+                                      <ArrowUpRight size={13} style={{ flexShrink: 0 }} />
+                                    </a>
+                                  ) : (
+                                    displayAnswer
+                                  )}
+                                </td>
                               </tr>
                             );
                           })}

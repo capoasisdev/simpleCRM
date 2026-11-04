@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase } from './supabase.js';
 import { Capacitor } from '@capacitor/core';
 
 const EMAIL_SETTINGS_STORAGE_KEY = 'crm_email_settings';
@@ -231,6 +231,17 @@ export async function verifyResendApiKey(apiKey) {
   if (!apiKey || !apiKey.trim().startsWith('re_')) {
     return { valid: false, error: 'API key must start with re_' };
   }
+  // Primary: verify via Supabase Edge Function to bypass browser CORS
+  try {
+    const { data, error } = await supabase.functions.invoke('send-email', {
+      body: { action: 'verify', api_key: apiKey.trim() }
+    });
+    if (!error && data && data.valid !== undefined) {
+      return data;
+    }
+  } catch (e) {}
+
+  // Fallback: direct fetch
   try {
     const res = await fetch(`${RESEND_API_BASE}/domains`, {
       headers: { 'Authorization': `Bearer ${apiKey.trim()}` }
@@ -381,7 +392,46 @@ export async function testResendCredentials({ apiKey, fromEmail, fromName, reply
 
   const senderName = fromName || 'SimpleCRM';
   const senderEmail = fromEmail || 'onboarding@resend.dev';
+  const htmlContent = generateTestEmailHtml({
+    senderName,
+    senderEmail,
+    replyTo,
+    testRecipient: testRecipient.trim()
+  });
 
+  // Primary: dispatch test via Supabase Edge Function (serverless, no CORS)
+  try {
+    const { data, error } = await supabase.functions.invoke('send-email', {
+      body: {
+        action: 'send',
+        api_key: apiKey.trim(),
+        to: [testRecipient.trim()],
+        subject: `✓ Connection Verified - ${senderName}`,
+        html: htmlContent,
+        from_name: senderName,
+        from_email: senderEmail,
+        reply_to: replyTo ? replyTo.trim() : undefined,
+        template_name: 'Resend Connection Verification Test',
+        is_automated: false
+      }
+    });
+
+    if (!error && data) {
+      if (data.success) {
+        return { id: data.id };
+      }
+      throw new Error(data.error || 'Failed to send test email');
+    }
+    if (error) {
+      console.warn('[Test Email Edge Function Note]:', error.message);
+    }
+  } catch (edgeErr) {
+    if (edgeErr.message && !edgeErr.message.includes('fetch')) {
+      throw edgeErr;
+    }
+  }
+
+  // Fallback: direct fetch
   const response = await fetch(`${RESEND_API_BASE}/emails`, {
     method: 'POST',
     headers: {
@@ -393,12 +443,7 @@ export async function testResendCredentials({ apiKey, fromEmail, fromName, reply
       to: [testRecipient.trim()],
       reply_to: replyTo ? replyTo.trim() : undefined,
       subject: `✓ Connection Verified - ${senderName}`,
-      html: generateTestEmailHtml({
-        senderName,
-        senderEmail,
-        replyTo,
-        testRecipient
-      })
+      html: htmlContent
     })
   });
 
@@ -417,16 +462,35 @@ export function renderEmailVariables(templateText, lead = {}) {
   if (!templateText) return '';
   const fullName = lead.name || 'Valued Customer';
   const firstName = fullName.split(' ')[0] || fullName;
-  const company = lead.company || lead.organization || 'your organization';
+  const company = lead.company || lead.organization || lead.custom_fields?.company || 'your organization';
   const phone = lead.phone || '';
   const stage = lead.stage || '';
+  const city = lead.city || lead.custom_fields?.city || '';
+  const designation = lead.designation || lead.role || lead.custom_fields?.designation || '';
+  const icebreaker = lead.custom_fields?.ai_icebreaker || lead.custom_fields?.icebreaker || '';
+  const painPoint = lead.custom_fields?.identified_pain_point || lead.custom_fields?.pain_point || '';
+  const valueProp = lead.custom_fields?.suggested_value_prop || lead.custom_fields?.value_prop || '';
+  const rating = lead.custom_fields?.rating ? `${lead.custom_fields.rating}★` : '';
+  const address = lead.custom_fields?.address || '';
+  const category = lead.custom_fields?.category || '';
 
   return templateText
     .replace(/\{\{name\}\}/gi, fullName)
     .replace(/\{\{first_name\}\}/gi, firstName)
     .replace(/\{\{company\}\}/gi, company)
     .replace(/\{\{phone\}\}/gi, phone)
-    .replace(/\{\{stage\}\}/gi, stage);
+    .replace(/\{\{stage\}\}/gi, stage)
+    .replace(/\{\{city\}\}/gi, city)
+    .replace(/\{\{location\}\}/gi, city)
+    .replace(/\{\{designation\}\}/gi, designation)
+    .replace(/\{\{role\}\}/gi, designation)
+    .replace(/\{\{icebreaker\}\}/gi, icebreaker)
+    .replace(/\{\{ai_icebreaker\}\}/gi, icebreaker)
+    .replace(/\{\{pain_point\}\}/gi, painPoint)
+    .replace(/\{\{value_prop\}\}/gi, valueProp)
+    .replace(/\{\{rating\}\}/gi, rating)
+    .replace(/\{\{address\}\}/gi, address)
+    .replace(/\{\{category\}\}/gi, category);
 }
 
 let lastDispatchTime = 0;
@@ -488,41 +552,82 @@ export async function sendEmailViaResend({
 
   let status = 'sent';
   let errorMessage = null;
+  let dispatchedViaEdge = false;
 
   await throttleEmailDispatch();
 
+  // 1. Primary: Dispatch via Supabase Edge Function (serverless, zero browser CORS restrictions)
   try {
-    const res = await fetch(`${RESEND_API_BASE}/emails`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${config.api_key.trim()}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: `${senderName} <${senderEmail}>`,
+    const { data, error } = await supabase.functions.invoke('send-email', {
+      body: {
+        action: 'send',
         to: [to.trim()],
-        reply_to: config.reply_to ? config.reply_to.trim() : undefined,
         subject: finalSubject,
-        html: finalHtml
-      })
+        html: finalHtml,
+        from_name: senderName,
+        from_email: senderEmail,
+        reply_to: config.reply_to ? config.reply_to.trim() : undefined,
+        lead_id: leadId,
+        lead_name: leadName || lead?.name || 'Lead',
+        pipeline_id: pipelineId,
+        stage_id: stageId,
+        template_name: resolvedTemplateName,
+        is_automated: Boolean(isAutomated)
+      }
     });
 
-    const resJson = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      status = 'failed';
-      const detailMsg = resJson?.message || resJson?.error || res.statusText || 'Unknown error';
-      const errorName = resJson?.name ? ` [${resJson.name}]` : '';
-      errorMessage = `[Resend HTTP ${res.status}]${errorName} ${detailMsg}`;
-      console.error(`[Resend Email Error] To: ${to} | Status: ${res.status} | Details:`, resJson);
-    } else {
-      console.log(`[Resend Email Sent] To: ${to} | ID: ${resJson?.id}`);
+    if (!error && data) {
+      dispatchedViaEdge = true;
+      if (data.success) {
+        status = 'sent';
+        console.log(`[Resend Email Sent via Edge Function] To: ${to} | ID: ${data.id}`);
+      } else {
+        status = 'failed';
+        errorMessage = data.error || 'Failed sending email via Resend';
+        console.error(`[Resend Email Failed via Edge Function] To: ${to} | Error:`, errorMessage);
+      }
+    } else if (error) {
+      console.warn('[Send Email Edge Function Note]:', error.message, '- attempting direct fallback');
     }
-  } catch (err) {
-    status = 'failed';
-    const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
-    errorMessage = `[Network Failure] Endpoint: ${RESEND_API_BASE}/emails | Online: ${isOnline} | Error: ${err.message || 'Failed to fetch'}`;
-    console.error(`[Resend Network Exception] To: ${to} | Endpoint: ${RESEND_API_BASE}/emails | Error:`, err);
+  } catch (edgeErr) {
+    console.warn('[Send Email Edge Function Exception]:', edgeErr, '- attempting direct fallback');
+  }
+
+  // 2. Fallback: If edge function was unreachable and local dev proxy is available
+  if (!dispatchedViaEdge) {
+    try {
+      const res = await fetch(`${RESEND_API_BASE}/emails`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.api_key.trim()}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: `${senderName} <${senderEmail}>`,
+          to: [to.trim()],
+          reply_to: config.reply_to ? config.reply_to.trim() : undefined,
+          subject: finalSubject,
+          html: finalHtml
+        })
+      });
+
+      const resJson = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        status = 'failed';
+        const detailMsg = resJson?.message || resJson?.error || res.statusText || 'Unknown error';
+        const errorName = resJson?.name ? ` [${resJson.name}]` : '';
+        errorMessage = `[Resend HTTP ${res.status}]${errorName} ${detailMsg}`;
+        console.error(`[Resend Email Error] To: ${to} | Status: ${res.status} | Details:`, resJson);
+      } else {
+        console.log(`[Resend Email Sent] To: ${to} | ID: ${resJson?.id}`);
+      }
+    } catch (err) {
+      status = 'failed';
+      const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      errorMessage = `[Network Failure] Endpoint: ${RESEND_API_BASE}/emails | Online: ${isOnline} | Error: ${err.message || 'Failed to fetch'}`;
+      console.error(`[Resend Network Exception] To: ${to} | Endpoint: ${RESEND_API_BASE}/emails | Error:`, err);
+    }
   }
 
   // Record to email_logs
@@ -549,23 +654,25 @@ export async function sendEmailViaResend({
     localStorage.setItem(EMAIL_LOGS_STORAGE_KEY, JSON.stringify(updated));
   } catch (e) { }
 
-  // Supabase persist
-  try {
-    const isUuid = leadId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(leadId);
-    await supabase.from('email_logs').insert([{
-      lead_id: isUuid ? leadId : null,
-      lead_name: logEntry.lead_name,
-      lead_email: logEntry.lead_email,
-      pipeline_id: logEntry.pipeline_id,
-      stage_id: logEntry.stage_id,
-      template_name: logEntry.template_name,
-      subject: logEntry.subject,
-      body: logEntry.body,
-      status: logEntry.status,
-      error_message: logEntry.error_message,
-      is_automated: logEntry.is_automated
-    }]);
-  } catch (e) { }
+  // Supabase persist (only if not already persisted by the edge function)
+  if (!dispatchedViaEdge) {
+    try {
+      const isUuid = leadId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(leadId);
+      await supabase.from('email_logs').insert([{
+        lead_id: isUuid ? leadId : null,
+        lead_name: logEntry.lead_name,
+        lead_email: logEntry.lead_email,
+        pipeline_id: logEntry.pipeline_id,
+        stage_id: logEntry.stage_id,
+        template_name: logEntry.template_name,
+        subject: logEntry.subject,
+        body: logEntry.body,
+        status: logEntry.status,
+        error_message: logEntry.error_message,
+        is_automated: logEntry.is_automated
+      }]);
+    } catch (e) { }
+  }
 
   // Cross-component notification
   try {

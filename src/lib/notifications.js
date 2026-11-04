@@ -43,10 +43,10 @@ export function addNotification(item) {
   const updated = [newNotification, ...current].slice(0, 50);
   saveNotifications(updated);
 
-  // Dispatch custom browser event for real-time drawer update and auto-opening
+  // Dispatch custom browser event for real-time drawer list update (never auto-pop drawer overlay)
   window.dispatchEvent(
     new CustomEvent('crm-notification-added', {
-      detail: { notification: newNotification, openDrawer: item.openDrawer !== false }
+      detail: { notification: newNotification, openDrawer: Boolean(item.openDrawer) }
     })
   );
 
