@@ -66,11 +66,22 @@ import { META_CAPI_EVENTS } from '../lib/metaCapi';
 import { generatePipelineConfigFromPrompt } from '../lib/pipelineAiGenerator';
 import '../styles/pipeline.css';
 
+export const DAYS_OF_WEEK = [
+  { key: 1, label: 'Monday', short: 'M' },
+  { key: 2, label: 'Tuesday', short: 'T' },
+  { key: 3, label: 'Wednesday', short: 'W' },
+  { key: 4, label: 'Thursday', short: 'T' },
+  { key: 5, label: 'Friday', short: 'F' },
+  { key: 6, label: 'Saturday', short: 'S' },
+  { key: 0, label: 'Sunday', short: 'S' }
+];
+
 const DEFAULT_DISCOVERY_CONFIG = {
   enabled: true,
   target_mode: 'b2b', // 'b2b' | 'b2c'
   autopilot_enabled: false,
-  schedule_cadence: 'weekdays', // 'weekdays' | 'daily' | 'twice_daily' | 'weekly'
+  schedule_days: [1, 2, 3, 4, 5], // 1=Mon .. 6=Sat, 0=Sun
+  schedule_cadence: 'weekdays', // legacy compatibility
   schedule_time: '09:00',
   sources: ['linkedin', 'web_discovery'], // multi-source array
   source: 'linkedin', // 'linkedin' | 'web_discovery' | 'google_places' | 'instagram' | 'clutch' | 'webhook'
@@ -190,13 +201,6 @@ const getDiscoveryArray = (config, arrayKey, legacyKey) => {
   }
   return [];
 };
-
-const DISCOVERY_CADENCE_OPTIONS = [
-  { value: 'weekdays', label: 'Weekdays (Mon–Fri)' },
-  { value: 'daily', label: 'Daily (Every day)' },
-  { value: 'twice_daily', label: 'Twice Daily (Morning & Afternoon)' },
-  { value: 'weekly', label: 'Weekly (Mondays)' }
-];
 
 const DISCOVERY_BATCH_OPTIONS = [
   { value: 10, label: '10 prospects' },
@@ -847,9 +851,24 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     setInitialDist(distObj);
 
     // Initialize discovery configuration for cold pipelines
-    const pipeDiscovery = pipe.discovery_config && typeof pipe.discovery_config === 'object'
-      ? { ...DEFAULT_DISCOVERY_CONFIG, ...pipe.discovery_config, dedupe: { ...DEFAULT_DISCOVERY_CONFIG.dedupe, ...(pipe.discovery_config.dedupe || {}) } }
-      : DEFAULT_DISCOVERY_CONFIG;
+    const rawDisc = (pipe.discovery_config && typeof pipe.discovery_config === 'object') ? pipe.discovery_config : {};
+    let initialScheduleDays = rawDisc.schedule_days;
+    if (!Array.isArray(initialScheduleDays) || initialScheduleDays.length === 0) {
+      if (rawDisc.schedule_cadence === 'daily') {
+        initialScheduleDays = [1, 2, 3, 4, 5, 6, 0];
+      } else if (rawDisc.schedule_cadence === 'weekly') {
+        initialScheduleDays = [1];
+      } else {
+        initialScheduleDays = [1, 2, 3, 4, 5];
+      }
+    }
+
+    const pipeDiscovery = {
+      ...DEFAULT_DISCOVERY_CONFIG,
+      ...rawDisc,
+      schedule_days: initialScheduleDays,
+      dedupe: { ...DEFAULT_DISCOVERY_CONFIG.dedupe, ...(rawDisc.dedupe || {}) }
+    };
 
     if (Array.isArray(pipeDiscovery.target_roles) &&
         pipeDiscovery.target_roles.length === 4 &&
@@ -1056,6 +1075,33 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       saveDiscoveryPayload(next);
       return next;
     });
+  };
+
+  // Sleek minimal Day selector toggle handler
+  const handleToggleScheduleDay = (dayKey) => {
+    const curDays = discoveryConfig?.schedule_days || [1, 2, 3, 4, 5];
+    let nextDays;
+    if (curDays.includes(dayKey)) {
+      if (curDays.length <= 1) {
+        showToast('At least one sweep day must remain selected');
+        return;
+      }
+      nextDays = curDays.filter(d => d !== dayKey);
+    } else {
+      nextDays = [...curDays, dayKey];
+    }
+
+    const dayOrder = [1, 2, 3, 4, 5, 6, 0];
+    nextDays.sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
+
+    const nextRun = calculateNextDiscoveryRun(nextDays, discoveryConfig?.schedule_time || '09:00');
+    const updated = {
+      ...(discoveryConfig || DEFAULT_DISCOVERY_CONFIG),
+      schedule_days: nextDays,
+      next_run_at: nextRun
+    };
+    setDiscoveryConfig(updated);
+    saveDiscoveryPayload(updated);
   };
 
   const handleDiscoveryArrayChange = (arrayKey, legacyKey, newArray) => {
@@ -1345,7 +1391,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
       if (!isDryRun) {
         const nextRun = discoveryConfig?.autopilot_enabled
-          ? calculateNextDiscoveryRun(discoveryConfig?.schedule_cadence || 'weekdays', discoveryConfig?.schedule_time || '09:00')
+          ? calculateNextDiscoveryRun(discoveryConfig?.schedule_days || [1, 2, 3, 4, 5], discoveryConfig?.schedule_time || '09:00')
           : discoveryConfig?.next_run_at;
         const updatedStats = {
           last_run_at: new Date().toISOString(),
@@ -3681,7 +3727,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                                 onChange={(e) => {
                                   const isEnabled = e.target.checked;
                                   const nextRun = isEnabled
-                                    ? calculateNextDiscoveryRun(discoveryConfig?.schedule_cadence || 'weekdays', discoveryConfig?.schedule_time || '09:00')
+                                    ? calculateNextDiscoveryRun(discoveryConfig?.schedule_days || [1, 2, 3, 4, 5], discoveryConfig?.schedule_time || '09:00')
                                     : null;
                                   const updated = {
                                     ...(discoveryConfig || DEFAULT_DISCOVERY_CONFIG),
@@ -3698,31 +3744,33 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                           </div>
                         </div>
 
-                        {/* Schedule Cadence (when active) */}
+                        {/* Sweep Days (when active) */}
                         {discoveryConfig?.autopilot_enabled && (
                           <div className="pipeline-prop-row">
                             <div className="pipeline-prop-label-col">
                               <div className="pipeline-prop-icon">
                                 <Calendar size={20} />
                               </div>
-                              <span className="pipeline-prop-name">Sweep Cadence</span>
+                              <span className="pipeline-prop-name">Sweep Days</span>
                             </div>
                             <div className="pipeline-prop-value-col">
-                              <div style={{ maxWidth: 300, width: '100%' }}>
-                                <CustomSelect
-                                  value={discoveryConfig?.schedule_cadence || 'weekdays'}
-                                  onChange={(val) => {
-                                    const nextRun = calculateNextDiscoveryRun(val, discoveryConfig?.schedule_time || '09:00');
-                                    const next = {
-                                      ...(discoveryConfig || DEFAULT_DISCOVERY_CONFIG),
-                                      schedule_cadence: val,
-                                      next_run_at: nextRun
-                                    };
-                                    setDiscoveryConfig(next);
-                                    saveDiscoveryPayload(next);
-                                  }}
-                                  options={DISCOVERY_CADENCE_OPTIONS}
-                                />
+                              <div className="pipeline-day-selector">
+                                {DAYS_OF_WEEK.map((d) => {
+                                  const currentDays = discoveryConfig?.schedule_days || [1, 2, 3, 4, 5];
+                                  const isSelected = currentDays.includes(d.key);
+                                  return (
+                                    <button
+                                      key={d.key}
+                                      type="button"
+                                      className={`pipeline-day-btn ${isSelected ? 'active' : ''}`}
+                                      onClick={() => handleToggleScheduleDay(d.key)}
+                                      title={d.label}
+                                      disabled={!canEdit}
+                                    >
+                                      {d.short}
+                                    </button>
+                                  );
+                                })}
                               </div>
                             </div>
                           </div>
@@ -3755,7 +3803,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                                   onChange={(e) => {
                                     const newTime = e.target.value || '09:00';
                                     const nextRun = calculateNextDiscoveryRun(
-                                      discoveryConfig?.schedule_cadence || 'weekdays',
+                                      discoveryConfig?.schedule_days || [1, 2, 3, 4, 5],
                                       newTime
                                     );
                                     const updated = {

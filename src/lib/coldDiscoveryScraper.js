@@ -595,60 +595,45 @@ export async function runColdDiscoveryBatch({
 }
 
 /**
- * Calculates the next scheduled run timestamp based on cadence and time.
- * @param {string} cadence - 'weekdays' | 'daily' | 'twice_daily' | 'weekly'
+ * Calculates the next scheduled run timestamp based on selected days and sweep time.
+ * Supports both an array of day numbers ([1, 2, 3, 4, 5]) and legacy cadence strings.
+ * @param {Array<number>|string} scheduleDaysOrCadence - [1, 2, 3, 4, 5] (0=Sun..6=Sat) or legacy string
  * @param {string} timeStr - 'HH:MM' (default '09:00')
  * @returns {string} ISO Date string
  */
-export function calculateNextDiscoveryRun(cadence = 'weekdays', timeStr = '09:00') {
+export function calculateNextDiscoveryRun(scheduleDaysOrCadence = [1, 2, 3, 4, 5], timeStr = '09:00') {
+  let targetDays = [];
+  if (Array.isArray(scheduleDaysOrCadence)) {
+    targetDays = scheduleDaysOrCadence.map(Number);
+  } else if (typeof scheduleDaysOrCadence === 'string') {
+    if (scheduleDaysOrCadence === 'daily') {
+      targetDays = [0, 1, 2, 3, 4, 5, 6];
+    } else if (scheduleDaysOrCadence === 'weekly') {
+      targetDays = [1];
+    } else {
+      // weekdays / default
+      targetDays = [1, 2, 3, 4, 5];
+    }
+  }
+  if (targetDays.length === 0) {
+    targetDays = [1, 2, 3, 4, 5];
+  }
+
   const [hours, minutes] = (timeStr || '09:00').split(':').map(Number);
   const now = new Date();
-  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours || 9, minutes || 0, 0, 0);
 
-  if (cadence === 'twice_daily') {
-    const afternoonHours = 14;
-    const morningTarget = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours || 9, minutes || 0, 0, 0);
-    const afternoonTarget = new Date(now.getFullYear(), now.getMonth(), now.getDate(), afternoonHours, 0, 0, 0);
-
-    if (now < morningTarget) {
-      return morningTarget.toISOString();
+  // Search through upcoming days (up to 14 days) to find the next matching day and time
+  for (let offset = 0; offset <= 14; offset++) {
+    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, hours || 9, minutes || 0, 0, 0);
+    if (targetDays.includes(candidate.getDay())) {
+      if (candidate > now) {
+        return candidate.toISOString();
+      }
     }
-    if (now < afternoonTarget) {
-      return afternoonTarget.toISOString();
-    }
-    morningTarget.setDate(morningTarget.getDate() + 1);
-    return morningTarget.toISOString();
   }
 
-  if (cadence === 'weekly') {
-    const currentDay = now.getDay();
-    let daysUntilMonday = (1 - currentDay + 7) % 7;
-    if (daysUntilMonday === 0 && now >= next) {
-      daysUntilMonday = 7;
-    }
-    next.setDate(next.getDate() + daysUntilMonday);
-    return next.toISOString();
-  }
-
-  if (cadence === 'daily') {
-    if (now >= next) {
-      next.setDate(next.getDate() + 1);
-    }
-    return next.toISOString();
-  }
-
-  // Default: 'weekdays' (Mon - Fri)
-  if (now >= next) {
-    next.setDate(next.getDate() + 1);
-  }
-  // Saturday (6) -> shift 2 days to Monday
-  if (next.getDay() === 6) {
-    next.setDate(next.getDate() + 2);
-  } else if (next.getDay() === 0) {
-    // Sunday (0) -> shift 1 day to Monday
-    next.setDate(next.getDate() + 1);
-  }
-  return next.toISOString();
+  const fallback = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, hours || 9, minutes || 0, 0, 0);
+  return fallback.toISOString();
 }
 
 /**
@@ -719,7 +704,10 @@ export async function checkAndRunDiscoveryAutopilot({ pipelines = [], usersList 
         });
 
         // Compute next run timestamp
-        const nextRunTimestamp = calculateNextDiscoveryRun(config.schedule_cadence || 'weekdays', config.schedule_time || '09:00');
+        const nextRunTimestamp = calculateNextDiscoveryRun(
+          config.schedule_days || config.schedule_cadence || [1, 2, 3, 4, 5],
+          config.schedule_time || '09:00'
+        );
 
         // Atomically update pipeline record with new next_run_at AND latest run stats
         const updatedConfig = {
