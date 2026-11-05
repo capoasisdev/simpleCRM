@@ -245,17 +245,12 @@ export default function SupportDrawer({
             </div>
             <div>
               <h2 className="support-modal-title">Feedback & Support</h2>
-              <p className="support-modal-subtitle">Send a direct note, suggestion, or bug report to Developers.</p>
             </div>
           </div>
-          <a
-            href="tel:+919156367501"
-            className="support-header-phone"
-            title="Call developers: +91 91563 67501"
-          >
-            <Phone size={13} strokeWidth={2.2} />
+          <div className="support-header-phone" title="Developer Contact: +91 91563 67501">
+            <Phone size={13} strokeWidth={2} />
             <span>+91 91563 67501</span>
-          </a>
+          </div>
         </div>
 
         {isSuccess ? (
