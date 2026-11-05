@@ -47,8 +47,71 @@ async function verifyDomainDoH(domain: string): Promise<{ isValid: boolean; prov
   return { isValid: false, provider: 'None', mxHost: null };
 }
 
+function expandAutopilotLocations(regions: any = [], country = "India") {
+  const isUS = /united states|usa|\bus\b/i.test(country);
+  const isUK = /united kingdom|uk|\bgb\b/i.test(country);
+
+  const metroPresets = {
+    in: ["Bengaluru", "Mumbai", "Pune", "Delhi NCR", "Hyderabad", "Chennai"],
+    us: ["New York", "Los Angeles", "Chicago", "Houston", "Miami", "San Francisco"],
+    uk: ["London", "Manchester", "Birmingham", "Leeds"]
+  };
+  const hubPresets = {
+    in: ["Ahmedabad", "Kolkata", "Jaipur", "Indore", "Kochi", "Chandigarh"],
+    us: ["Austin", "Seattle", "Denver", "Atlanta", "Boston"],
+    uk: ["Bristol", "Glasgow", "Edinburgh", "Liverpool"]
+  };
+
+  const activeMetros = isUS ? metroPresets.us : (isUK ? metroPresets.uk : metroPresets.in);
+  const activeHubs = isUS ? hubPresets.us : (isUK ? hubPresets.uk : hubPresets.in);
+
+  const rawList = Array.isArray(regions) ? regions : (regions ? [regions] : []);
+  const results: string[] = [];
+
+  for (const item of rawList) {
+    if (!item || typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+
+    if (/major metros/i.test(trimmed)) {
+      results.push(...activeMetros);
+    } else if (/regional hubs/i.test(trimmed)) {
+      results.push(...activeHubs);
+    } else if (/all regions|worldwide|global/i.test(trimmed)) {
+      results.push(activeMetros[0]);
+    } else {
+      results.push(trimmed);
+    }
+  }
+
+  const unique = Array.from(new Set(results));
+  return unique.length > 0 ? unique : [activeMetros[0]];
+}
+
+function extractAutopilotCategories(config: any = {}) {
+  const categories: string[] = [];
+  const rawQueries = Array.isArray(config.search_queries) ? config.search_queries : (config.search_query ? [config.search_query] : []);
+  const rawIndustries = Array.isArray(config.target_industries) ? config.target_industries : (config.industry ? [config.industry] : []);
+
+  for (const q of rawQueries) {
+    if (q && typeof q === "string" && q.trim()) {
+      const trimmed = q.trim();
+      if (!categories.includes(trimmed)) categories.push(trimmed);
+    }
+  }
+  for (const ind of rawIndustries) {
+    if (ind && typeof ind === "string" && ind.trim()) {
+      const trimmed = ind.trim();
+      const isAlreadyCovered = categories.some(c => c.toLowerCase() === trimmed.toLowerCase());
+      if (!isAlreadyCovered) categories.push(trimmed);
+    }
+  }
+
+  return categories.length > 0 ? categories : ["Commercial Businesses"];
+}
+
 /**
- * Fetches real Google Maps businesses from Serper.dev Places API
+ * Fetches real Google Maps businesses from Serper.dev Places API across multiple categories and cities
  * ZERO FAKE DATA GUARANTEE: If a phone or email is not publicly published, it is left as "" (empty string).
  */
 async function fetchSerperPlaces(config: any, count = 25) {
@@ -58,82 +121,87 @@ async function fetchSerperPlaces(config: any, count = 25) {
     return [];
   }
 
-  const searchCategory = (config.target_industries && config.target_industries[0]) ||
-    (config.search_queries && config.search_queries[0]) ||
-    config.search_query ||
-    config.industry ||
-    "Commercial Businesses";
-
-  let searchLocation = (config.target_regions && config.target_regions[0]) || config.location || "Bengaluru";
   const searchCountry = (config.target_countries && config.target_countries[0]) || config.country || "India";
+  const cities = expandAutopilotLocations(config.target_regions || [config.location], searchCountry);
+  const categories = extractAutopilotCategories(config);
 
-  if (!searchLocation || /major metros|regional hubs|all regions|worldwide|global/i.test(searchLocation)) {
-    if (/united states|usa|us/i.test(searchCountry)) searchLocation = "New York";
-    else if (/united kingdom|uk/i.test(searchCountry)) searchLocation = "London";
-    else searchLocation = "Bengaluru";
-  }
+  const collected: any[] = [];
+  const seenKeys = new Set<string>();
 
-  const fullQuery = `${searchCategory} in ${searchLocation}, ${searchCountry}`.trim();
+  for (const city of cities) {
+    if (collected.length >= count) break;
+    for (const category of categories) {
+      if (collected.length >= count) break;
 
-  try {
-    const res = await fetch("https://google.serper.dev/places", {
-      method: "POST",
-      headers: {
-        "X-API-KEY": apiKey,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        q: fullQuery,
-        gl: searchCountry.toLowerCase().includes("us") ? "us" : "in",
-        hl: "en"
-      }),
-      signal: AbortSignal.timeout(10000)
-    });
+      const fullQuery = `${category} in ${city}, ${searchCountry}`.trim();
+      try {
+        const res = await fetch("https://google.serper.dev/places", {
+          method: "POST",
+          headers: {
+            "X-API-KEY": apiKey,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            q: fullQuery,
+            gl: searchCountry.toLowerCase().includes("us") ? "us" : "in",
+            hl: "en"
+          }),
+          signal: AbortSignal.timeout(10000)
+        });
 
-    if (res.ok) {
-      const data = await res.json();
-      const places = Array.isArray(data.places) ? data.places : [];
-      return places.map((p: any) => {
-        const cleanTitle = (p.title || "Local Business").trim();
-        const cleanAddress = (p.address || `${searchLocation}, ${searchCountry}`).trim();
-        const phone = (p.phoneNumber || "").trim();
-        const website = (p.website || "").trim();
-        const category = (p.category || searchCategory || "Local Business").trim();
-        const mapsUrl = p.cid
-          ? `https://www.google.com/maps?cid=${p.cid}`
-          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${cleanTitle} ${cleanAddress}`)}`;
+        if (res.ok) {
+          const data = await res.json();
+          const places = Array.isArray(data.places) ? data.places : [];
+          for (const p of places) {
+            const cleanTitle = (p.title || "Local Business").trim();
+            const cleanAddress = (p.address || `${city}, ${searchCountry}`).trim();
+            const phone = (p.phoneNumber || "").trim();
+            const key = (phone || cleanTitle).toLowerCase().trim();
 
-        return {
-          name: cleanTitle,
-          company: cleanTitle,
-          phone,
-          email: "",
-          website,
-          address: cleanAddress,
-          city: searchLocation,
-          category,
-          custom_fields: {
-            company: cleanTitle,
-            designation: "Business Owner / Management",
-            address: cleanAddress,
-            phone,
-            website,
-            rating: p.rating || null,
-            review_count: p.ratingCount || 0,
-            category,
-            google_maps_url: mapsUrl,
-            location: `${searchLocation}, ${searchCountry}`,
-            discovery_source: "google_places",
-            is_real_scraped_phone: Boolean(phone)
+            if (key && !seenKeys.has(key)) {
+              seenKeys.add(key);
+              const website = (p.website || "").trim();
+              const cat = (p.category || category || "Local Business").trim();
+              const mapsUrl = p.cid
+                ? `https://www.google.com/maps?cid=${p.cid}`
+                : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${cleanTitle} ${cleanAddress}`)}`;
+
+              collected.push({
+                name: cleanTitle,
+                company: cleanTitle,
+                phone,
+                email: "",
+                website,
+                address: cleanAddress,
+                city,
+                category: cat,
+                custom_fields: {
+                  company: cleanTitle,
+                  designation: "Business Owner / Management",
+                  address: cleanAddress,
+                  phone,
+                  website,
+                  rating: p.rating || null,
+                  review_count: p.ratingCount || 0,
+                  category: cat,
+                  google_maps_url: mapsUrl,
+                  location: `${city}, ${searchCountry}`,
+                  discovery_source: "google_places",
+                  is_real_scraped_phone: Boolean(phone)
+                }
+              });
+
+              if (collected.length >= count) break;
+            }
           }
-        };
-      });
+        }
+      } catch (err) {
+        console.warn(`[Autopilot Serper error for "${category} in ${city}"]:`, err);
+      }
     }
-  } catch (err) {
-    console.warn("[Autopilot Serper Places error]:", err);
   }
 
-  return [];
+  return collected;
 }
 
 /**
@@ -332,8 +400,8 @@ Deno.serve(async (req) => {
         remainingDripBuffer = dripBuffer.slice(batchSize);
         isFromDripBuffer = true;
       } else {
-        // Query real Google Maps businesses via Serper API
-        rawCandidates = await fetchSerperPlaces(config, batchSize * 2);
+        // Query real Google Maps businesses via Serper API across multiple categories & cities
+        rawCandidates = await fetchSerperPlaces(config, Math.max(batchSize * 3, 35));
       }
 
       const readyToInsert: any[] = [];

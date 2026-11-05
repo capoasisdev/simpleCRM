@@ -101,7 +101,123 @@ export async function fetchWebhookDiscoveryCandidates(webhookUrl, config, count 
 }
 
 /**
- * Live Discovery Fetcher: queries Google Places / Local Business Directory with zero fake data.
+ * Expands target locations, translating abstract presets into real metropolitan cities.
+ */
+export function expandTargetLocations(regions = [], country = 'India') {
+  const isIndia = /india|\bin\b/i.test(country);
+  const isUS = /united states|usa|\bus\b/i.test(country);
+  const isUK = /united kingdom|uk|\bgb\b/i.test(country);
+
+  const metroPresets = {
+    in: ['Bengaluru', 'Mumbai', 'Pune', 'Delhi NCR', 'Hyderabad', 'Chennai'],
+    us: ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Miami', 'San Francisco'],
+    uk: ['London', 'Manchester', 'Birmingham', 'Leeds']
+  };
+
+  const hubPresets = {
+    in: ['Ahmedabad', 'Kolkata', 'Jaipur', 'Indore', 'Kochi', 'Chandigarh'],
+    us: ['Austin', 'Seattle', 'Denver', 'Atlanta', 'Boston'],
+    uk: ['Bristol', 'Glasgow', 'Edinburgh', 'Liverpool']
+  };
+
+  const activeMetros = isUS ? metroPresets.us : (isUK ? metroPresets.uk : metroPresets.in);
+  const activeHubs = isUS ? hubPresets.us : (isUK ? hubPresets.uk : hubPresets.in);
+
+  const rawList = Array.isArray(regions) ? regions : (regions ? [regions] : []);
+  const results = [];
+
+  for (const item of rawList) {
+    if (!item || typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+
+    if (/major metros/i.test(trimmed)) {
+      results.push(...activeMetros);
+    } else if (/regional hubs/i.test(trimmed)) {
+      results.push(...activeHubs);
+    } else if (/all regions|worldwide|global/i.test(trimmed)) {
+      results.push(activeMetros[0]);
+    } else {
+      results.push(trimmed);
+    }
+  }
+
+  const unique = Array.from(new Set(results));
+  return unique.length > 0 ? unique : [activeMetros[0]];
+}
+
+/**
+ * Extracts and deduplicates all distinct business categories and search keywords.
+ */
+export function extractTargetCategories(config = {}) {
+  const categories = [];
+
+  const rawQueries = Array.isArray(config.search_queries) ? config.search_queries : (config.search_query ? [config.search_query] : []);
+  const rawIndustries = Array.isArray(config.target_industries) ? config.target_industries : (config.industry ? [config.industry] : []);
+
+  // 1. First add explicit search keywords/queries
+  for (const q of rawQueries) {
+    if (q && typeof q === 'string' && q.trim()) {
+      const trimmed = q.trim();
+      if (!categories.includes(trimmed)) categories.push(trimmed);
+    }
+  }
+
+  // 2. Add industries that aren't already represented
+  for (const ind of rawIndustries) {
+    if (ind && typeof ind === 'string' && ind.trim()) {
+      const trimmed = ind.trim();
+      const isAlreadyCovered = categories.some(
+        c => c.toLowerCase() === trimmed.toLowerCase()
+      );
+      if (!isAlreadyCovered) {
+        categories.push(trimmed);
+      }
+    }
+  }
+
+  return categories.length > 0 ? categories : ['Commercial Businesses'];
+}
+
+/**
+ * Builds an interleaved queue of search tasks across all categories, cities, and pagination depths.
+ */
+export function buildDiscoveryQueryPlan(config = {}) {
+  const searchCountry = (config.target_countries && config.target_countries[0]) || config.country || 'India';
+  const cities = expandTargetLocations(config.target_regions || [config.location], searchCountry);
+  const categories = extractTargetCategories(config);
+
+  const tasks = [];
+
+  // Round 1: Page 1 across all categories in City 1, then City 2, etc.
+  for (const city of cities) {
+    for (const category of categories) {
+      tasks.push({
+        category,
+        location: city,
+        country: searchCountry,
+        page: 1
+      });
+    }
+  }
+
+  // Round 2: Page 2 for primary cities to ensure sufficient depth if duplicates are encountered
+  for (const city of cities.slice(0, 3)) {
+    for (const category of categories) {
+      tasks.push({
+        category,
+        location: city,
+        country: searchCountry,
+        page: 2
+      });
+    }
+  }
+
+  return tasks;
+}
+
+/**
+ * Live Discovery Fetcher: queries Google Places across multiple categories and cities with zero fake data.
  */
 export async function fetchLiveDiscoveryCandidates(config, count = 15) {
   // 1. If custom webhook is explicitly configured, query it
@@ -114,32 +230,41 @@ export async function fetchLiveDiscoveryCandidates(config, count = 15) {
     }
   }
 
-  // 2. Verified Google Places & Maps Discovery powered by Serper
-  const searchCategory = (config.target_industries && config.target_industries[0]) ||
-    (config.search_queries && config.search_queries[0]) ||
-    config.search_query ||
-    config.industry ||
-    'Commercial Businesses';
+  // 2. Multi-category Google Places Discovery powered by Serper
+  const queryTasks = buildDiscoveryQueryPlan(config);
+  const collectedPlaces = [];
+  const seenPlaceKeys = new Set();
 
-  const searchLocation = (config.target_regions && config.target_regions[0]) || config.location || 'Bengaluru';
-  const searchCountry = (config.target_countries && config.target_countries[0]) || config.country || 'India';
+  for (const task of queryTasks) {
+    if (collectedPlaces.length >= count) break;
+    try {
+      const places = await fetchSerperGooglePlaces({
+        query: task.category,
+        location: task.location,
+        country: task.country,
+        page: task.page,
+        count: Math.min(20, count - collectedPlaces.length)
+      });
 
-  try {
-    const places = await fetchSerperGooglePlaces({
-      query: searchCategory,
-      location: searchLocation,
-      country: searchCountry,
-      count
-    });
-
-    if (Array.isArray(places) && places.length > 0) {
-      return await scoreCandidateBatch({ candidates: places, pipelineConfig: config });
+      if (Array.isArray(places)) {
+        for (const p of places) {
+          const key = (p.phone || p.name || p.company || '').toLowerCase().trim();
+          if (key && !seenPlaceKeys.has(key)) {
+            seenPlaceKeys.add(key);
+            collectedPlaces.push(p);
+            if (collectedPlaces.length >= count) break;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[Serper query failed for "${task.category} in ${task.location}"]:`, err);
     }
-    return places || [];
-  } catch (err) {
-    console.error('[Google Places Discovery Error]:', err);
-    throw err;
   }
+
+  if (collectedPlaces.length > 0) {
+    return await scoreCandidateBatch({ candidates: collectedPlaces, pipelineConfig: config });
+  }
+  return [];
 }
 
 /**
@@ -180,20 +305,7 @@ export async function runColdDiscoveryBatch({
 
   const dedupeIndex = buildLeadsDedupeIndex(existingLeads || [], pipeline.id);
 
-  // 2. Fetch candidates: prioritize Lead Drip Buffer if present, otherwise live discovery
-  let rawCandidates = [];
-  let isFromDripBuffer = false;
-  let remainingDripBuffer = null;
-
-  if (hasDrip) {
-    rawCandidates = dripBuffer.slice(0, batchSize);
-    remainingDripBuffer = dripBuffer.slice(batchSize);
-    isFromDripBuffer = true;
-  } else {
-    rawCandidates = await fetchLiveDiscoveryCandidates(config, Math.max(batchSize * 2, 25));
-  }
-
-  // 3. Process Deduplication & Allocation
+  // 2. Set up allocation and pipeline parameters
   const pipeDist = pipeline.lead_distribution || {};
   const distMode = pipeDist.mode || 'round_robin';
   const defaultAssignee = pipeDist.default_assignee || 'unassigned';
@@ -224,16 +336,21 @@ export async function runColdDiscoveryBatch({
   };
 
   const entryStageId = (pipeline.stages && pipeline.stages[0]?.id) ? pipeline.stages[0].id : 'prospect';
-
   const today = new Date();
   const dateStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
 
   const readyToInsert = [];
   const duplicatesList = [];
   const enrichmentsToUpdate = [];
+  let totalCandidatesEvaluated = 0;
 
-  for (const candidate of rawCandidates) {
-    if (readyToInsert.length >= batchSize) break;
+  let isFromDripBuffer = false;
+  let remainingDripBuffer = null;
+
+  // Process candidate helper
+  const processCandidate = (candidate) => {
+    if (readyToInsert.length >= batchSize) return false;
+    totalCandidatesEvaluated++;
 
     const dedupeResult = evaluateCandidateDeduplication(candidate, dedupeIndex, dedupeRules, pipeline.id);
 
@@ -256,49 +373,92 @@ export async function runColdDiscoveryBatch({
         reason: dedupeResult.reason,
         scope: dedupeResult.scope
       });
-    } else {
-      const assignee = getAssignee();
-      const companyVal = candidate.company || candidate.custom_fields?.company || '';
-      const designationVal = candidate.designation || candidate.custom_fields?.designation || '';
-      const websiteVal = candidate.website || candidate.custom_fields?.website || '';
-      const linkedinVal = candidate.linkedin || candidate.custom_fields?.linkedin || '';
-      const cityVal = candidate.city || candidate.custom_fields?.city || candidate.custom_fields?.location?.split(',')[0]?.trim() || '';
+      return true;
+    }
 
-      const newLeadPayload = {
-        name: candidate.name,
-        phone: candidate.phone || '',
-        email: candidate.email || '',
+    const assignee = getAssignee();
+    const companyVal = candidate.company || candidate.custom_fields?.company || '';
+    const designationVal = candidate.designation || candidate.custom_fields?.designation || '';
+    const websiteVal = candidate.website || candidate.custom_fields?.website || '';
+    const linkedinVal = candidate.linkedin || candidate.custom_fields?.linkedin || '';
+    const cityVal = candidate.city || candidate.custom_fields?.city || candidate.custom_fields?.location?.split(',')[0]?.trim() || '';
+
+    const newLeadPayload = {
+      name: candidate.name,
+      phone: candidate.phone || '',
+      email: candidate.email || '',
+      city: cityVal,
+      stage: entryStageId,
+      pipeline_id: pipeline.id,
+      form_name: candidate.source || 'Discovery',
+      assigned_to: assignee,
+      date: dateStr,
+      created_at: new Date().toISOString(),
+      custom_fields: {
+        company: companyVal,
+        designation: designationVal,
+        website: websiteVal,
+        linkedin: linkedinVal,
+        source: candidate.source || 'Discovery',
         city: cityVal,
-        stage: entryStageId,
-        pipeline_id: pipeline.id,
-        form_name: candidate.source || 'Discovery',
-        assigned_to: assignee,
-        date: dateStr,
-        created_at: new Date().toISOString(),
-        custom_fields: {
-          company: companyVal,
-          designation: designationVal,
-          website: websiteVal,
-          linkedin: linkedinVal,
-          source: candidate.source || 'Discovery',
-          city: cityVal,
-          ...(candidate.custom_fields || {})
-        }
-      };
-
-      readyToInsert.push(newLeadPayload);
-
-      // Add to running index so multiple candidates in the same batch don't duplicate each other
-      if (candidate.email) {
-        if (!dedupeIndex.byEmail.has(candidate.email)) dedupeIndex.byEmail.set(candidate.email, []);
-        dedupeIndex.byEmail.get(candidate.email).push(newLeadPayload);
+        ...(candidate.custom_fields || {})
       }
-      if (candidate.phone) {
-        const cleanP = candidate.phone.replace(/\D/g, '').slice(-10);
-        if (cleanP) {
-          if (!dedupeIndex.byPhone.has(cleanP)) dedupeIndex.byPhone.set(cleanP, []);
-          dedupeIndex.byPhone.get(cleanP).push(newLeadPayload);
+    };
+
+    readyToInsert.push(newLeadPayload);
+
+    // Add to running index so multiple candidates in the same batch don't duplicate each other
+    if (candidate.email) {
+      if (!dedupeIndex.byEmail.has(candidate.email)) dedupeIndex.byEmail.set(candidate.email, []);
+      dedupeIndex.byEmail.get(candidate.email).push(newLeadPayload);
+    }
+    if (candidate.phone) {
+      const cleanP = candidate.phone.replace(/\D/g, '').slice(-10);
+      if (cleanP) {
+        if (!dedupeIndex.byPhone.has(cleanP)) dedupeIndex.byPhone.set(cleanP, []);
+        dedupeIndex.byPhone.get(cleanP).push(newLeadPayload);
+      }
+    }
+
+    return true;
+  };
+
+  // 3. Lead Fulfillment Loop
+  if (hasDrip) {
+    const dripSlice = dripBuffer.slice(0, batchSize * 2);
+    for (const candidate of dripSlice) {
+      if (readyToInsert.length >= batchSize) break;
+      processCandidate(candidate);
+    }
+    remainingDripBuffer = dripBuffer.slice(readyToInsert.length);
+    isFromDripBuffer = true;
+  } else {
+    // Multi-category, multi-city dynamic batch fulfillment loop
+    const queryTasks = buildDiscoveryQueryPlan(config);
+    const maxTasksToRun = Math.min(queryTasks.length, 12); // Safety cap to avoid infinite loops
+
+    for (let taskIdx = 0; taskIdx < maxTasksToRun; taskIdx++) {
+      if (readyToInsert.length >= batchSize) break;
+
+      const task = queryTasks[taskIdx];
+      try {
+        const places = await fetchSerperGooglePlaces({
+          query: task.category,
+          location: task.location,
+          country: task.country,
+          page: task.page,
+          count: 20
+        });
+
+        if (Array.isArray(places) && places.length > 0) {
+          const scoredBatch = await scoreCandidateBatch({ candidates: places, pipelineConfig: config });
+          for (const candidate of scoredBatch) {
+            if (readyToInsert.length >= batchSize) break;
+            processCandidate(candidate);
+          }
         }
+      } catch (taskErr) {
+        console.warn(`[Discovery task failed for "${task.category} in ${task.location}"]:`, taskErr);
       }
     }
   }
@@ -308,7 +468,7 @@ export async function runColdDiscoveryBatch({
     return {
       success: true,
       dryRun: true,
-      totalFound: rawCandidates.length,
+      totalFound: totalCandidatesEvaluated,
       insertedCount: readyToInsert.length,
       duplicatesCount: duplicatesList.length,
       enrichedCount: enrichmentsToUpdate.length,
@@ -363,7 +523,7 @@ export async function runColdDiscoveryBatch({
   const updatedRunStats = {
     last_run_at: new Date().toISOString(),
     last_run_stats: {
-      total_scraped: rawCandidates.length,
+      total_scraped: totalCandidatesEvaluated,
       inserted: readyToInsert.length,
       duplicates_skipped: duplicatesList.length,
       enriched: enrichmentsToUpdate.length
@@ -393,7 +553,7 @@ export async function runColdDiscoveryBatch({
   return {
     success: true,
     dryRun: false,
-    totalFound: rawCandidates.length,
+    totalFound: totalCandidatesEvaluated,
     insertedCount: readyToInsert.length,
     duplicatesCount: duplicatesList.length,
     enrichedCount: enrichmentsToUpdate.length,

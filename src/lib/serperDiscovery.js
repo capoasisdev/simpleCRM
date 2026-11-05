@@ -52,6 +52,7 @@ export async function fetchSerperGooglePlaces({
   location = 'Bengaluru',
   country = 'India',
   count = 20,
+  page = 1,
   apiKeyOverride = ''
 }) {
   const apiKey = getSerperApiKey(apiKeyOverride);
@@ -72,17 +73,22 @@ export async function fetchSerperGooglePlaces({
   const fullSearchQuery = `${cleanQuery} in ${effectiveLocation}, ${country}`.trim();
   const gl = resolveCountryCode(country);
 
+  const payload = {
+    q: fullSearchQuery,
+    gl,
+    hl: 'en'
+  };
+  if (page && Number(page) > 1) {
+    payload.page = Number(page);
+  }
+
   const response = await fetch('https://google.serper.dev/places', {
     method: 'POST',
     headers: {
       'X-API-KEY': apiKey,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      q: fullSearchQuery,
-      gl,
-      hl: 'en'
-    }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(12000)
   });
 
