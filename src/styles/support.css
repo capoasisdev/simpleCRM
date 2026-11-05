@@ -156,27 +156,6 @@
   font-weight: 500;
 }
 
-.support-modal-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-  color: #94a3b8;
-  padding-top: 2px;
-}
-
-.support-modal-sender {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 60%;
-}
-
-.support-modal-hint {
-  font-size: 10.5px;
-  letter-spacing: 0.01em;
-}
-
 /* Footer */
 .support-modal-footer {
   padding: 12px 20px 16px 20px;

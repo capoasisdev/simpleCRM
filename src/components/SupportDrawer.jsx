@@ -75,13 +75,6 @@ export default function SupportDrawer({
     }
   };
 
-  const handleKeyDown = (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   return (
     <>
       <div className="support-modal-backdrop" onClick={onClose} aria-hidden="true" />
@@ -121,16 +114,11 @@ export default function SupportDrawer({
                 placeholder="What's on your mind? Found a bug or have an idea? Type here..."
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={handleKeyDown}
                 rows={4}
                 maxLength={2000}
                 disabled={isSubmitting}
               />
               {errorMsg && <div className="support-modal-error">{errorMsg}</div>}
-              <div className="support-modal-meta">
-                <span className="support-modal-sender">From {userName} ({userEmail})</span>
-                <span className="support-modal-hint">Press ⌘+Enter to send</span>
-              </div>
             </div>
 
             <div className="support-modal-footer">
