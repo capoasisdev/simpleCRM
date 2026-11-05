@@ -24,19 +24,19 @@ export const DEFAULT_COLD_B2C_PIPELINE_FIELDS = [
 ];
 
 export const STANDARD_DISCOVERY_ATTRIBUTES = [
-  { value: 'name', label: 'Discovery: Business / Contact Name' },
-  { value: 'company', label: 'Discovery: Company Name' },
-  { value: 'designation', label: 'Discovery: Job Title / Designation' },
-  { value: 'phone', label: 'Discovery: Phone Number' },
-  { value: 'email', label: 'Discovery: Email Address' },
-  { value: 'city', label: 'Discovery: City / Location' },
-  { value: 'address', label: 'Discovery: Street Address' },
-  { value: 'website', label: 'Discovery: Official Website' },
-  { value: 'category', label: 'Discovery: Business Category' },
-  { value: 'rating', label: 'Discovery: Google Rating' },
-  { value: 'review_count', label: 'Discovery: Review Count' },
-  { value: 'google_maps_url', label: 'Discovery: Google Maps Link' },
-  { value: 'linkedin', label: 'Discovery: LinkedIn Profile' }
+  { value: 'name', label: 'Full Name' },
+  { value: 'company', label: 'Company' },
+  { value: 'designation', label: 'Job Title / Designation' },
+  { value: 'phone', label: 'Phone Number' },
+  { value: 'email', label: 'Email Address' },
+  { value: 'city', label: 'City' },
+  { value: 'address', label: 'Street Address' },
+  { value: 'website', label: 'Website' },
+  { value: 'category', label: 'Business Category' },
+  { value: 'rating', label: 'Google Rating' },
+  { value: 'review_count', label: 'Review Count' },
+  { value: 'google_maps_url', label: 'Google Maps Link' },
+  { value: 'linkedin', label: 'LinkedIn Profile' }
 ];
 
 /**

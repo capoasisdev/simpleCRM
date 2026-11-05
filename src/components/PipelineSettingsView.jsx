@@ -677,16 +677,16 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       // Also include any custom keys discovered in active pipeline leads
       availableFormQuestions.forEach((q) => {
         if (!opts.some((o) => o.value.toLowerCase() === q.toLowerCase())) {
-          opts.push({ value: q, label: `Custom Field (${q})` });
+          opts.push({ value: q, label: q });
         }
       });
 
       if (field.mapped_question && !opts.some((o) => o.value === field.mapped_question)) {
-        opts.push({ value: field.mapped_question, label: `Attribute (${field.mapped_question})` });
+        opts.push({ value: field.mapped_question, label: field.mapped_question });
       }
 
       if (!opts.some((o) => o.value.toLowerCase() === field.key.toLowerCase())) {
-        opts.push({ value: field.key, label: `Custom Key (${field.key})` });
+        opts.push({ value: field.key, label: field.key });
       }
 
       return opts;
@@ -714,7 +714,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     }
 
     if (!opts.some((o) => o.value.toLowerCase() === field.key.toLowerCase())) {
-      opts.push({ value: field.key, label: `Custom Key (${field.key})` });
+      opts.push({ value: field.key, label: field.key });
     }
     return opts;
   };
@@ -1716,8 +1716,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       if (pipelineType === 'cold') {
         const matchingAttr = (STANDARD_DISCOVERY_ATTRIBUTES || []).find((a) => a.value === question);
         if (matchingAttr) {
-          const cleanLabel = matchingAttr.label.replace('Discovery: ', '');
-          setNewFieldName(cleanLabel);
+          setNewFieldName(matchingAttr.label);
           return;
         }
       }
@@ -3339,7 +3338,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                             ...(pipelineType === 'cold'
                               ? (STANDARD_DISCOVERY_ATTRIBUTES || [])
                                   .filter((attr) => !pipelineFields.some((f) => (f.mapped_question || f.key) === attr.value))
-                                  .map((attr) => ({ value: attr.value, label: attr.label.replace('Discovery: ', '') }))
+                                  .map((attr) => ({ value: attr.value, label: attr.label }))
                               : availableFormQuestions
                                   .filter((q) => !pipelineFields.some((f) => f.mapped_question === q))
                                   .map((q) => ({ value: q, label: q }))
