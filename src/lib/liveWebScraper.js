@@ -16,11 +16,7 @@ import { fetchGooglePlacesCandidates } from './googlePlacesDiscovery.js';
  * matching configured pipeline ICP criteria.
  */
 
-const FIRST_NAMES_IN = ['Aarav', 'Neha', 'Vikram', 'Pooja', 'Rohan', 'Ananya', 'Rahul', 'Sneha', 'Arjun', 'Priyanka', 'Aditya', 'Ritu', 'Karan', 'Meera', 'Sameer', 'Tanvi', 'Varun', 'Divya'];
-const LAST_NAMES_IN = ['Sharma', 'Patel', 'Verma', 'Iyer', 'Reddy', 'Mehta', 'Nair', 'Kapoor', 'Choudhury', 'Joshi', 'Bose', 'Gupta', 'Singh', 'Deshmukh', 'Kulkarni', 'Bhat'];
-
-const FIRST_NAMES_GLOBAL = ['Alexander', 'Sophia', 'Marcus', 'Elena', 'David', 'Chloe', 'James', 'Isabella', 'Daniel', 'Olivia', 'Lucas', 'Emily', 'Tariq', 'Fatima', 'Liam'];
-const LAST_NAMES_GLOBAL = ['Sterling', 'Vance', 'Chen', 'Dubois', 'Al-Mansoor', 'O\'Connor', 'Nakamura', 'Rossi', 'Müller', 'Schneider', 'Santos', 'Davies'];
+// Zero Fake Data: Synthetic name lists are permanently disabled.
 
 export function decodeHtmlEntities(str) {
   if (!str) return '';
@@ -545,135 +541,8 @@ export function generateDynamicB2BCompanies(config = {}) {
 }
 
 export function getRegistryCandidates(config = {}) {
-  const targetMode = config.target_mode === 'b2c' ? 'b2c' : 'b2b';
-  const queryStr = [
-    config.pipeline_name || '',
-    ...(config.search_queries || []),
-    ...(config.target_industries || []),
-    ...(config.target_interests || []),
-    ...(config.target_personas || []),
-    config.search_query || '',
-    config.industry || ''
-  ].join(' ').toLowerCase();
-
-  const countryStr = (config.target_countries || [config.country || '']).join(' ').toLowerCase();
-
-  // B2C Intent Candidates
-  if (targetMode === 'b2c') {
-    // 1. HRMS / Payroll / People Ops / Workforce Tech
-    if (
-      queryStr.includes('hrms') ||
-      queryStr.includes('payroll') ||
-      queryStr.includes('human resource') ||
-      queryStr.includes('people ops') ||
-      queryStr.includes('attendance') ||
-      queryStr.includes('recruitment') ||
-      queryStr.includes('workforce') ||
-      queryStr.includes('talent') ||
-      /\bhr\b/.test(queryStr)
-    ) {
-      return REAL_B2C_INQUIRY_REGISTRY.hrms_payroll_software;
-    }
-
-    // 2. CRM / Sales Management Software
-    if (
-      /\bcrm\b/.test(queryStr) ||
-      queryStr.includes('sales crm') ||
-      queryStr.includes('sales automation software') ||
-      queryStr.includes('lead management software')
-    ) {
-      return REAL_B2C_INQUIRY_REGISTRY.b2b_saas_crm_software;
-    }
-
-    // 3. Real Estate / Housing / Flats (STRICT: ONLY if explicitly mentioned!)
-    const isRealEstate = (
-      queryStr.includes('villa') ||
-      queryStr.includes('property') ||
-      queryStr.includes('real estate') ||
-      queryStr.includes('apartment') ||
-      queryStr.includes('housing') ||
-      queryStr.includes('3bhk') ||
-      queryStr.includes('2bhk') ||
-      queryStr.includes('flat') ||
-      queryStr.includes('interior design')
-    );
-
-    if (isRealEstate) {
-      if (countryStr.includes('uae') || countryStr.includes('emirates') || countryStr.includes('dubai')) {
-        return REAL_B2C_INQUIRY_REGISTRY.dubai_real_estate;
-      }
-      return REAL_B2C_INQUIRY_REGISTRY.bangalore_housing_interior;
-    }
-
-    // 4. Fitness & Wellness (STRICT: ONLY if explicitly mentioned!)
-    if (
-      queryStr.includes('fitness') ||
-      queryStr.includes('gym') ||
-      queryStr.includes('coach') ||
-      queryStr.includes('trainer') ||
-      queryStr.includes('diet') ||
-      queryStr.includes('nutrition')
-    ) {
-      return REAL_B2C_INQUIRY_REGISTRY.fitness_wellness;
-    }
-
-    // 5. Dynamic Contextual Synthesizer for any other domain (e.g. Solar, Legal, Logistics, Healthcare, Education)
-    return generateDynamicInquiries(config);
-  }
-
-  // B2B Enterprise Candidates
-  if (
-    queryStr.includes('hrms') ||
-    queryStr.includes('payroll') ||
-    queryStr.includes('human resource') ||
-    queryStr.includes('people ops') ||
-    queryStr.includes('attendance') ||
-    queryStr.includes('recruitment') ||
-    /\bhr\b/.test(queryStr)
-  ) {
-    return REAL_COMPANY_REGISTRY.hrms_india;
-  }
-
-  const isRealEstate = (
-    queryStr.includes('real estate') ||
-    queryStr.includes('property') ||
-    queryStr.includes('villa') ||
-    queryStr.includes('developer') ||
-    queryStr.includes('housing')
-  );
-  if (isRealEstate) {
-    return REAL_COMPANY_REGISTRY.real_estate_uae;
-  }
-
-  if (
-    queryStr.includes('agency') ||
-    queryStr.includes('marketing') ||
-    queryStr.includes('creative') ||
-    queryStr.includes('social media') ||
-    queryStr.includes('advertising')
-  ) {
-    return REAL_COMPANY_REGISTRY.agency_india;
-  }
-
-  if (
-    queryStr.includes('fitness') ||
-    queryStr.includes('gym') ||
-    queryStr.includes('wellness')
-  ) {
-    return REAL_COMPANY_REGISTRY.fitness_wellness;
-  }
-
-  if (
-    queryStr.includes('saas') ||
-    queryStr.includes('software') ||
-    queryStr.includes('tech') ||
-    queryStr.includes('cloud') ||
-    queryStr.includes('it')
-  ) {
-    return REAL_COMPANY_REGISTRY.b2b_saas_global;
-  }
-
-  return generateDynamicB2BCompanies(config);
+  // Zero Fake Data Policy: Synthetic company and inquiry backfills are permanently disabled.
+  return [];
 }
 
 /**
@@ -835,8 +704,6 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
     : (config.region ? [config.region] : ['Bengaluru', 'Mumbai', 'Delhi NCR']);
 
   const isIndia = countries.some(c => c.toLowerCase().includes('india'));
-  const firstNames = isIndia ? FIRST_NAMES_IN : FIRST_NAMES_GLOBAL;
-  const lastNames = isIndia ? LAST_NAMES_IN : LAST_NAMES_GLOBAL;
 
   // Resolve active sources (defaulting gracefully based on B2B/B2C)
   let activeSources = [];
@@ -984,53 +851,20 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
     }
   }
 
-  // If live multi-channel scraping returned fewer results than requested, backfill from verified registry
-  if (allScraped.length < requestedCount * 2) {
-    const registry = getRegistryCandidates(config);
-    const loc = regions[0] || countries[0] || 'Bengaluru';
-    const country = countries[0] || 'India';
-    let rIdx = 0;
-    const maxRegistryCycles = Math.max(requestedCount * 4, 30);
-    while (allScraped.length < requestedCount * 2 && rIdx < maxRegistryCycles) {
-      const reg = registry[rIdx % registry.length];
-      rIdx++;
-      if (!reg) break;
-      const sourceChannel = reg.channel || activeSources[rIdx % activeSources.length] || (targetMode === 'b2c' ? 'reddit' : 'web_discovery');
-      const uniqueSuffix = rIdx > registry.length ? ` #${rIdx}` : '';
-      allScraped.push({
-        title: (reg.inquiry || reg.company) + uniqueSuffix,
-        snippet: reg.inquiry ? `Consumer looking for advice: "${reg.inquiry}"` : `${reg.company} is an established company providing ${reg.industry} based in ${reg.city || loc}, ${reg.country || country}.`,
-        link: reg.link || `https://${reg.domain}`,
-        domain: reg.domain || (reg.link ? new URL(reg.link).hostname : 'community.local'),
-        location: `${reg.city || loc}, ${reg.country || country}`,
-        query: queryPool[0] || (targetMode === 'b2c' ? 'Community Inquiries' : 'Industry Discovery'),
-        companySize: reg.size,
-        industry: reg.industry,
-        persona: reg.persona,
-        inquiry: reg.inquiry,
-        subreddit: reg.subreddit,
-        sourceChannel,
-        isRegistryB2C: targetMode === 'b2c'
-      });
-    }
-  }
-
   // Format into rich candidate records with specialized channel attributes and Option A deliverability validation
   const candidates = [];
 
   for (let i = 0; i < allScraped.length && candidates.length < requestedCount; i++) {
     const scraped = allScraped[i];
     const sourceChannel = scraped.sourceChannel || (targetMode === 'b2c' ? 'reddit' : 'web_discovery');
-    const fn = firstNames[Math.floor(Math.random() * firstNames.length)];
-    const ln = lastNames[Math.floor(Math.random() * lastNames.length)];
     const location = scraped.location;
     const query = scraped.query;
     const domain = scraped.domain;
 
-    let fullName = `${fn} ${ln}`;
     let company = cleanCompanyName(scraped.title, scraped.domain);
+    let fullName = '';
     let role = targetRoles[i % targetRoles.length];
-    let linkedinUrl = `https://www.linkedin.com/company/${domain.split('.')[0]}`;
+    let linkedinUrl = `https://www.linkedin.com/company/${domain ? domain.split('.')[0] : ''}`;
     let website = scraped.link?.startsWith('http') ? scraped.link : `https://${domain}`;
     let sourceLabel = `Web Discovery (${query})`;
 
@@ -1039,10 +873,11 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
       const parsed = parseRedditTitle(scraped.title, scraped.link);
       const sub = scraped.subreddit || parsed.subreddit || 'r/community';
       sourceLabel = `Reddit (${sub})`;
-      fullName = `${fn} (${sub})`;
+      fullName = parsed.cleanTitle || 'Community User';
       website = scraped.link?.startsWith('http') ? scraped.link : `https://${domain}`;
     } else if (sourceChannel === 'quora') {
       sourceLabel = 'Quora Q&A';
+      fullName = parseQuoraTitle(scraped.title) || 'Community User';
       website = scraped.link?.startsWith('http') ? scraped.link : `https://${domain}`;
     } else if (sourceChannel === 'linkedin') {
       if (scraped.link?.includes('linkedin.com/in/')) {
@@ -1052,17 +887,15 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
         if (parsed.company) company = parsed.company;
         linkedinUrl = scraped.link;
       }
-      // If company was not in the LinkedIn title, try extracting from snippet or registry
       if (!company || company === fullName || company.length < 2) {
         const snippetMatch = (scraped.snippet || '').match(/(?:at|with|for)\s+([A-Z][A-Za-z0-9\s&]+?)(?:\s+in|\s+based|\s+as|\.|\,|$)/);
         if (snippetMatch && snippetMatch[1].trim().length >= 2 && !/^(the|linkedin|india|bangalore)/i.test(snippetMatch[1].trim())) {
           company = snippetMatch[1].trim();
         } else {
-          const regPool = getRegistryCandidates(config);
-          const reg = regPool[i % regPool.length];
-          company = reg ? reg.company : 'Enterprise Group';
+          company = domain ? domain.split('.')[0] : 'Commercial Business';
         }
       }
+      if (!fullName) fullName = company;
       sourceLabel = `LinkedIn Discovery (${role || query})`;
     } else if (sourceChannel === 'google_places') {
       sourceLabel = `Google Maps (${scraped.placeData?.custom_fields?.category || query})`;
@@ -1161,7 +994,7 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
       }
 
       candidates.push({
-        name: fullName,
+        name: fullName || company || 'Business Owner',
         phone,
         email,
         company: '', // No corporate company for B2C consumer inquiries
@@ -1190,10 +1023,10 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
       });
     } else {
       const industry = scraped.industry || config.target_industries?.[i % (config.target_industries?.length || 1)] || 'Information Technology';
-      const companySize = scraped.companySize || companySizes[i % companySizes.length];
+      const companySize = scraped.companySize || "";
 
       candidates.push({
-        name: fullName,
+        name: fullName || company || 'Business Owner',
         phone,
         email,
         company,
