@@ -2520,34 +2520,43 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
         </div>
 
         <div className="lead-card-contact-info">
-          {cardFields.some((f) => f.key === 'phone') && lead.phone && (
-            <div className="lead-card-contact-row">
-              <Phone size={13} strokeWidth={2} className="lead-contact-icon" />
-              <span>{formatPhoneNumber(lead.phone)}</span>
-              {lead.custom_fields?.phone_type && lead.custom_fields.phone_type !== 'standard' && (
-                <span
-                  className="lead-card-verify-badge is-phone"
-                  title={lead.custom_fields.phone_type === 'office_landline' ? 'Office Landline / Switchboard' : 'Direct Line'}
-                >
-                  {lead.custom_fields.phone_type === 'office_landline' ? 'Office' : 'Direct'}
-                </span>
-              )}
-            </div>
+          {cardFields.some((f) => f.key === 'phone') && (
+            lead.phone ? (
+              <div className="lead-card-contact-row">
+                <Phone size={13} strokeWidth={2} className="lead-contact-icon" />
+                <span>{formatPhoneNumber(lead.phone)}</span>
+                {lead.custom_fields?.phone_type && lead.custom_fields.phone_type !== 'standard' && (
+                  <span
+                    className="lead-card-verify-badge is-phone"
+                    title={lead.custom_fields.phone_type === 'office_landline' ? 'Office Landline / Switchboard' : 'Direct Line'}
+                  >
+                    {lead.custom_fields.phone_type === 'office_landline' ? 'Office' : 'Direct'}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="lead-card-contact-row" style={{ opacity: 0.55 }}>
+                <Phone size={13} strokeWidth={2} className="lead-contact-icon" />
+                <span style={{ fontStyle: 'italic', fontSize: '12px' }}>Unlisted phone</span>
+              </div>
+            )
           )}
-          {!isFollowUpCol && cardFields.some((f) => f.key === 'email') && lead.email && (
-            <div className="lead-card-contact-row">
-              <Mail size={13} strokeWidth={2} className="lead-contact-icon" />
-              <span className="lead-card-email-text">{lead.email}</span>
-              {lead.custom_fields?.mail_provider && lead.custom_fields.mail_provider !== 'None' && (
-                <span
-                  className="lead-card-verify-badge is-email"
-                  title={`Deliverability Verified via MX (${lead.custom_fields.mail_provider}) · Score: ${lead.custom_fields.quality_score || 85}/100`}
-                >
-                  <Check size={9} strokeWidth={3} className="lead-card-verify-check" />
-                  <span>{lead.custom_fields.mail_provider.replace('Google Workspace', 'Google').replace('Microsoft 365', 'M365').replace(' Consumer', '')}</span>
-                </span>
-              )}
-            </div>
+          {!isFollowUpCol && cardFields.some((f) => f.key === 'email') && (
+            lead.email ? (
+              <div className="lead-card-contact-row">
+                <Mail size={13} strokeWidth={2} className="lead-contact-icon" />
+                <span className="lead-card-email-text">{lead.email}</span>
+                {lead.custom_fields?.mail_provider && lead.custom_fields.mail_provider !== 'None' && (
+                  <span
+                    className="lead-card-verify-badge is-email"
+                    title={`Deliverability Verified via MX (${lead.custom_fields.mail_provider}) · Score: ${lead.custom_fields.quality_score || 85}/100`}
+                  >
+                    <Check size={9} strokeWidth={3} className="lead-card-verify-check" />
+                    <span>{lead.custom_fields.mail_provider.replace('Google Workspace', 'Google').replace('Microsoft 365', 'M365').replace(' Consumer', '')}</span>
+                  </span>
+                )}
+              </div>
+            ) : null
           )}
           {cardFields.some((f) => f.key === 'city') && (lead.city || getLeadFieldValue(lead, { key: 'city', mapped_question: 'city' })) && (
             <div className="lead-card-contact-row">

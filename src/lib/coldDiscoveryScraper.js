@@ -65,177 +65,11 @@ export function hasDiscoveryTargetingCriteria(config) {
 }
 
 /**
- * Generates realistic, contextual discovery candidates matching the configured ICP criteria.
- * Used for dry runs, testing, and built-in web discovery when external scraping APIs are optional.
- * Supports both B2B (business prospects) and B2C (individual consumer leads).
+ * Zero Fake Data Policy: Mock discovery generator is permanently disabled.
+ * The system strictly imports genuine public business listings or leads from the Lead Drip Buffer.
  */
 export function generateMockDiscoveryCandidates(config, count = 15) {
-  const targetMode = config.target_mode === 'b2c' ? 'b2c' : 'b2b';
-
-  if (!hasDiscoveryTargetingCriteria(config)) {
-    const hint = targetMode === 'b2c'
-      ? 'Country, City, Customer Persona, or Interest/Need'
-      : 'Country, Region, Industry, or Search Query';
-    throw new Error(`No target criteria configured. Please specify at least one ${hint} before running discovery.`);
-  }
-
-  const countries = Array.isArray(config.target_countries) && config.target_countries.length > 0
-    ? config.target_countries
-    : [];
-
-  const regions = Array.isArray(config.target_regions) && config.target_regions.length > 0
-    ? config.target_regions
-    : [];
-
-  const locations = Array.isArray(config.target_locations) && config.target_locations.length > 0
-    ? config.target_locations
-    : (config.location ? [config.location] : []);
-
-  // Build combined location string pool
-  let locationPool = [];
-  if (regions.length > 0 && countries.length > 0) {
-    for (const r of regions) {
-      for (const c of countries) {
-        locationPool.push(`${r}, ${c}`);
-      }
-    }
-  } else if (regions.length > 0) {
-    locationPool = [...regions];
-  } else if (countries.length > 0) {
-    locationPool = [...countries];
-  } else if (locations.length > 0) {
-    locationPool = [...locations];
-  } else {
-    locationPool = ['Global'];
-  }
-
-  const firstNames = ['Alexander', 'Sophia', 'Rohan', 'Elena', 'Marcus', 'Priya', 'David', 'Fatima', 'Vikram', 'Chloe', 'Arjun', 'Isabella', 'Tariq', 'Maya'];
-  const lastNames = ['Sterling', 'Vance', 'Kapoor', 'Chen', 'Patel', 'Al-Mansoor', 'Dubois', 'Sharma', 'O\'Connor', 'Nakamura', 'Mehta', 'Rossi'];
-
-  // ================= B2C DISCOVERY GENERATION =================
-  if (targetMode === 'b2c') {
-    const personas = Array.isArray(config.target_personas) && config.target_personas.length > 0
-      ? config.target_personas
-      : ['Interested Buyer', 'Consumer', 'High-Intent Client'];
-
-    const interests = Array.isArray(config.target_interests) && config.target_interests.length > 0
-      ? config.target_interests
-      : (Array.isArray(config.search_queries) && config.search_queries.length > 0
-          ? config.search_queries
-          : ['General Service Inquiry']);
-
-    const queries = Array.isArray(config.search_queries) && config.search_queries.length > 0
-      ? config.search_queries
-      : interests;
-
-    const emailDomains = ['gmail.com', 'icloud.com', 'outlook.com', 'yahoo.com'];
-    const candidates = [];
-
-    for (let i = 0; i < count; i++) {
-      const location = locationPool[i % locationPool.length].trim();
-      const persona = personas[i % personas.length].trim();
-      const interest = interests[i % interests.length].trim();
-      const query = queries[i % queries.length].trim();
-
-      const fn = firstNames[i % firstNames.length];
-      const ln = lastNames[(i * 3 + 2) % lastNames.length];
-      const fullName = `${fn} ${ln}`;
-      const domain = emailDomains[i % emailDomains.length];
-      const email = `${fn.toLowerCase()}.${ln.toLowerCase()}${i > 0 ? (i * 7 + 12) : ''}@${domain}`;
-      const phone = resolvePhoneNumber('', countries[0] || 'India', i);
-
-      candidates.push({
-        name: fullName,
-        phone,
-        email,
-        company: '', // Consumer leads do not have a company
-        designation: persona, // Shows persona tag e.g. First-time Home Buyer
-        website: '',
-        linkedin: '',
-        source: `Discovery (${interest || query})`,
-        custom_fields: {
-          target_mode: 'b2c',
-          location,
-          city: location.split(',')[0].trim(),
-          persona,
-          interest,
-          requirement: interest,
-          discovery_query: query,
-          discovery_source: config.source || 'web_discovery',
-          scraped_at: new Date().toISOString()
-        }
-      });
-    }
-
-    return candidates;
-  }
-
-  // ================= B2B DISCOVERY GENERATION =================
-  const industries = Array.isArray(config.target_industries) && config.target_industries.length > 0
-    ? config.target_industries
-    : (config.industry ? [config.industry] : ['Technology & Professional Services']);
-
-  const queries = Array.isArray(config.search_queries) && config.search_queries.length > 0
-    ? config.search_queries
-    : (config.search_query ? [config.search_query] : industries);
-
-  const companySizes = Array.isArray(config.target_company_sizes) && config.target_company_sizes.length > 0
-    ? config.target_company_sizes
-    : ['11–50', '51–200'];
-
-  const targetRoles = (config.target_roles && config.target_roles.length > 0)
-    ? config.target_roles
-    : ['Founder', 'Managing Director', 'CEO', 'Head of Sales', 'VP Growth'];
-
-  const registry = getRegistryCandidates(config);
-
-  const candidates = [];
-  for (let i = 0; i < count; i++) {
-    const reg = registry[i % registry.length] || {};
-    const industry = reg.industry || industries[i % industries.length].trim();
-    const location = reg.city ? `${reg.city}, ${reg.country}` : locationPool[i % locationPool.length].trim();
-    const query = queries[i % queries.length].trim();
-    const companySize = reg.size || companySizes[i % companySizes.length];
-
-    const fn = firstNames[i % firstNames.length];
-    const ln = lastNames[(i * 3 + 2) % lastNames.length];
-    const fullName = `${fn} ${ln}`;
-    const company = reg.company || `Company ${i + 1}`;
-    const role = targetRoles[i % targetRoles.length];
-    const domain = reg.domain || `${company.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
-    const email = `${fn.toLowerCase()}.${ln.toLowerCase()}@${domain}`;
-
-    // Compliant phone generation
-    const phone = resolvePhoneNumber('', countries[0] || 'India', i);
-    const linkedin = `https://www.linkedin.com/company/${domain.split('.')[0]}`;
-    const website = `https://${domain}`;
-
-    candidates.push({
-      name: fullName,
-      phone,
-      email,
-      company,
-      designation: role,
-      website,
-      linkedin,
-      source: `Discovery (${query})`,
-      custom_fields: {
-        target_mode: 'b2b',
-        company,
-        designation: role,
-        website,
-        linkedin,
-        industry,
-        location,
-        company_size: companySize,
-        discovery_query: query,
-        discovery_source: config.source || 'web_discovery',
-        scraped_at: new Date().toISOString()
-      }
-    });
-  }
-
-  return candidates;
+  return [];
 }
 
 /**
@@ -339,10 +173,9 @@ export async function fetchLiveDiscoveryCandidates(config, count = 15) {
     }
   }
 
-  // 5. Fallback to contextual generator if network is completely unreachable
+  // 5. Zero Fake Data Policy: If no real candidates were found, return empty array.
   if (liveCandidates.length === 0 && webhookCandidates.length === 0) {
-    const mocks = generateMockDiscoveryCandidates(config, count);
-    return scoreCandidateBatch({ candidates: mocks, pipelineConfig: config });
+    return [];
   }
 
   return [...webhookCandidates, ...liveCandidates];
@@ -365,8 +198,11 @@ export async function runColdDiscoveryBatch({
     ...(pipeline.discovery_config || {}),
     pipeline_name: pipeline.name || ''
   };
-  if (!hasDiscoveryTargetingCriteria(config)) {
-    throw new Error('No target criteria configured. Please specify at least one Country, Region, Industry, or Search Query before running discovery.');
+  const dripBuffer = Array.isArray(config.drip_buffer) ? config.drip_buffer : [];
+  const hasDrip = dripBuffer.length > 0;
+
+  if (!hasDrip && !hasDiscoveryTargetingCriteria(config)) {
+    throw new Error('No target criteria or drip buffer configured. Please specify targeting criteria or upload prospects to the Lead Drip Buffer.');
   }
 
   const dedupeRules = config.dedupe || DEFAULT_DEDUPE_RULES;
@@ -383,8 +219,18 @@ export async function runColdDiscoveryBatch({
 
   const dedupeIndex = buildLeadsDedupeIndex(existingLeads || [], pipeline.id);
 
-  // 2. Fetch live web discovery candidates with buffer for deduplication
-  const rawCandidates = await fetchLiveDiscoveryCandidates(config, Math.max(batchSize * 2, 25));
+  // 2. Fetch candidates: prioritize Lead Drip Buffer if present, otherwise live discovery
+  let rawCandidates = [];
+  let isFromDripBuffer = false;
+  let remainingDripBuffer = null;
+
+  if (hasDrip) {
+    rawCandidates = dripBuffer.slice(0, batchSize);
+    remainingDripBuffer = dripBuffer.slice(batchSize);
+    isFromDripBuffer = true;
+  } else {
+    rawCandidates = await fetchLiveDiscoveryCandidates(config, Math.max(batchSize * 2, 25));
+  }
 
   // 3. Process Deduplication & Allocation
   const pipeDist = pipeline.lead_distribution || {};
@@ -566,6 +412,7 @@ export async function runColdDiscoveryBatch({
   const updatedPipelinePayload = {
     discovery_config: {
       ...config,
+      ...(isFromDripBuffer && remainingDripBuffer !== null ? { drip_buffer: remainingDripBuffer } : {}),
       ...updatedRunStats
     }
   };

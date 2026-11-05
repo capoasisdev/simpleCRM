@@ -787,35 +787,25 @@ export async function scrapeWebResults(searchQuery) {
 /**
  * Resolves a realistic prospect email address, preventing social/forum domains from leaking into emails
  */
-export function resolveProspectEmail(firstName, lastName, rawDomain = '', isB2C = true, index = 0) {
-  const fn = (firstName || 'lead').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const ln = (lastName || 'user').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const cleanDomain = (rawDomain || '').toLowerCase().replace(/^www\./, '').trim();
-
-  const isSocialOrPlatform = !cleanDomain || /(reddit\.com|quora\.com|instagram\.com|twitter\.com|x\.com|facebook\.com|linkedin\.com|clutch\.co|google\.com|community\.local|ask\.com|medium\.com|youtube\.com)/i.test(cleanDomain);
-
-  // Dynamic entropy seed ensuring uniqueness across discovery sweeps
-  const randSuffix = Math.floor(10 + Math.random() * 890);
-
-  if (isB2C || isSocialOrPlatform) {
-    const consumerProviders = ['gmail.com', 'outlook.com', 'yahoo.com', 'icloud.com'];
-    const provider = consumerProviders[(index + Math.floor(Math.random() * consumerProviders.length)) % consumerProviders.length];
-    const patterns = [
-      `${fn}.${ln}${randSuffix}@${provider}`,
-      `${fn}${randSuffix}.${ln}@${provider}`,
-      `${fn}.${ln}@${provider}`
-    ];
-    return patterns[Math.floor(Math.random() * patterns.length)];
+/**
+ * Resolves prospect email: extracts real email from text or returns empty string (Zero Fake Data Policy)
+ */
+export function resolveProspectEmail(snippet = '', domain = '') {
+  const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+  const matches = (snippet || '').match(emailRegex);
+  if (matches && matches.length > 0) {
+    const valid = matches.find(e => !/(example\.com|domain\.com|sentry\.io|w3\.org)/i.test(e));
+    if (valid) return valid.toLowerCase().trim();
   }
-
-  return `${fn}.${ln}${randSuffix}@${cleanDomain}`;
+  // Never fabricate synthetic emails
+  return '';
 }
 
 /**
- * Extracts phone from snippet or formats a realistic national number
+ * Extracts phone from snippet or returns empty string (Zero Fake Data Policy)
  */
 export function resolvePhoneNumber(snippet = '', country = 'India', index = 0) {
-  // 1. Try to extract real phone number from snippet text
+  // Try to extract real phone number from snippet text
   const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/g;
   const matches = (snippet || '').match(phoneRegex);
   if (matches && matches.length > 0) {
@@ -827,34 +817,8 @@ export function resolvePhoneNumber(snippet = '', country = 'India', index = 0) {
     }
   }
 
-  // 2. Generate compliant national format with entropy to avoid duplicate collision
-  const cLower = (country || '').toLowerCase();
-
-  if (cLower.includes('india') || cLower.includes('bharat')) {
-    const prefixes = ['98', '99', '97', '96', '91', '88', '89', '70', '79', '80'];
-    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
-    const mid3 = String(Math.floor(100 + Math.random() * 900));
-    const last5 = String(Math.floor(10000 + Math.random() * 90000));
-    return `+91 ${prefix}${mid3} ${last5}`;
-  }
-
-  if (cLower.includes('uae') || cLower.includes('emirates') || cLower.includes('dubai')) {
-    const mid = String(Math.floor(100 + Math.random() * 900));
-    const end = String(Math.floor(1000 + Math.random() * 9000));
-    return Math.random() > 0.5 ? `+971 50 ${mid} ${end}` : `+971 4 ${mid} ${end}`;
-  }
-
-  if (cLower.includes('uk') || cLower.includes('kingdom') || cLower.includes('england') || cLower.includes('london')) {
-    const end = String(Math.floor(1000 + Math.random() * 9000));
-    return `+44 20 7946 ${end}`;
-  }
-
-  // Default: US / Canada 10-digit NANP format
-  const areaCodes = ['415', '212', '512', '312', '650', '206', '305', '408'];
-  const area = areaCodes[Math.floor(Math.random() * areaCodes.length)];
-  const mid = String(Math.floor(200 + Math.random() * 800));
-  const end = String(Math.floor(1000 + Math.random() * 9000));
-  return `+1 (${area}) ${mid}-${end}`;
+  // Never fabricate synthetic phone numbers
+  return '';
 }
 
 /**
@@ -1138,9 +1102,11 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
       phoneType = extractedPhones[0].type;
     } else {
       phone = resolvePhoneNumber(scraped.snippet, countries[0] || 'India', i);
+      isRealPhone = Boolean(phone);
+      phoneType = phone ? 'standard' : 'unlisted';
     }
 
-    // 2. Real email extraction from snippet or corporate domain pattern
+    // 2. Real email extraction from snippet (strictly real data)
     const extractedEmails = extractRealEmailsFromText(combinedText, domain);
     let email = '';
     let isRealEmail = false;
@@ -1148,17 +1114,15 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
       email = extractedEmails[0].email;
       isRealEmail = true;
     } else {
-      email = resolveProspectEmail(fn, ln, domain, targetMode === 'b2c', i);
+      email = resolveProspectEmail(scraped.snippet, domain);
+      isRealEmail = Boolean(email);
     }
 
-    // 3. Option A: DNS-over-HTTPS MX Deliverability Verification
+    // 3. DNS MX Deliverability Verification (only for actual emails)
+    let mxCheck = { isValid: false, provider: 'None' };
     const emailDomain = email.includes('@') ? email.split('@')[1] : domain;
-    const mxCheck = await verifyDomainMX(emailDomain);
-
-    // Option A: Automatically drop/skip dead domains where no MX records exist
-    if (!mxCheck.isValid && targetMode !== 'b2c') {
-      console.log(`[Discovery Deliverability] Dropping candidate on invalid domain (No MX): ${emailDomain}`);
-      continue;
+    if (emailDomain && emailDomain.includes('.')) {
+      mxCheck = await verifyDomainMX(emailDomain);
     }
 
     const quality = calculateContactQualityScore({
@@ -1171,10 +1135,10 @@ export async function scrapeLiveProspects(config, requestedCount = 15) {
     });
 
     const verificationFields = {
-      verification_status: mxCheck.isValid ? (isRealEmail ? 'verified_direct' : 'deliverable_pattern') : 'unverified',
-      is_deliverable: mxCheck.isValid,
-      mail_provider: mxCheck.provider,
-      mx_host: mxCheck.mxHost,
+      verification_status: email ? (mxCheck.isValid ? (isRealEmail ? 'verified_direct' : 'deliverable') : 'unverified') : 'unlisted',
+      is_deliverable: Boolean(email && mxCheck.isValid),
+      mail_provider: email ? mxCheck.provider : 'None',
+      mx_host: mxCheck.mxHost || null,
       quality_score: quality.score,
       quality_tier: quality.tier,
       badge_color: quality.badgeColor,

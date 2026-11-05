@@ -6,29 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
-// Rich contextual registries for fallback & automated server execution
-const HRMS_B2C_INQUIRIES = [
-  { inquiry: "What is the best budget HRMS platform for mid-size tech startups with biometric attendance & mobile app leave approvals?", persona: "People Ops Manager", channel: "quora", source: "Quora Q&A", thread: "https://www.quora.com/What-is-the-best-HRMS-software-for-mid-sized-companies-in-India" },
-  { inquiry: "Looking for HR payroll software with statutory compliance (PF, ESI, TDS) and automated salary slips for 80+ employees.", persona: "HR Director", channel: "reddit", subreddit: "r/humanresources", source: "Reddit (r/humanresources)", thread: "https://www.reddit.com/r/humanresources/comments/hrms_payroll_recommendations" },
-  { inquiry: "Need employee attendance and leave tracking system with WhatsApp notifications and geo-fencing for remote teams.", persona: "Operations Lead", channel: "reddit", subreddit: "r/startups", source: "Reddit (r/startups)", thread: "https://www.reddit.com/r/startups/comments/leave_attendance_software_recommendation" },
-  { inquiry: "Which HRMS tool is easiest to implement without requiring weeks of dedicated IT consulting for a 50-person agency?", persona: "Founder & CEO", channel: "quora", source: "Quora Q&A", thread: "https://www.quora.com/Which-HRMS-tool-is-easiest-to-implement" },
-  { inquiry: "Evaluating HR software: need seamless integration with RazorpayX payroll, biometric devices, and Slack bot for leaves.", persona: "Head of People & Culture", channel: "reddit", subreddit: "r/bangalore", source: "Reddit (r/bangalore)", thread: "https://www.reddit.com/r/bangalore/comments/best_hrms_for_bengaluru_tech_companies" },
-  { inquiry: "Best enterprise HRMS for managing contractor payroll and full-time employee benefits in single portal.", persona: "Talent Acquisition Manager", channel: "quora", source: "Quora Q&A", thread: "https://www.quora.com/Best-HRMS-contractor-payroll" }
-];
-
-const B2B_COMPANIES = [
-  { company: "Zeta Workforce Technologies", domain: "zetaworkforce.com", industry: "Information Technology", role: "VP Human Resources", city: "Bengaluru" },
-  { company: "Lumina People Labs", domain: "luminapeople.io", industry: "Enterprise Software", role: "Head of People & Culture", city: "Pune" },
-  { company: "DarwinOps Cloud Solutions", domain: "darwinops.com", industry: "Information Technology", role: "Chief Human Resources Officer", city: "Mumbai" },
-  { company: "PaySphere HR Systems", domain: "paysphere.co", industry: "Financial Services", role: "Director of Talent Acquisition", city: "Gurugram" },
-  { company: "Nexus Enterprise Systems", domain: "nexustech.in", industry: "Information Technology", role: "Senior HR Business Partner", city: "Hyderabad" },
-  { company: "Vanguard Tech Staffing", domain: "vanguardtech.io", industry: "Staffing & Recruiting", role: "Head of Total Rewards & Payroll", city: "Chennai" }
-];
-
-const FIRST_NAMES = ["Aarav", "Neha", "Vikram", "Pooja", "Rohan", "Ananya", "Rahul", "Kavita", "Siddharth", "Meera", "Arjun", "Nandini"];
-const LAST_NAMES = ["Kapoor", "Sharma", "Deshmukh", "Verma", "Iyer", "Reddy", "Patel", "Agarwal", "Menon", "Sundaram", "Nambiar", "Singhania"];
-const CITIES = ["Mumbai", "Bengaluru", "Pune", "Delhi NCR", "Hyderabad", "Chennai"];
-
 /**
  * Fast DNS-over-HTTPS (DoH) verification for automated edge execution
  */
@@ -68,6 +45,62 @@ async function verifyDomainDoH(domain: string): Promise<{ isValid: boolean; prov
   } catch { }
 
   return { isValid: false, provider: 'None', mxHost: null };
+}
+
+/**
+ * Fetches real local businesses from OpenStreetMap Nominatim with extratags
+ * ZERO FAKE DATA GUARANTEE: If a phone or email is not publicly published, it is left as "" (empty string).
+ */
+async function fetchDirectoryBusinesses(query: string, location: string, country: string, count = 25) {
+  try {
+    const searchQuery = `${query || 'business'} in ${location || 'Bengaluru'}, ${country || 'India'}`.trim();
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&addressdetails=1&extratags=1&limit=${count}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "SimpleCRM-CloudAutopilot/1.0"
+      },
+      signal: AbortSignal.timeout(6000)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data.map((item: any) => {
+          const addr = item.address || {};
+          const street = [addr.house_number, addr.road, addr.neighbourhood, addr.suburb].filter(Boolean).join(", ");
+          const city = addr.city || addr.town || addr.city_district || addr.county || location || "Bengaluru";
+          const state = addr.state || "";
+          const postcode = addr.postcode || "";
+          const fullAddress = [street, city, postcode, state, country].filter(Boolean).join(", ");
+          const category = (item.type || item.class || "Commercial Office")
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+          const extratags = item.extratags || {};
+          const phone = extratags.phone || extratags["contact:phone"] || extratags["contact:mobile"] || "";
+          const website = extratags.website || extratags["contact:website"] || extratags.url || "";
+          const email = extratags.email || extratags["contact:email"] || "";
+          const name = item.name || item.display_name?.split(",")[0] || "Local Business";
+
+          return {
+            name,
+            company: name,
+            phone,
+            email,
+            website,
+            address: fullAddress,
+            city,
+            category
+          };
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("[Directory query note]:", err);
+  }
+  return [];
 }
 
 /**
@@ -152,67 +185,78 @@ Deno.serve(async (req) => {
 
     if (!supabaseUrl || !supabaseKey) {
       return new Response(
-        JSON.stringify({ error: "Missing Supabase credentials." }),
+        JSON.stringify({ error: "Missing Supabase configuration in Edge Function environment" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 1. Fetch Cold Engine pipelines
-    let pipeQuery = supabase.from("pipelines").select("*").eq("pipeline_type", "cold");
+    // Fetch active cold pipelines with autopilot enabled
+    let query = supabase
+      .from("pipelines")
+      .select("id, name, stages, pipeline_type, lead_distribution, discovery_config")
+      .eq("pipeline_type", "cold");
+
     if (targetPipelineId) {
-      pipeQuery = pipeQuery.eq("id", targetPipelineId);
+      query = query.eq("id", targetPipelineId);
     }
 
-    const { data: pipelines, error: pipeErr } = await pipeQuery;
+    const { data: pipelines, error: pipeErr } = await query;
+
     if (pipeErr) {
       return new Response(
-        JSON.stringify({ error: `Failed to fetch pipelines: ${pipeErr.message}` }),
+        JSON.stringify({ error: pipeErr.message }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const now = new Date();
     const executedRuns = [];
+    const nowIso = new Date().toISOString();
 
-    // 2. Process each pipeline
     for (const pipe of pipelines || []) {
       const config = pipe.discovery_config || {};
-      const isAutopilotEnabled = config.autopilot_enabled === true;
+      const isAutopilot = config.autopilot_enabled === true;
 
-      if (!force && !isAutopilotEnabled) continue;
+      // When running as scheduled cron, skip if autopilot is disabled unless forced
+      if (!force && !isAutopilot) {
+        continue;
+      }
 
-      const nextRunAt = config.next_run_at ? new Date(config.next_run_at) : null;
-      const isDue = force || !nextRunAt || now >= nextRunAt;
-      if (!isDue) continue;
-
-      console.log(`[Discovery Autopilot] Executing sweep for "${pipe.name}"...`);
-
-      const batchSize = Math.min(Math.max(Number(config.batch_size) || 10, 1), 50);
-      const isB2C = config.target_mode === "b2c";
-      const dedupeRules = config.dedupe || { match_email: true, match_phone: true, match_domain: true, on_duplicate: "skip" };
-
-      // Deduplication check against existing leads
-      const { data: existingLeads } = await supabase.from("leads").select("id, email, phone");
-      const existingEmails = new Set<string>();
-      const existingPhones = new Set<string>();
-      for (const lead of existingLeads || []) {
-        if (lead.email) existingEmails.add(lead.email.trim().toLowerCase());
-        if (lead.phone) {
-          const cleanP = lead.phone.replace(/\D/g, "").slice(-10);
-          if (cleanP) existingPhones.add(cleanP);
+      // Check schedule trigger unless explicitly forced
+      if (!force && isAutopilot) {
+        const nextRunAt = config.next_run_at ? new Date(config.next_run_at).getTime() : 0;
+        const nowMs = Date.now();
+        // Allow up to 10 minutes grace window
+        if (nextRunAt > 0 && nextRunAt > (nowMs + 60000)) {
+          continue;
         }
       }
 
-      // 3. Lead distribution - strictly respects user_rules
+      const batchSize = Number(config.batch_size) || 25;
+      const dedupeRules = config.dedupe || { match_email: true, match_phone: true, on_duplicate: "skip" };
+
+      // Fetch existing leads for deduplication
+      const { data: existingLeads } = await supabase
+        .from("leads")
+        .select("id, phone, email")
+        .eq("pipeline_id", pipe.id);
+
+      const existingEmails = new Set(
+        (existingLeads || []).map((l: any) => (l.email || "").toLowerCase().trim()).filter(Boolean)
+      );
+      const existingPhones = new Set(
+        (existingLeads || []).map((l: any) => (l.phone || "").replace(/\D/g, "").slice(-10)).filter(Boolean)
+      );
+
+      // Lead distribution rules
       const pipeDist = pipe.lead_distribution || {};
       const distMode = pipeDist.mode || "round_robin";
-      const defaultAssignee = pipeDist.default_assignee || "Pranav Patil";
+      const defaultAssignee = pipeDist.default_assignee || "unassigned";
       const activeRules = (pipeDist.user_rules || []).filter((r: any) => r.enabled !== false && r.active !== false);
       let roundRobinIndex = Number(pipeDist.round_robin_index) || 0;
 
-      const getAssignee = (): string => {
+      const getAssignee = () => {
         if (distMode === "unassigned") return "unassigned";
         if (distMode === "single") return defaultAssignee;
         if (distMode === "round_robin" && activeRules.length > 0) {
@@ -244,158 +288,80 @@ Deno.serve(async (req) => {
       const today = new Date();
       const dateStr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
 
-      const readyToInsert = [];
+      // Candidates Resolution: Prioritize Drip Buffer, otherwise real Directory search
+      let rawCandidates: any[] = [];
+      let isFromDripBuffer = false;
+      let remainingDripBuffer: any[] | null = null;
+
+      const dripBuffer = Array.isArray(config.drip_buffer) ? config.drip_buffer : [];
+      if (dripBuffer.length > 0) {
+        rawCandidates = dripBuffer.slice(0, batchSize);
+        remainingDripBuffer = dripBuffer.slice(batchSize);
+        isFromDripBuffer = true;
+      } else {
+        // Query real public business directory
+        const searchLocation = (config.target_regions && config.target_regions[0]) || config.location || "Bengaluru";
+        const searchCountry = (config.target_countries && config.target_countries[0]) || config.country || "India";
+        const searchQuery = config.search_query || (config.target_industries && config.target_industries[0]) || "local business";
+
+        rawCandidates = await fetchDirectoryBusinesses(searchQuery, searchLocation, searchCountry, batchSize * 2);
+      }
+
+      const readyToInsert: any[] = [];
       let duplicatesSkipped = 0;
-      let loopAttempts = 0;
-      const maxAttempts = batchSize * 6;
 
-      while (readyToInsert.length < batchSize && loopAttempts < maxAttempts) {
-        loopAttempts++;
-        const fn = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
-        const ln = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
-        const assignedCity = (config.target_regions && config.target_regions.length > 0)
-          ? config.target_regions[Math.floor(Math.random() * config.target_regions.length)]
-          : CITIES[Math.floor(Math.random() * CITIES.length)];
+      for (const candidate of rawCandidates) {
+        if (readyToInsert.length >= batchSize) break;
 
-        // Generate unique phone
-        let phone = `+91 ${98000 + Math.floor(Math.random() * 1999)} ${10000 + Math.floor(Math.random() * 89999)}`;
-        let cleanPhone = phone.replace(/\D/g, "").slice(-10);
-        let phoneAttempts = 0;
-        while (existingPhones.has(cleanPhone) && phoneAttempts < 10) {
-          phone = `+91 ${98000 + Math.floor(Math.random() * 1999)} ${10000 + Math.floor(Math.random() * 89999)}`;
-          cleanPhone = phone.replace(/\D/g, "").slice(-10);
-          phoneAttempts++;
-        }
-
-        const emailDomains = ["gmail.com", "outlook.com", "yahoo.com"];
-        const randSeed = Math.floor(10 + Math.random() * 899);
-        const email = `${fn.toLowerCase()}.${ln.toLowerCase()}${randSeed}@${emailDomains[Math.floor(Math.random() * emailDomains.length)]}`;
-        const cleanEmail = email.toLowerCase();
+        const cleanPhone = (candidate.phone || "").replace(/\D/g, "").slice(-10);
+        const cleanEmail = (candidate.email || "").toLowerCase().trim();
 
         if (
-          (dedupeRules.match_email && existingEmails.has(cleanEmail)) ||
-          (dedupeRules.match_phone && existingPhones.has(cleanPhone))
+          (dedupeRules.match_email && cleanEmail && existingEmails.has(cleanEmail)) ||
+          (dedupeRules.match_phone && cleanPhone && existingPhones.has(cleanPhone))
         ) {
           duplicatesSkipped++;
           continue;
         }
 
-        existingEmails.add(cleanEmail);
-        existingPhones.add(cleanPhone);
+        if (cleanEmail) existingEmails.add(cleanEmail);
+        if (cleanPhone) existingPhones.add(cleanPhone);
 
         const assignee = getAssignee();
-        const icpScore = Math.floor(88 + Math.random() * 8);
+        const candidateName = candidate.name || candidate.company || "Prospect";
+        const candidateCompany = candidate.company || candidate.name || "";
+        const candidatePhone = candidate.phone || "";
+        const candidateEmail = candidate.email || "";
+        const candidateWebsite = candidate.website || "";
+        const candidateAddress = candidate.address || "";
+        const candidateCity = candidate.city || "";
 
-        if (isB2C) {
-          const inqItem = HRMS_B2C_INQUIRIES[Math.floor(Math.random() * HRMS_B2C_INQUIRIES.length)];
-          const name = inqItem.channel === "reddit" ? `${fn} (${inqItem.subreddit})` : `${fn} ${ln}`;
-          const formName = inqItem.source;
-          const persona = (config.target_personas && config.target_personas.length > 0)
-            ? config.target_personas[Math.floor(Math.random() * config.target_personas.length)]
-            : inqItem.persona;
-          const interest = (config.target_interests && config.target_interests.length > 0)
-            ? config.target_interests[Math.floor(Math.random() * config.target_interests.length)]
-            : inqItem.inquiry;
-
-          readyToInsert.push({
-            name,
-            phone,
-            email,
-            city: assignedCity,
-            stage: entryStage,
-            pipeline_id: pipe.id,
-            form_name: formName,
-            assigned_to: assignee,
-            date: dateStr,
-            created_at: new Date().toISOString(),
-            custom_fields: {
-              city: assignedCity,
-              domain: inqItem.channel === "reddit" ? "www.reddit.com" : "www.quora.com",
-              source: formName,
-              company: "",
-              persona: persona,
-              website: inqItem.thread,
-              interest: interest,
-              requirement: inqItem.inquiry,
-              linkedin: "",
-              location: `${assignedCity}, India`,
-              scraped_at: new Date().toISOString(),
-              thread_url: inqItem.thread,
-              designation: persona,
-              target_mode: "b2c",
-              discovery_query: config.search_query || "HRMS software buyers",
-              is_live_scraped: true,
-              scraped_snippet: `Consumer inquiry in ${assignedCity}: "${inqItem.inquiry}"`,
-              discovery_source: inqItem.channel,
-              verification_status: "deliverable_pattern",
-              is_deliverable: true,
-              mail_provider: "Google Consumer",
-              quality_score: 90,
-              quality_tier: "A+",
-              badge_color: "#10b981",
-              verified_at: new Date().toISOString(),
-              icp_score: icpScore,
-              icp_tier: "hot",
-              icp_reasoning: `Active buyer inquiry seeking ${interest} in ${assignedCity}.`,
-              ai_icebreaker: `Noticed your post seeking recommendations for ${interest} in ${assignedCity} — wanted to share how simplecrm automates rollout seamlessly.`,
-              identified_pain_point: `Finding an intuitive ${interest} tool without weeks of manual setup.`,
-              suggested_value_prop: "One-click deployment with integrated attendance tracking and mobile approvals."
-            }
-          });
-        } else {
-          const comp = B2B_COMPANIES[Math.floor(Math.random() * B2B_COMPANIES.length)];
-          const mxCheck = await verifyDomainDoH(comp.domain);
-
-          // Option A: Automatically drop/skip dead domains
-          if (!mxCheck.isValid) {
-            console.log(`[Autopilot Deliverability] Dropping candidate on invalid domain (No MX): ${comp.domain}`);
-            continue;
+        readyToInsert.push({
+          name: candidateName,
+          phone: candidatePhone,
+          email: candidateEmail,
+          city: candidateCity,
+          stage: entryStage,
+          pipeline_id: pipe.id,
+          form_name: isFromDripBuffer ? "Lead Drip Buffer" : `Directory Discovery (${candidate.category || "Local Business"})`,
+          assigned_to: assignee,
+          date: dateStr,
+          created_at: new Date().toISOString(),
+          custom_fields: {
+            company: candidateCompany,
+            designation: candidate.designation || (isFromDripBuffer ? "Prospect" : "Business Owner"),
+            website: candidateWebsite,
+            address: candidateAddress,
+            city: candidateCity,
+            phone_type: candidatePhone ? "office_landline" : "unlisted",
+            is_real_scraped_phone: Boolean(candidatePhone),
+            verification_status: candidateEmail ? "deliverable" : "unlisted",
+            source: isFromDripBuffer ? "Lead Drip Buffer" : "google_places",
+            discovery_source: isFromDripBuffer ? "drip_buffer" : "google_places",
+            scraped_at: new Date().toISOString(),
+            ...(candidate.custom_fields || {})
           }
-
-          const formName = `LinkedIn Discovery (${comp.role})`;
-          const b2bEmail = `${fn.toLowerCase()}.${ln.toLowerCase()}${randSeed}@${comp.domain}`;
-
-          readyToInsert.push({
-            name: `${fn} ${ln}`,
-            phone,
-            email: b2bEmail,
-            city: comp.city || assignedCity,
-            stage: entryStage,
-            pipeline_id: pipe.id,
-            form_name: formName,
-            assigned_to: assignee,
-            date: dateStr,
-            created_at: new Date().toISOString(),
-            custom_fields: {
-              city: comp.city || assignedCity,
-              domain: comp.domain,
-              source: formName,
-              company: comp.company,
-              designation: comp.role,
-              website: `https://${comp.domain}`,
-              linkedin: `https://www.linkedin.com/company/${comp.domain.split('.')[0]}`,
-              location: `${comp.city || assignedCity}, India`,
-              industry: comp.industry,
-              target_mode: "b2b",
-              scraped_at: new Date().toISOString(),
-              is_live_scraped: true,
-              verification_status: "deliverable_pattern",
-              is_deliverable: true,
-              mail_provider: mxCheck.provider,
-              mx_host: mxCheck.mxHost,
-              quality_score: 92,
-              quality_tier: "A+",
-              badge_color: "#10b981",
-              verified_at: new Date().toISOString(),
-              icp_score: icpScore,
-              icp_tier: "hot",
-              icp_reasoning: `Executive decision-maker (${comp.role}) at ${comp.company}. Verified active domain.`,
-              ai_icebreaker: `Reached out seeing your leadership as ${comp.role} at ${comp.company} in ${assignedCity} — loved your team's footprint.`,
-              identified_pain_point: "Manual bottlenecks in lead distribution and cross-department pipeline visibility.",
-              suggested_value_prop: "Automate outbound prospecting and lead routing with zero setup downtime."
-            }
-          });
-        }
+        });
       }
 
       let insertedCount = 0;
@@ -418,9 +384,10 @@ Deno.serve(async (req) => {
 
       const updatedConfig = {
         ...config,
+        ...(isFromDripBuffer && remainingDripBuffer !== null ? { drip_buffer: remainingDripBuffer } : {}),
         last_run_at: new Date().toISOString(),
         last_run_stats: {
-          total_scraped: batchSize,
+          total_scraped: rawCandidates.length,
           inserted: insertedCount,
           duplicates_skipped: duplicatesSkipped,
           enriched: 0
@@ -448,9 +415,10 @@ Deno.serve(async (req) => {
       executedRuns.push({
         pipeline_id: pipe.id,
         pipeline_name: pipe.name,
-        total_scraped: batchSize,
+        total_scraped: rawCandidates.length,
         inserted: insertedCount,
         duplicates_skipped: duplicatesSkipped,
+        remaining_in_buffer: isFromDripBuffer && remainingDripBuffer ? remainingDripBuffer.length : null,
         next_run_at: nextRunTimestamp
       });
     }

@@ -52,7 +52,9 @@ import {
   X,
   Calendar,
   Radar,
-  Brain
+  Brain,
+  Upload,
+  Inbox
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { hasPermission } from '../lib/permissions';
@@ -100,6 +102,7 @@ const DEFAULT_DISCOVERY_CONFIG = {
   webhook_url: '',
   google_maps_api_key: '',
   batch_size: 25,
+  drip_buffer: [],
   dedupe: DEFAULT_DEDUPE_RULES,
   next_run_at: null,
   last_run_at: null,
@@ -453,7 +456,8 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         ? Boolean(newPersonaInput.trim()) || Boolean(newInterestInput.trim())
         : Boolean(newIndustryInput.trim()) || Boolean(newTargetRoleInput.trim())
       );
-    return hasDiscoveryTargetingCriteria(discoveryConfig) || hasPendingInput;
+    const hasDrip = Array.isArray(discoveryConfig?.drip_buffer) && discoveryConfig.drip_buffer.length > 0;
+    return hasDrip || hasDiscoveryTargetingCriteria(discoveryConfig) || hasPendingInput;
   }, [discoveryConfig, newCountryInput, newRegionInput, newQueryInput, newPersonaInput, newInterestInput, newIndustryInput, newTargetRoleInput]);
 
   const triggerSavedFeedback = () => {
@@ -866,6 +870,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     const pipeDiscovery = {
       ...DEFAULT_DISCOVERY_CONFIG,
       ...rawDisc,
+      drip_buffer: Array.isArray(rawDisc.drip_buffer) ? rawDisc.drip_buffer : [],
       schedule_days: initialScheduleDays,
       dedupe: { ...DEFAULT_DISCOVERY_CONFIG.dedupe, ...(rawDisc.dedupe || {}) }
     };
@@ -1103,6 +1108,106 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     };
     setDiscoveryConfig(updated);
     saveDiscoveryPayload(updated);
+  };
+
+  // Upload and parse CSV leads into the optional Lead Drip Buffer
+  const handleCsvUploadToDripBuffer = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result;
+        if (!text || typeof text !== 'string') return;
+
+        const lines = text.split(/\r\n|\n/).filter(line => line.trim().length > 0);
+        if (lines.length < 2) {
+          showToast('CSV file is empty or missing data rows');
+          return;
+        }
+
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/^["']|["']$/g, ''));
+        const findColIdx = (...terms) => {
+          return headers.findIndex(h => terms.some(t => h.includes(t)));
+        };
+
+        const nameIdx = findColIdx('name', 'full name', 'lead', 'contact');
+        const compIdx = findColIdx('company', 'organization', 'account', 'business');
+        const phoneIdx = findColIdx('phone', 'mobile', 'tel', 'cell');
+        const emailIdx = findColIdx('email', 'mail');
+        const websiteIdx = findColIdx('website', 'url', 'domain');
+        const cityIdx = findColIdx('city', 'location', 'region');
+        const addressIdx = findColIdx('address', 'street');
+        const desigIdx = findColIdx('designation', 'role', 'title', 'position');
+
+        const newLeads = [];
+        for (let i = 1; i < lines.length; i++) {
+          const cells = lines[i].split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
+          const name = nameIdx !== -1 ? cells[nameIdx] : '';
+          const company = compIdx !== -1 ? cells[compIdx] : '';
+          const phone = phoneIdx !== -1 ? cells[phoneIdx] : '';
+          const email = emailIdx !== -1 ? cells[emailIdx] : '';
+          const website = websiteIdx !== -1 ? cells[websiteIdx] : '';
+          const city = cityIdx !== -1 ? cells[cityIdx] : '';
+          const address = addressIdx !== -1 ? cells[addressIdx] : '';
+          const designation = desigIdx !== -1 ? cells[desigIdx] : 'Prospect';
+
+          if (name || company || phone || email) {
+            newLeads.push({
+              name: name || company || 'Prospect',
+              company: company || name || '',
+              phone: phone || '',
+              email: email || '',
+              website: website || '',
+              city: city || '',
+              address: address || '',
+              designation: designation || 'Prospect',
+              custom_fields: {
+                company: company || '',
+                designation: designation || 'Prospect',
+                website: website || '',
+                city: city || '',
+                address: address || '',
+                source: 'Lead Drip Buffer',
+                imported_at: new Date().toISOString()
+              }
+            });
+          }
+        }
+
+        if (newLeads.length === 0) {
+          showToast('No valid leads found in CSV');
+          return;
+        }
+
+        const curBuffer = Array.isArray(discoveryConfig?.drip_buffer) ? discoveryConfig.drip_buffer : [];
+        const merged = [...curBuffer, ...newLeads];
+        const updated = {
+          ...(discoveryConfig || DEFAULT_DISCOVERY_CONFIG),
+          drip_buffer: merged
+        };
+        setDiscoveryConfig(updated);
+        saveDiscoveryPayload(updated);
+        showToast(`Added ${newLeads.length} prospects to Lead Drip Buffer (${merged.length} total queued)`);
+      } catch (err) {
+        console.error('Failed to parse CSV:', err);
+        showToast('Failed to parse CSV file');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleClearDripBuffer = () => {
+    if (!window.confirm('Are you sure you want to clear all buffered leads for this pipeline?')) return;
+    const updated = {
+      ...(discoveryConfig || DEFAULT_DISCOVERY_CONFIG),
+      drip_buffer: []
+    };
+    setDiscoveryConfig(updated);
+    saveDiscoveryPayload(updated);
+    showToast('Lead Drip Buffer cleared');
   };
 
   const handleDiscoveryArrayChange = (arrayKey, legacyKey, newArray) => {
@@ -3837,6 +3942,91 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                                 onChange={(val) => handleDiscoverySelectChange('batch_size', Number(val))}
                                 options={DISCOVERY_BATCH_OPTIONS}
                               />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 1.5 Lead Drip Buffer (Optional) */}
+                    <div className="pipeline-general-section">
+                      <div className="pipeline-general-header">
+                        <label className="pipeline-general-label">Lead Drip Buffer (Optional)</label>
+                        <p className="pipeline-general-desc">
+                          Upload your own verified prospect CSV list. When queued, your scheduled discovery sweeps will automatically drip your configured batch size ({discoveryConfig?.batch_size || 25} leads/sweep) from this buffer into your pipeline instead of dumping them all at once.
+                        </p>
+                      </div>
+
+                      <div className="pipeline-prop-list">
+                        <div className="pipeline-prop-row" style={{ alignItems: 'flex-start', padding: '16px 0' }}>
+                          <div className="pipeline-prop-label-col">
+                            <div className="pipeline-prop-icon">
+                              <Inbox size={20} />
+                            </div>
+                            <span className="pipeline-prop-name">Buffered Leads</span>
+                          </div>
+                          <div className="pipeline-prop-value-col" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                              <span style={{
+                                fontSize: '13px',
+                                fontWeight: 600,
+                                padding: '4px 10px',
+                                borderRadius: '12px',
+                                background: (discoveryConfig?.drip_buffer?.length > 0) ? '#ecfdf5' : '#f1f5f9',
+                                color: (discoveryConfig?.drip_buffer?.length > 0) ? '#059669' : '#64748b'
+                              }}>
+                                {(discoveryConfig?.drip_buffer?.length || 0)} Prospects Queued
+                              </span>
+                              {discoveryConfig?.drip_buffer?.length > 0 && (
+                                <span style={{ fontSize: '13px', color: '#64748b' }}>
+                                  ~{Math.ceil(discoveryConfig.drip_buffer.length / (discoveryConfig.batch_size || 25))} sweeps remaining
+                                </span>
+                              )}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                              <label
+                                className="crm-btn crm-btn-secondary"
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  cursor: canEdit ? 'pointer' : 'default',
+                                  fontSize: '13px',
+                                  padding: '6px 14px',
+                                  margin: 0
+                                }}
+                              >
+                                <Upload size={14} />
+                                <span>{discoveryConfig?.drip_buffer?.length > 0 ? 'Append More Leads' : 'Upload Prospect CSV'}</span>
+                                <input
+                                  type="file"
+                                  accept=".csv,text/csv"
+                                  style={{ display: 'none' }}
+                                  disabled={!canEdit}
+                                  onChange={handleCsvUploadToDripBuffer}
+                                />
+                              </label>
+
+                              {discoveryConfig?.drip_buffer?.length > 0 && (
+                                <button
+                                  type="button"
+                                  className="crm-btn crm-btn-secondary"
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    fontSize: '13px',
+                                    padding: '6px 14px',
+                                    color: '#ef4444'
+                                  }}
+                                  onClick={handleClearDripBuffer}
+                                  disabled={!canEdit}
+                                >
+                                  <Trash2 size={14} />
+                                  <span>Clear Buffer</span>
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>
