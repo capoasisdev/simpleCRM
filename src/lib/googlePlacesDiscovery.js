@@ -35,57 +35,70 @@ export function extractRatingAndReviews(text = '', index = 0) {
 /**
  * Free Layer: Queries OpenStreetMap Nominatim for exact physical venues, street addresses, and categories
  */
-async function fetchNominatimPlaces(searchQuery, count = 10) {
-  try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&addressdetails=1&extratags=1&limit=${count}`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'SimpleCRM-Places/1.0'
-      },
-      signal: AbortSignal.timeout(6000)
-    });
+async function fetchNominatimPlaces({ query = '', location = 'Bengaluru', country = 'India', count = 10 }) {
+  const cleanQ = (query || '').trim().replace(/[,\-_]/g, ' ');
+  const singularQ = cleanQ.replace(/ies\b/gi, 'y').replace(/s\b/gi, '');
 
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data.map((item) => {
-          const addr = item.address || {};
-          const street = [addr.house_number, addr.road, addr.neighbourhood, addr.suburb].filter(Boolean).join(', ');
-          const city = addr.city || addr.town || addr.city_district || addr.county || 'Bengaluru';
-          const state = addr.state || '';
-          const postcode = addr.postcode || '';
-          const country = addr.country || 'India';
+  const queryCandidates = Array.from(new Set([
+    `${singularQ} ${location}`.trim(),
+    `${cleanQ} ${location}`.trim(),
+    `${cleanQ} in ${location}`.trim(),
+    `${cleanQ} ${location} ${country}`.trim(),
+    cleanQ
+  ])).filter(Boolean);
 
-          const fullAddress = [street, city, postcode, state, country].filter(Boolean).join(', ');
-          const category = (item.type || item.class || 'Commercial Office')
-            .replace(/_/g, ' ')
-            .replace(/\b\w/g, (c) => c.toUpperCase());
+  for (const q of queryCandidates) {
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&extratags=1&limit=${count}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'SimpleCRM-Places/1.0'
+        },
+        signal: AbortSignal.timeout(6000)
+      });
 
-          const extratags = item.extratags || {};
-          const phone = extratags.phone || extratags['contact:phone'] || extratags['contact:mobile'] || '';
-          const website = extratags.website || extratags['contact:website'] || extratags.url || '';
-          const email = extratags.email || extratags['contact:email'] || '';
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          return data.map((item) => {
+            const addr = item.address || {};
+            const street = [addr.house_number, addr.road, addr.neighbourhood, addr.suburb].filter(Boolean).join(', ');
+            const city = addr.city || addr.town || addr.city_district || addr.county || location;
+            const state = addr.state || '';
+            const postcode = addr.postcode || '';
+            const itemCountry = addr.country || country;
 
-          return {
-            name: item.name || item.display_name?.split(',')[0] || 'Local Business',
-            address: fullAddress,
-            city,
-            country,
-            category,
-            lat: item.lat,
-            lon: item.lon,
-            phone,
-            website,
-            email,
-            source: 'nominatim'
-          };
-        });
+            const fullAddress = [street, city, postcode, state, itemCountry].filter(Boolean).join(', ');
+            const category = (item.type || item.class || cleanQ || 'Commercial Office')
+              .replace(/_/g, ' ')
+              .replace(/\b\w/g, (c) => c.toUpperCase());
+
+            const extratags = item.extratags || {};
+            const phone = extratags.phone || extratags['contact:phone'] || extratags['contact:mobile'] || '';
+            const website = extratags.website || extratags['contact:website'] || extratags.url || '';
+            const email = extratags.email || extratags['contact:email'] || '';
+
+            return {
+              name: item.name || item.display_name?.split(',')[0] || 'Local Business',
+              address: fullAddress,
+              city,
+              country: itemCountry,
+              category,
+              lat: item.lat,
+              lon: item.lon,
+              phone,
+              website,
+              email,
+              source: 'nominatim'
+            };
+          });
+        }
       }
+    } catch (err) {
+      console.warn(`[Nominatim variation "${q}" note]:`, err);
     }
-  } catch (err) {
-    console.warn('[Nominatim Places query note]:', err);
   }
   return [];
 }
@@ -198,7 +211,7 @@ export async function fetchGooglePlacesCandidates({
   }
 
   // 2. Zero-Cost Layer: Query OpenStreetMap Nominatim with extratags
-  const places = await fetchNominatimPlaces(searchQuery, count);
+  const places = await fetchNominatimPlaces({ query, location, country, count });
 
   // If no real listings were found, return empty array - ZERO fake data insertion
   if (!places || places.length === 0) {

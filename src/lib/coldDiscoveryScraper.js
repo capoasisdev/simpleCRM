@@ -12,56 +12,34 @@ import {
   buildEnrichmentPatch,
   DEFAULT_DEDUPE_RULES
 } from './coldDeduplication.js';
-import { scrapeLiveProspects, resolvePhoneNumber, getRegistryCandidates } from './liveWebScraper.js';
+import { fetchGooglePlacesCandidates } from './googlePlacesDiscovery.js';
 import { scoreCandidateBatch } from './leadAiScorer.js';
 
 /**
  * Evaluates whether a discovery configuration has at least one valid targeting criterion specified.
- * Prevents accidental blind discovery runs with hardcoded defaults.
- * Supports both B2B and B2C discovery modes.
+ * Supports Lead Drip Buffer or Category/Location criteria.
  */
 export function hasDiscoveryTargetingCriteria(config) {
   if (!config) return false;
-  const mode = config.target_mode || 'b2b';
-  const countries = Array.isArray(config.target_countries) ? config.target_countries : [];
-  const regions = Array.isArray(config.target_regions) ? config.target_regions : [];
-  const locations = Array.isArray(config.target_locations) ? config.target_locations : [];
-  const queries = Array.isArray(config.search_queries) ? config.search_queries : [];
-  const hasBaseGeoOrQuery =
-    countries.length > 0 ||
-    regions.length > 0 ||
-    locations.length > 0 ||
-    queries.length > 0 ||
-    Boolean(config.search_query?.trim()) ||
-    Boolean(config.location?.trim()) ||
-    Boolean(config.country?.trim()) ||
-    Boolean(config.region?.trim());
+  if (Array.isArray(config.drip_buffer) && config.drip_buffer.length > 0) return true;
 
-  if (mode === 'b2c') {
-    const personas = Array.isArray(config.target_personas) ? config.target_personas : [];
-    const interests = Array.isArray(config.target_interests) ? config.target_interests : [];
-    return (
-      hasBaseGeoOrQuery ||
-      personas.length > 0 ||
-      interests.length > 0 ||
-      Boolean(config.persona?.trim()) ||
-      Boolean(config.interest?.trim())
-    );
-  }
-
-  // Default B2B mode
-  const industries = Array.isArray(config.target_industries) ? config.target_industries : [];
-  const roles = Array.isArray(config.target_roles) ? config.target_roles : [];
-  const sizes = Array.isArray(config.target_company_sizes) ? config.target_company_sizes : [];
-
-  return (
-    hasBaseGeoOrQuery ||
-    industries.length > 0 ||
-    roles.length > 0 ||
-    sizes.length > 0 ||
-    Boolean(config.industry?.trim()) ||
-    Boolean(config.role?.trim())
+  const hasQuery = Boolean(
+    config.search_query?.trim() ||
+    config.industry?.trim() ||
+    (Array.isArray(config.target_industries) && config.target_industries.length > 0) ||
+    (Array.isArray(config.search_queries) && config.search_queries.length > 0)
   );
+
+  const hasLocation = Boolean(
+    config.location?.trim() ||
+    config.region?.trim() ||
+    config.country?.trim() ||
+    (Array.isArray(config.target_regions) && config.target_regions.length > 0) ||
+    (Array.isArray(config.target_countries) && config.target_countries.length > 0) ||
+    (Array.isArray(config.target_locations) && config.target_locations.length > 0)
+  );
+
+  return hasQuery || hasLocation;
 }
 
 /**
@@ -115,70 +93,41 @@ export async function fetchWebhookDiscoveryCandidates(webhookUrl, config, count 
 }
 
 /**
- * Live Discovery Fetcher: queries live internet prospects, with graceful fallback
+ * Live Discovery Fetcher: queries Google Places / Local Business Directory with zero fake data.
  */
 export async function fetchLiveDiscoveryCandidates(config, count = 15) {
-  const sources = Array.isArray(config.sources) && config.sources.length > 0
-    ? config.sources
-    : (config.source ? [config.source] : ['web_discovery']);
-
-  const hasWebhook = sources.includes('webhook') && Boolean(config.webhook_url?.trim());
-  const nonWebhookSources = sources.filter(s => s !== 'webhook');
-
-  // 1. If ONLY webhook is selected
-  if (hasWebhook && nonWebhookSources.length === 0) {
-    return fetchWebhookDiscoveryCandidates(config.webhook_url, config, count);
-  }
-
-  // 2. If webhook is selected alongside other channels, split count
-  let webhookCandidates = [];
-  let scrapeCount = count;
-  if (hasWebhook && nonWebhookSources.length > 0) {
-    const webhookCount = Math.max(1, Math.floor(count / sources.length));
-    scrapeCount = count - webhookCount;
+  // 1. If custom webhook is explicitly configured, query it
+  if (config.webhook_url && config.webhook_url.trim()) {
     try {
-      webhookCandidates = await fetchWebhookDiscoveryCandidates(config.webhook_url, config, webhookCount);
+      const webhookCandidates = await fetchWebhookDiscoveryCandidates(config.webhook_url, config, count);
+      if (webhookCandidates.length > 0) return webhookCandidates;
     } catch (err) {
-      console.warn('[Discovery Webhook Channel Failed, proceeding with web channels]:', err);
+      console.warn('[Discovery Webhook Failed, falling back to Google Places directory]:', err);
     }
   }
 
-  // 3. Try the live server scraper endpoint for the active web channels
-  let liveCandidates = [];
+  // 2. Google Places & Local Business Directory Discovery (Real, Verified Establishments)
+  const searchCategory = (config.target_industries && config.target_industries[0]) || config.search_query || config.industry || 'Commercial Businesses';
+  const searchLocation = (config.target_regions && config.target_regions[0]) || config.location || 'Bengaluru';
+  const searchCountry = (config.target_countries && config.target_countries[0]) || config.country || 'India';
+
   try {
-    const res = await fetch('/api/live-discovery', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config, count: scrapeCount })
+    const places = await fetchGooglePlacesCandidates({
+      query: searchCategory,
+      location: searchLocation,
+      country: searchCountry,
+      count,
+      apiKey: config.google_maps_api_key || ''
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.candidates) && data.candidates.length > 0) {
-        liveCandidates = data.candidates;
-      }
+
+    if (Array.isArray(places) && places.length > 0) {
+      return scoreCandidateBatch({ candidates: places, pipelineConfig: config });
     }
   } catch (err) {
-    console.warn('[Discovery Live Endpoint Failed, falling back to direct scraper]:', err);
+    console.warn('[Google Places Discovery Failed]:', err);
   }
 
-  // 4. Fallback to direct client scraper
-  if (liveCandidates.length === 0) {
-    try {
-      const direct = await scrapeLiveProspects(config, scrapeCount);
-      if (Array.isArray(direct) && direct.length > 0) {
-        liveCandidates = direct;
-      }
-    } catch (err) {
-      console.warn('[Direct Live Scrape Failed]:', err);
-    }
-  }
-
-  // 5. Zero Fake Data Policy: If no real candidates were found, return empty array.
-  if (liveCandidates.length === 0 && webhookCandidates.length === 0) {
-    return [];
-  }
-
-  return [...webhookCandidates, ...liveCandidates];
+  return [];
 }
 
 /**
