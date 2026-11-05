@@ -156,15 +156,130 @@
   font-weight: 500;
 }
 
+.support-modal-body.is-dragging {
+  background-color: #f8fafc;
+  outline: 2px dashed #0f172a;
+  outline-offset: -8px;
+  border-radius: 8px;
+}
+
+/* Image Attachment Thumbnails */
+.support-thumbnails-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.support-thumbnail-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 8px 4px 5px;
+  max-width: 220px;
+}
+
+.support-thumbnail-img {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+  flex-shrink: 0;
+}
+
+.support-thumbnail-name {
+  font-size: 11.5px;
+  color: #334155;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.support-thumbnail-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background-color: #e2e8f0;
+  color: #475569;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.support-thumbnail-remove:hover {
+  background-color: #ef4444;
+  color: #ffffff;
+}
+
+.support-thumbnail-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #64748b;
+  padding: 4px 8px;
+}
+
 /* Footer */
 .support-modal-footer {
   padding: 14px 24px 18px 24px;
   border-top: 1px solid #f1f5f9;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
   background-color: #fafbfc;
+}
+
+.support-footer-left {
+  display: flex;
+  align-items: center;
+}
+
+.support-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.support-btn-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #475569;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  height: 38px;
+}
+
+.support-btn-attach:hover:not(:disabled) {
+  background-color: #f1f5f9;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+.support-btn-attach:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .support-btn-cancel {
