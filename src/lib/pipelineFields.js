@@ -6,21 +6,37 @@ export const DEFAULT_PIPELINE_FIELDS = [
 ];
 
 export const DEFAULT_COLD_PIPELINE_FIELDS = [
-  { key: 'name', label: 'Full Name', show_on_card: false, is_core: true },
-  { key: 'company', label: 'Company', show_on_card: true, is_core: false },
-  { key: 'designation', label: 'Job Title / Designation', show_on_card: true, is_core: false },
-  { key: 'phone', label: 'Phone Number', show_on_card: false, is_core: true },
-  { key: 'email', label: 'Email Address', show_on_card: false, is_core: true },
-  { key: 'linkedin', label: 'LinkedIn Profile', show_on_card: false, is_core: false }
+  { key: 'name', label: 'Full Name', mapped_question: 'name', show_on_card: false, is_core: true },
+  { key: 'company', label: 'Company', mapped_question: 'company', show_on_card: true, is_core: false },
+  { key: 'designation', label: 'Job Title / Designation', mapped_question: 'designation', show_on_card: true, is_core: false },
+  { key: 'phone', label: 'Phone Number', mapped_question: 'phone', show_on_card: false, is_core: true },
+  { key: 'email', label: 'Email Address', mapped_question: 'email', show_on_card: false, is_core: true },
+  { key: 'linkedin', label: 'LinkedIn Profile', mapped_question: 'linkedin', show_on_card: false, is_core: false }
 ];
 
 export const DEFAULT_COLD_B2C_PIPELINE_FIELDS = [
-  { key: 'name', label: 'Full Name / Member', show_on_card: false, is_core: true },
-  { key: 'interest', label: 'Inquiry & Need', show_on_card: true, is_core: false },
-  { key: 'persona', label: 'Customer Persona', show_on_card: true, is_core: false },
-  { key: 'city', label: 'City / Location', show_on_card: true, is_core: false },
-  { key: 'phone', label: 'Phone Number', show_on_card: false, is_core: true },
-  { key: 'email', label: 'Email Address', show_on_card: false, is_core: true }
+  { key: 'name', label: 'Full Name / Member', mapped_question: 'name', show_on_card: false, is_core: true },
+  { key: 'interest', label: 'Inquiry & Need', mapped_question: 'interest', show_on_card: true, is_core: false },
+  { key: 'persona', label: 'Customer Persona', mapped_question: 'persona', show_on_card: true, is_core: false },
+  { key: 'city', label: 'City / Location', mapped_question: 'city', show_on_card: true, is_core: false },
+  { key: 'phone', label: 'Phone Number', mapped_question: 'phone', show_on_card: false, is_core: true },
+  { key: 'email', label: 'Email Address', mapped_question: 'email', show_on_card: false, is_core: true }
+];
+
+export const STANDARD_DISCOVERY_ATTRIBUTES = [
+  { value: 'name', label: 'Discovery: Business / Contact Name' },
+  { value: 'company', label: 'Discovery: Company Name' },
+  { value: 'designation', label: 'Discovery: Job Title / Designation' },
+  { value: 'phone', label: 'Discovery: Phone Number' },
+  { value: 'email', label: 'Discovery: Email Address' },
+  { value: 'city', label: 'Discovery: City / Location' },
+  { value: 'address', label: 'Discovery: Street Address' },
+  { value: 'website', label: 'Discovery: Official Website' },
+  { value: 'category', label: 'Discovery: Business Category' },
+  { value: 'rating', label: 'Discovery: Google Rating' },
+  { value: 'review_count', label: 'Discovery: Review Count' },
+  { value: 'google_maps_url', label: 'Discovery: Google Maps Link' },
+  { value: 'linkedin', label: 'Discovery: LinkedIn Profile' }
 ];
 
 /**
@@ -55,29 +71,43 @@ export function labelToKey(label) {
 export function getLeadFieldValue(lead, field) {
   if (!lead || !field) return '';
 
-  // Core properties
-  if (field.key === 'name') return lead.name || '';
-  if (field.key === 'phone') return lead.phone || '';
-  if (field.key === 'email') return lead.email || '';
-  if (field.key === 'city') {
-    return lead.city || lead.custom_fields?.['City'] || lead.custom_fields?.['city'] || '';
+  const targetKey = field.mapped_question || field.key;
+
+  // Direct lead properties
+  if (targetKey === 'name') return lead.name || '';
+  if (targetKey === 'phone') return lead.phone || '';
+  if (targetKey === 'email') return lead.email || '';
+  if (targetKey === 'city') {
+    return lead.city || lead.custom_fields?.['City'] || lead.custom_fields?.['city'] || lead.custom_fields?.location || '';
   }
-  if (field.key === 'interest') {
+  if (targetKey === 'company') {
+    return lead.company || lead.custom_fields?.company || '';
+  }
+  if (targetKey === 'designation') {
+    return lead.designation || lead.custom_fields?.designation || '';
+  }
+  if (targetKey === 'website') {
+    return lead.website || lead.custom_fields?.website || '';
+  }
+  if (targetKey === 'interest') {
     return lead.custom_fields?.interest || lead.custom_fields?.requirement || lead.designation || '';
   }
-  if (field.key === 'persona') {
+  if (targetKey === 'persona') {
     return lead.custom_fields?.persona || (lead.custom_fields?.target_mode === 'b2c' ? lead.designation : '') || '';
   }
 
-  // Check mapped question first
+  // Check mapped question in custom_fields
   if (field.mapped_question && lead.custom_fields) {
     if (lead.custom_fields[field.mapped_question] !== undefined && lead.custom_fields[field.mapped_question] !== null) {
       return lead.custom_fields[field.mapped_question];
     }
   }
 
-  // Fallbacks: field.key or field.label in custom_fields or lead direct property
+  // Fallbacks: targetKey or field.key or field.label in custom_fields or lead direct property
   if (lead.custom_fields) {
+    if (lead.custom_fields[targetKey] !== undefined && lead.custom_fields[targetKey] !== null) {
+      return lead.custom_fields[targetKey];
+    }
     if (lead.custom_fields[field.key] !== undefined && lead.custom_fields[field.key] !== null) {
       return lead.custom_fields[field.key];
     }
@@ -86,6 +116,9 @@ export function getLeadFieldValue(lead, field) {
     }
   }
 
+  if (lead[targetKey] !== undefined && lead[targetKey] !== null) {
+    return lead[targetKey];
+  }
   if (lead[field.key] !== undefined && lead[field.key] !== null) {
     return lead[field.key];
   }

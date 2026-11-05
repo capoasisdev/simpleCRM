@@ -59,7 +59,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { hasPermission } from '../lib/permissions';
 import { fetchEmailTemplates } from '../lib/email';
-import { getPipelineFields, DEFAULT_PIPELINE_FIELDS, DEFAULT_COLD_PIPELINE_FIELDS, labelToKey, extractPipelineFormQuestions } from '../lib/pipelineFields';
+import { getPipelineFields, DEFAULT_PIPELINE_FIELDS, DEFAULT_COLD_PIPELINE_FIELDS, STANDARD_DISCOVERY_ATTRIBUTES, labelToKey, extractPipelineFormQuestions } from '../lib/pipelineFields';
 import { runColdDiscoveryBatch, calculateNextDiscoveryRun, formatNextRunDate, hasDiscoveryTargetingCriteria } from '../lib/coldDiscoveryScraper';
 import { DEFAULT_DEDUPE_RULES } from '../lib/coldDeduplication';
 import Skeleton from './common/Skeleton';
@@ -667,6 +667,32 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
   const getFieldMappingOptions = (field) => {
     const opts = [];
+
+    // Cold / Discovery Pipeline mapping
+    if (pipelineType === 'cold') {
+      (STANDARD_DISCOVERY_ATTRIBUTES || []).forEach((attr) => {
+        opts.push({ value: attr.value, label: attr.label });
+      });
+
+      // Also include any custom keys discovered in active pipeline leads
+      availableFormQuestions.forEach((q) => {
+        if (!opts.some((o) => o.value.toLowerCase() === q.toLowerCase())) {
+          opts.push({ value: q, label: `Custom Field (${q})` });
+        }
+      });
+
+      if (field.mapped_question && !opts.some((o) => o.value === field.mapped_question)) {
+        opts.push({ value: field.mapped_question, label: `Attribute (${field.mapped_question})` });
+      }
+
+      if (!opts.some((o) => o.value.toLowerCase() === field.key.toLowerCase())) {
+        opts.push({ value: field.key, label: `Custom Key (${field.key})` });
+      }
+
+      return opts;
+    }
+
+    // Sales Pipeline (Inbound form questions)
     if (field.key === 'name') opts.push({ value: 'name', label: 'Form: Full Name' });
     if (field.key === 'phone') opts.push({ value: 'phone', label: 'Form: Phone Number' });
     if (field.key === 'email') opts.push({ value: 'email', label: 'Form: Email Address' });
@@ -1687,6 +1713,14 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   const handleSelectFormQuestionToAdd = (question) => {
     setNewFieldMappedQuestion(question);
     if (question) {
+      if (pipelineType === 'cold') {
+        const matchingAttr = (STANDARD_DISCOVERY_ATTRIBUTES || []).find((a) => a.value === question);
+        if (matchingAttr) {
+          const cleanLabel = matchingAttr.label.replace('Discovery: ', '');
+          setNewFieldName(cleanLabel);
+          return;
+        }
+      }
       const clean = question
         .replace(/\?$/, '')
         .replace(/^Which\s+/i, '')
@@ -1716,7 +1750,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       {
         key,
         label: trimmed,
-        mapped_question: pipelineType === 'sales' ? (newFieldMappedQuestion || key) : '',
+        mapped_question: newFieldMappedQuestion || key,
         show_on_card: false,
         is_core: false
       }
@@ -3200,19 +3234,22 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                           />
                         </div>
 
-                        {pipelineType === 'sales' && (
-                          <div className="pipeline-field-map-slot">
-                            <CustomSelect
-                              className="pipeline-field-custom-select"
-                              value={field.mapped_question || (field.is_core ? field.key : (field.key === 'city' ? (availableFormQuestions.find(q => q.toLowerCase() === 'city') || 'city') : ''))}
-                              onChange={(val) => handleFieldMappingChange(field.key, val)}
-                              onOpenChange={(isOpen) => setOpenSelectFieldKey(isOpen ? field.key : null)}
-                              disabled={!canEdit}
-                              placeholder="Select form question..."
-                              options={getFieldMappingOptions(field)}
-                            />
-                          </div>
-                        )}
+                        <div className="pipeline-field-map-slot">
+                          <CustomSelect
+                            className="pipeline-field-custom-select"
+                            value={
+                              field.mapped_question ||
+                              (pipelineType === 'cold'
+                                ? field.key
+                                : (field.is_core ? field.key : (field.key === 'city' ? (availableFormQuestions.find(q => q.toLowerCase() === 'city') || 'city') : '')))
+                            }
+                            onChange={(val) => handleFieldMappingChange(field.key, val)}
+                            onOpenChange={(isOpen) => setOpenSelectFieldKey(isOpen ? field.key : null)}
+                            disabled={!canEdit}
+                            placeholder={pipelineType === 'cold' ? "Select discovery attribute..." : "Select form question..."}
+                            options={getFieldMappingOptions(field)}
+                          />
+                        </div>
 
                         <div className="pipeline-numbered-actions">
                           {field.key === 'name' ? (
@@ -3289,24 +3326,27 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                         />
                       </div>
 
-                      {pipelineType === 'sales' && (
-                        <div className="pipeline-field-map-slot">
-                          <CustomSelect
-                            className="pipeline-field-custom-select"
-                            value={newFieldMappedQuestion}
-                            onChange={(val) => handleSelectFormQuestionToAdd(val)}
-                            onOpenChange={(isOpen) => setOpenSelectFieldKey(isOpen ? '__add_field__' : null)}
-                            placeholder="Map from form question..."
-                            disabled={!canEdit || availableFormQuestions.length === 0}
-                            options={[
-                              { value: '', label: 'Map from form question...' },
-                              ...availableFormQuestions
-                                .filter((q) => !pipelineFields.some((f) => f.mapped_question === q))
-                                .map((q) => ({ value: q, label: q }))
-                            ]}
-                          />
-                        </div>
-                      )}
+                      <div className="pipeline-field-map-slot">
+                        <CustomSelect
+                          className="pipeline-field-custom-select"
+                          value={newFieldMappedQuestion}
+                          onChange={(val) => handleSelectFormQuestionToAdd(val)}
+                          onOpenChange={(isOpen) => setOpenSelectFieldKey(isOpen ? '__add_field__' : null)}
+                          placeholder={pipelineType === 'cold' ? "Map from discovery attribute..." : "Map from form question..."}
+                          disabled={!canEdit}
+                          options={[
+                            { value: '', label: pipelineType === 'cold' ? 'Map from discovery attribute...' : 'Map from form question...' },
+                            ...(pipelineType === 'cold'
+                              ? (STANDARD_DISCOVERY_ATTRIBUTES || [])
+                                  .filter((attr) => !pipelineFields.some((f) => (f.mapped_question || f.key) === attr.value))
+                                  .map((attr) => ({ value: attr.value, label: attr.label.replace('Discovery: ', '') }))
+                              : availableFormQuestions
+                                  .filter((q) => !pipelineFields.some((f) => f.mapped_question === q))
+                                  .map((q) => ({ value: q, label: q }))
+                            )
+                          ]}
+                        />
+                      </div>
 
                       <div className="pipeline-numbered-actions">
                         <button
