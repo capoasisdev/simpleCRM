@@ -76,25 +76,61 @@ const GEOGRAPHY_DATABASE = [
 // Common B2B & B2C Domain Profiles
 const NICHE_TEMPLATES = [
   {
-    keywords: ['hrms', 'payroll', 'human resource', 'hr software', 'hcm', 'recruitment software'],
+    keywords: ['crm', 'customer relationship', 'sales software', 'lead management', 'sales automation', 'crm software'],
     mode: 'b2b',
-    name: 'HRMS Software Outreach',
-    industries: ['Information Technology', 'Human Resources & Staffing', 'Enterprise Software', 'Financial Services', 'B2B Services'],
-    roles: ['Chief Human Resources Officer', 'VP Human Resources', 'Head of People & Culture', 'HR Director', 'Talent Acquisition Lead'],
-    personas: ['HR Decision Makers', 'Business Owners & Founders', 'People Operations Heads', 'Payroll & Talent Managers'],
-    interests: ['HRMS Software', 'Cloud Payroll Automation', 'Attendance & Leave Tracking', 'Employee Management Systems'],
-    companySizes: ['51–200', '201–500', '500+'],
-    queries: ['HRMS software buyers', 'HR payroll software companies', 'Human resources management software', 'Enterprise HR decision makers'],
+    name: 'SMB CRM Client Acquisition',
+    industries: [
+      'Real Estate & Property Development',
+      'Logistics & Supply Chain',
+      'Clinics & Diagnostic Centers',
+      'Construction & Interior Design Studios',
+      'Manufacturing & Wholesale Distribution',
+      'Education & Coaching Academies',
+      'Financial & Legal Advisory'
+    ],
+    roles: ['Founder & CEO', 'Managing Director', 'Business Owner', 'Director of Sales', 'Operations Head'],
+    personas: ['SMB Business Owners', 'Founders & Managing Directors', 'Sales Heads & Growth Directors', 'Commercial Firm Leaders'],
+    interests: ['Lead Management Software', 'Sales Automation CRM', 'Customer Follow-up Systems', 'Inquiry Tracking'],
+    companySizes: ['1–10', '11–50', '51–200'],
+    queries: ['Real estate agencies', 'Logistics companies', 'Interior design studios', 'Manufacturing firms', 'Diagnostic clinics'],
     stages: [
       { name: 'Prospect' },
       { name: 'Contacted' },
-      { name: 'HRMS Demo Scheduled' },
-      { name: 'Technical Evaluation' },
-      { name: 'Proposal Sent' },
+      { name: 'Discovery & Pain Points' },
+      { name: 'CRM Demo Presented' },
+      { name: 'Trial / Proposal Sent' },
       { name: 'Closed Won', is_won: true },
-      { name: 'Unresponsive / Lost', is_lost: true }
+      { name: 'Lost / Unresponsive', is_lost: true }
     ],
-    explanation: 'Configured for B2B enterprise outreach targeting HR leadership and C-level decision-makers in mid-to-large companies needing modern HR and payroll solutions.'
+    explanation: 'Configured for selling CRM software to high-touch non-tech SMBs (Real Estate, Logistics, Clinics, Manufacturing, and Services) targeting business owners and sales leaders.'
+  },
+  {
+    keywords: ['hrms', 'payroll', 'human resource', 'hr software', 'hcm', 'staffing software', 'attendance software'],
+    mode: 'b2b',
+    name: 'HRMS & Payroll Client Acquisition',
+    industries: [
+      'Manufacturing & Industrial Plants',
+      'Retail & Store Chains',
+      'Hospitals & Healthcare Centers',
+      'Logistics & Warehousing Hubs',
+      'Security & Facility Management',
+      'Hotels & Restaurant Chains'
+    ],
+    roles: ['Founder & Managing Director', 'Business Owner', 'General Manager', 'HR Manager', 'Head of Operations'],
+    personas: ['SMB Business Owners', 'Managing Directors', 'Operations & HR Heads', 'Factory & Store Leaders'],
+    interests: ['Employee Attendance & Shifts', 'Automated Payroll Software', 'Staff Management Systems', 'Leave & Compliance Tracking'],
+    companySizes: ['11–50', '51–200', '201–500'],
+    queries: ['Manufacturing companies', 'Retail chains', 'Hospitals and nursing homes', 'Logistics hubs', 'Facility management companies'],
+    stages: [
+      { name: 'Prospect' },
+      { name: 'Contacted' },
+      { name: 'Payroll & HR Needs Review' },
+      { name: 'HRMS Demo Scheduled' },
+      { name: 'Commercial Proposal' },
+      { name: 'Closed Won', is_won: true },
+      { name: 'Lost / Unresponsive', is_lost: true }
+    ],
+    explanation: 'Configured for selling HRMS & payroll software to companies with frontline and deskless staff (Manufacturing, Retail, Healthcare, Logistics, and Hospitality).'
   },
   {
     keywords: ['real estate', 'realty', 'property', 'properties', 'villa', 'villas', 'apartment', 'apartments', 'flats', 'flat', 'housing', 'off-plan', 'luxury homes', 'home buyer', 'home buyers'],
@@ -118,9 +154,9 @@ const NICHE_TEMPLATES = [
     explanation: 'Configured for consumer real estate buyer acquisition with stages focused on site visits, property requirements, and booking conversions.'
   },
   {
-    keywords: ['saas', 'software', 'cloud', 'b2b tech', 'api', 'devops', 'cybersecurity'],
+    keywords: ['devops', 'cybersecurity', 'developer tool', 'cloud infrastructure', 'api platform'],
     mode: 'b2b',
-    name: 'B2B SaaS Prospecting',
+    name: 'DevOps & Cloud Tech Prospecting',
     industries: ['Software & SaaS', 'Information Technology', 'Internet & FinTech', 'E-Commerce'],
     roles: ['Chief Technology Officer (CTO)', 'VP Engineering', 'Head of Product', 'Founder & CEO', 'IT Director'],
     personas: ['Tech Founders & CEOs', 'CTOs & Engineering Leads', 'Head of Product', 'IT & DevOps Directors'],
@@ -209,8 +245,11 @@ export function generateHeuristicPipelineConfig(promptText, options = {}) {
     }
   }
 
-  const countries = matchedCountries.length > 0 ? matchedCountries : ['United States'];
-  const cities = matchedCities.length > 0 ? matchedCities.slice(0, 6) : ['Major Metros', 'Regional Hubs'];
+  const countries = matchedCountries.length > 0 ? matchedCountries : ['India'];
+  const defaultCommercialCities = countries[0] === 'India'
+    ? ['Bengaluru', 'Mumbai', 'Delhi NCR', 'Pune', 'Hyderabad', 'Chennai']
+    : ['New York', 'San Francisco', 'Austin', 'Chicago', 'Miami'];
+  const cities = matchedCities.length > 0 ? matchedCities.slice(0, 6) : defaultCommercialCities;
 
   // 2. Detect B2B vs B2C & Niche
   let matchedTemplate = null;
@@ -359,23 +398,40 @@ export async function generatePipelineConfigFromPrompt(userPrompt, options = {})
 
   const currentMode = options?.currentMode;
   const systemPrompt = `You are a World-Class CRM Pipeline & Outbound Prospecting Architect.
-The user will provide a business description or targeting goal (e.g. "I want to target customers in India who want HRMS software").
-${currentMode ? `The user's current CRM pipeline mode is "${currentMode}". If the user describes customers, buyers, or consumers, prioritize "b2c".` : ''}
+The user will provide a business description or targeting goal (e.g. "I want to target companies who might need CRM software from startups, small to mid size companies").
 
-MANDATORY CRITERIA RULES:
-1. "target_personas" MUST ALWAYS be an array with 3-5 specific personas (e.g. ["HR Decision Makers", "SMB Business Owners", "People Operations Heads"]). NEVER return an empty array!
-2. "target_interests" MUST ALWAYS be an array with 3-5 specific product/service interests or inquiries (e.g. ["HRMS Software", "Cloud Payroll Automation", "Attendance Tracking Systems"]). NEVER return an empty array!
-3. "target_roles" MUST ALSO be populated with 3-5 corporate titles (e.g. ["Chief Human Resources Officer", "VP HR", "Operations Director"]).
-4. "target_industries" and "target_company_sizes" must also be populated.
-5. Return ONLY valid JSON matching this exact structure, with no markdown code blocks and no surrounding text:
+CRITICAL B2B BUYER DISAMBIGUATION RULES:
+1. OFFERING VS. BUYER INDUSTRY:
+   - When the user is selling a B2B horizontal tool or service (such as CRM software, HRMS software, ERP, Accounting, Invoicing, Website Development, or Marketing):
+     * NEVER set "target_industries" to Software, SaaS, IT, or Tech! Tech companies build software themselves and are NOT your target clients.
+     * ALWAYS set "target_industries" to the actual NON-TECH commercial businesses that need this tool to run their day-to-day operations:
+       - For CRM: ["Real Estate & Property Development", "Logistics & Supply Chain", "Clinics & Diagnostic Centers", "Interior Design & Architecture Studios", "Manufacturing & Wholesale Distribution", "Education & Coaching Academies", "Financial & Legal Services"]
+       - For HRMS: ["Manufacturing & Factories", "Retail & Store Chains", "Hospitals & Healthcare Centers", "Logistics & Warehousing Hubs", "Security & Facility Management", "Hotels & Restaurant Chains"]
+     * Set "target_roles" to actual SMB business owners: ["Founder & CEO", "Managing Director", "Business Owner", "General Manager", "Head of Operations"]. (NEVER CTO, VP Engineering, or DevOps leads).
+     * Set "search_queries" to concrete local business types on Google Places (e.g. ["Real estate agencies in Bengaluru", "Logistics companies in Mumbai", "Interior design studios in Delhi NCR", "Diagnostic clinics in Hyderabad"]).
+
+2. NO ABSTRACT REGIONS OR PLACEHOLDERS:
+   - NEVER output abstract placeholders like "Major Metros", "Regional Hubs", "All Regions", or "Global".
+   - "target_regions" MUST ALWAYS be real, concrete commercial cities:
+     - For India: ["Bengaluru", "Mumbai", "Delhi NCR", "Pune", "Hyderabad", "Chennai"]
+     - For US: ["New York", "San Francisco", "Austin", "Chicago", "Miami"]
+     - For UK: ["London", "Manchester", "Birmingham"]
+   - If no country is specified by the user, default "target_countries" to ["India"] and "target_regions" to Indian commercial hubs.
+
+3. MANDATORY CRITERIA RULES:
+   - "target_personas": 3-5 specific personas (e.g. ["SMB Business Owners", "Managing Directors", "Commercial Firm Leaders"]).
+   - "target_interests": 3-5 specific product/service pain points (e.g. ["Lead Management CRM", "Customer Follow-up Automation", "Sales Pipeline Tracking"]).
+   - "target_company_sizes": ["1–10", "11–50", "51–200"].
+
+Return ONLY valid JSON matching this exact structure, with no markdown code blocks and no surrounding text:
 {
   "name": "Concise Descriptive Pipeline Name",
   "pipeline_type": "cold",
-  "target_mode": "b2b" or "b2c",
+  "target_mode": "b2b",
   "target_countries": ["Country 1"],
   "target_regions": ["City 1", "City 2", "City 3"],
   "target_industries": ["Industry 1", "Industry 2"],
-  "target_company_sizes": ["51–200", "201–500"],
+  "target_company_sizes": ["1–10", "11–50", "51–200"],
   "target_roles": ["Role 1", "Role 2", "Role 3"],
   "target_personas": ["Persona 1", "Persona 2", "Persona 3"],
   "target_interests": ["Interest 1", "Interest 2", "Interest 3"],
