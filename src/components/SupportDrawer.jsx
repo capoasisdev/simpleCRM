@@ -114,7 +114,7 @@ export default function SupportDrawer({
                 placeholder="What's on your mind? Found a bug or have an idea? Type here..."
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                rows={4}
+                rows={6}
                 maxLength={2000}
                 disabled={isSubmitting}
               />
