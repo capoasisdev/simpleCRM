@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Send, CheckCircle2, Loader2, MessageSquare, Paperclip } from 'lucide-react';
+import { X, Send, CheckCircle2, Loader2, MessageSquare, Paperclip, Phone } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import '../styles/support.css';
 
@@ -80,8 +80,16 @@ export default function SupportDrawer({
       setTimeout(() => {
         textareaRef.current?.focus();
       }, 60);
+
+      const handleKeyDown = (e) => {
+        if (e.key === 'Escape') {
+          onClose();
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [isOpen]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -240,14 +248,14 @@ export default function SupportDrawer({
               <p className="support-modal-subtitle">Send a direct note, suggestion, or bug report to Developers.</p>
             </div>
           </div>
-          <button
-            type="button"
-            className="support-modal-close-btn"
-            onClick={onClose}
-            aria-label="Close"
+          <a
+            href="tel:+919156367501"
+            className="support-header-phone"
+            title="Call developers: +91 91563 67501"
           >
-            <X size={17} strokeWidth={2} />
-          </button>
+            <Phone size={13} strokeWidth={2.2} />
+            <span>+91 91563 67501</span>
+          </a>
         </div>
 
         {isSuccess ? (
