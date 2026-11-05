@@ -110,12 +110,19 @@ function extractAutopilotCategories(config: any = {}) {
   return categories.length > 0 ? categories : ["Commercial Businesses"];
 }
 
+const FALLBACK_SERPER_KEY = "ab6c45041a6e6979c6c31015e15a3f8ed58ca31a";
+
 /**
  * Fetches real Google Maps businesses from Serper.dev Places API across multiple categories and cities
  * ZERO FAKE DATA GUARANTEE: If a phone or email is not publicly published, it is left as "" (empty string).
  */
 async function fetchSerperPlaces(config: any, count = 25) {
-  const apiKey = Deno.env.get("SERPER_API_KEY") || Deno.env.get("VITE_SERPER_API_KEY");
+  const apiKey =
+    config.serper_api_key ||
+    config.google_maps_api_key ||
+    Deno.env.get("SERPER_API_KEY") ||
+    Deno.env.get("VITE_SERPER_API_KEY") ||
+    FALLBACK_SERPER_KEY;
   if (!apiKey) {
     console.warn("[Autopilot] SERPER_API_KEY environment variable is not configured.");
     return [];

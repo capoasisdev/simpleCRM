@@ -998,6 +998,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       const payload = {
         ...(discoveryConfig || DEFAULT_DISCOVERY_CONFIG),
         timezone_offset: new Date().getTimezoneOffset(),
+        serper_api_key: import.meta.env.VITE_SERPER_API_KEY || '',
         ...overrides,
         dedupe: {
           ...((discoveryConfig || DEFAULT_DISCOVERY_CONFIG).dedupe || {}),
