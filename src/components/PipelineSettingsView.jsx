@@ -27,6 +27,7 @@ import {
   Globe,
   ListFilter,
   CreditCard,
+  GripVertical,
   Pin,
   Info,
   Monitor,
@@ -369,6 +370,8 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldMappedQuestion, setNewFieldMappedQuestion] = useState('');
   const [openSelectFieldKey, setOpenSelectFieldKey] = useState(null);
+  const [draggedFieldIndex, setDraggedFieldIndex] = useState(null);
+  const [dragOverFieldIndex, setDragOverFieldIndex] = useState(null);
 
   // Discovery & Scraping Engine states (Cold Pipelines)
   const [discoveryConfig, setDiscoveryConfig] = useState(DEFAULT_DISCOVERY_CONFIG);
@@ -1771,6 +1774,51 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     setPipelineFields(updated);
     savePipelineFields(updated);
     showToast(`Removed field "${target?.label || fieldKey}"`);
+  };
+
+  const handleFieldDragStart = (e, index) => {
+    if (!canEdit) return;
+    setDraggedFieldIndex(index);
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(index));
+    }
+  };
+
+  const handleFieldDragOver = (e, index) => {
+    if (!canEdit) return;
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'move';
+    }
+    if (dragOverFieldIndex !== index) {
+      setDragOverFieldIndex(index);
+    }
+  };
+
+  const handleFieldDrop = (e, targetIndex) => {
+    if (!canEdit) return;
+    e.preventDefault();
+    if (draggedFieldIndex === null || draggedFieldIndex === undefined) return;
+    if (draggedFieldIndex === targetIndex) {
+      setDraggedFieldIndex(null);
+      setDragOverFieldIndex(null);
+      return;
+    }
+
+    const copy = [...pipelineFields];
+    const [moved] = copy.splice(draggedFieldIndex, 1);
+    copy.splice(targetIndex, 0, moved);
+
+    setPipelineFields(copy);
+    savePipelineFields(copy);
+    setDraggedFieldIndex(null);
+    setDragOverFieldIndex(null);
+  };
+
+  const handleFieldDragEnd = () => {
+    setDraggedFieldIndex(null);
+    setDragOverFieldIndex(null);
   };
 
   const handleMoveFieldUp = (index) => {
@@ -3236,12 +3284,22 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                     return (
                       <div
                         key={field.key}
-                        className={`pipeline-numbered-item ${isSelectOpen ? 'has-open-dropdown' : ''}`}
+                        draggable={canEdit}
+                        onDragStart={(e) => handleFieldDragStart(e, idx)}
+                        onDragOver={(e) => handleFieldDragOver(e, idx)}
+                        onDrop={(e) => handleFieldDrop(e, idx)}
+                        onDragEnd={handleFieldDragEnd}
+                        className={`pipeline-numbered-item ${isSelectOpen ? 'has-open-dropdown' : ''} ${draggedFieldIndex === idx ? 'is-dragging' : ''} ${dragOverFieldIndex === idx && draggedFieldIndex !== idx ? 'is-drag-over' : ''}`}
                         style={{
                           zIndex: isSelectOpen ? 200 : (pipelineFields.length + 10 - idx)
                         }}
                       >
                         <div className="pipeline-numbered-left">
+                          {canEdit && (
+                            <span className="pipeline-drag-handle" title="Drag to reorder">
+                              <GripVertical size={15} strokeWidth={2.2} />
+                            </span>
+                          )}
                           <span className="pipeline-number-index">{idx + 1}</span>
                           <input
                             type="text"
@@ -3270,7 +3328,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                           />
                         </div>
 
-                        <div className="pipeline-numbered-actions pipeline-fields-actions-box">
+                        <div className="pipeline-numbered-actions">
                           {field.key === 'name' ? (
                             <span
                               className="btn-entry-icon active"
@@ -3289,27 +3347,6 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                               <CreditCard size={17} strokeWidth={2.2} />
                             </button>
                           )}
-
-                          <div className="pipeline-field-reorder-stepper">
-                            <button
-                              type="button"
-                              className="btn-field-stepper-arrow"
-                              disabled={!canEdit || idx === 0}
-                              onClick={() => handleMoveFieldUp(idx)}
-                              data-tooltip="Move up"
-                            >
-                              <ChevronUp size={12} strokeWidth={2.4} />
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-field-stepper-arrow"
-                              disabled={!canEdit || idx === pipelineFields.length - 1}
-                              onClick={() => handleMoveFieldDown(idx)}
-                              data-tooltip="Move down"
-                            >
-                              <ChevronDown size={12} strokeWidth={2.4} />
-                            </button>
-                          </div>
 
                           {field.is_core ? (
                             <span
@@ -3354,6 +3391,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                       }}
                     >
                       <div className="pipeline-numbered-left">
+                        {canEdit && <span className="pipeline-drag-handle-spacer" aria-hidden="true" />}
                         <span className="pipeline-number-index pipeline-number-index-ghost">
                           {pipelineFields.length + 1}
                         </span>
@@ -3388,7 +3426,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                         />
                       </div>
 
-                      <div className="pipeline-numbered-actions pipeline-fields-actions-box">
+                      <div className="pipeline-numbered-actions">
                         <button
                           type="submit"
                           disabled={!newFieldName.trim()}
@@ -3398,6 +3436,13 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                         >
                           <Plus size={17} strokeWidth={2.4} />
                         </button>
+                        <span
+                          className="btn-number-trash"
+                          style={{ visibility: 'hidden', pointerEvents: 'none' }}
+                          aria-hidden="true"
+                        >
+                          <Trash2 size={16} />
+                        </span>
                       </div>
                     </form>
                   )}
