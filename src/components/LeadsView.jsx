@@ -613,7 +613,6 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
   const inFlightAutomationsRef = useRef(new Set());
   // Lead Card Automation Countdown Strips State: { [leadId]: { leadId, targetStageId, stageName, items: { whatsapp, email, meta } } }
   const [cardAutomations, setCardAutomations] = useState({});
-  const [copiedHookLeadId, setCopiedHookLeadId] = useState(null);
   const automationTimersRef = useRef({});
 
   // Flush any pending card automations immediately (e.g. on unmount or tab close)
@@ -3772,69 +3771,6 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
                     ) : (
                       <div className="lead-modal-followup-card-desc empty">
                         No additional remarks provided.
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* AI Prospect Intelligence & Dynamic Icebreaker Card */}
-                {selectedLead.custom_fields && (selectedLead.custom_fields.icp_score !== undefined || selectedLead.custom_fields.ai_icebreaker) && (
-                  <div className="lead-ai-intelligence-card">
-                    <div className="lead-ai-intelligence-header">
-                      <div className="lead-ai-header-left">
-                        <Sparkles size={15} className="lead-ai-sparkle-icon" />
-                        <span>AI Prospect Intelligence</span>
-                      </div>
-                      {selectedLead.custom_fields.icp_score !== undefined && (
-                        <div className="lead-ai-score-pill">
-                          <span className="icp-pill-symbol">⚡</span>
-                          <span>ICP {selectedLead.custom_fields.icp_score}/100</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {selectedLead.custom_fields.icp_reasoning && (
-                      <div className="lead-ai-reasoning">
-                        &ldquo;{selectedLead.custom_fields.icp_reasoning}&rdquo;
-                      </div>
-                    )}
-
-                    {selectedLead.custom_fields.ai_icebreaker && (
-                      <div className="lead-ai-hook-box">
-                        <div className="lead-ai-hook-label">
-                          <span>Personalized Outreach Hook</span>
-                          <button
-                            type="button"
-                            className="lead-ai-copy-btn"
-                            onClick={() => {
-                              navigator.clipboard.writeText(selectedLead.custom_fields.ai_icebreaker);
-                              setCopiedHookLeadId(selectedLead.id);
-                              setTimeout(() => setCopiedHookLeadId(null), 2000);
-                            }}
-                          >
-                            {copiedHookLeadId === selectedLead.id ? (
-                              <>
-                                <Check size={12} color="#16a34a" />
-                                <span style={{ color: '#16a34a' }}>Copied</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy size={12} />
-                                <span>Copy Hook</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                        <div className="lead-ai-hook-text">
-                          &ldquo;{selectedLead.custom_fields.ai_icebreaker}&rdquo;
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedLead.custom_fields.identified_pain_point && (
-                      <div className="lead-ai-pain-point-row">
-                        <span className="lead-ai-sub-label">Identified Need:</span>
-                        <span className="lead-ai-sub-text">{selectedLead.custom_fields.identified_pain_point}</span>
                       </div>
                     )}
                   </div>
