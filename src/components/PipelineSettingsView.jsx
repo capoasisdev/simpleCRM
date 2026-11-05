@@ -27,7 +27,7 @@ import {
   Globe,
   ListFilter,
   CreditCard,
-  GripVertical,
+  Grip,
   Pin,
   Info,
   Monitor,
@@ -3297,7 +3297,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                         <div className="pipeline-numbered-left">
                           {canEdit && (
                             <span className="pipeline-drag-handle" title="Drag to reorder">
-                              <GripVertical size={15} strokeWidth={2.2} />
+                              <Grip size={15} strokeWidth={2.2} />
                             </span>
                           )}
                           <span className="pipeline-number-index">{idx + 1}</span>
