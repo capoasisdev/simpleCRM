@@ -498,21 +498,6 @@ export default function DashboardView({ currentUser, onLogout }) {
               localStorage.setItem('crm_cached_users', JSON.stringify(usersRes.data));
             } catch (e) {}
           }
-
-          // Trigger Discovery Autopilot catch-up check
-          if (pipesRes.data && usersRes.data) {
-            checkAndRunDiscoveryAutopilot({
-              pipelines: pipesRes.data,
-              usersList: usersRes.data
-            }).then((runs) => {
-              if (runs && runs.length > 0) {
-                const totalInserted = runs.reduce((acc, r) => acc + (r.insertedCount || 0), 0);
-                if (totalInserted > 0) {
-                  showToast(`Discovery Autopilot dripped ${totalInserted} new prospect(s) into your pipeline!`);
-                }
-              }
-            }).catch(e => console.warn('[Discovery Autopilot] Check error:', e));
-          }
         }
       } catch (err) {
         console.warn('Dashboard data fetch note:', err);
@@ -575,31 +560,6 @@ export default function DashboardView({ currentUser, onLogout }) {
       supabase.removeChannel(channel);
     };
   }, []);
-
-  // Recurring Discovery Autopilot heartbeat: checks for due automated sweeps every 30 seconds
-  useEffect(() => {
-    const heartbeatTimer = setInterval(() => {
-      if (!pipelinesList || pipelinesList.length === 0) return;
-      const hasActiveColdAutopilot = pipelinesList.some(
-        p => p.pipeline_type === 'cold' && p.discovery_config?.autopilot_enabled === true
-      );
-      if (!hasActiveColdAutopilot) return;
-
-      checkAndRunDiscoveryAutopilot({
-        pipelines: pipelinesList,
-        usersList: usersList || []
-      }).then((runs) => {
-        if (runs && runs.length > 0) {
-          const totalInserted = runs.reduce((acc, r) => acc + (r.insertedCount || 0), 0);
-          if (totalInserted > 0) {
-            showToast(`Discovery Autopilot dripped ${totalInserted} new prospect(s) into your pipeline!`);
-          }
-        }
-      }).catch((e) => console.warn('[Discovery Autopilot] Heartbeat check note:', e));
-    }, 30000);
-
-    return () => clearInterval(heartbeatTimer);
-  }, [pipelinesList, usersList]);
 
   // Subscribe to real-time activity events & pipeline creation
   useEffect(() => {

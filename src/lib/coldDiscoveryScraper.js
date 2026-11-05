@@ -715,9 +715,23 @@ export async function checkAndRunDiscoveryAutopilot({ pipelines = [], usersList 
 
   try {
     for (const pipe of duePipelines) {
-      const config = pipe.discovery_config || {};
       try {
-        console.log(`[Discovery Autopilot] Executing automated discovery sweep for "${pipe.name}"...`);
+        // Fetch fresh pipeline state from database to ensure no stale in-memory race condition
+        const { data: freshPipe } = await supabase
+          .from('pipelines')
+          .select('id, name, discovery_config, stages, lead_distribution')
+          .eq('id', pipe.id)
+          .maybeSingle();
+
+        const activePipe = freshPipe || pipe;
+        const config = activePipe.discovery_config || {};
+        const freshNextRun = config.next_run_at ? new Date(config.next_run_at) : null;
+        if (freshNextRun && now < freshNextRun) {
+          console.log(`[Discovery Autopilot] "${activePipe.name}" already executed or next run is in future (${config.next_run_at}), skipping.`);
+          continue;
+        }
+
+        console.log(`[Discovery Autopilot] Executing automated discovery sweep for "${activePipe.name}"...`);
 
         let cloudHandled = false;
         const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL;
@@ -733,34 +747,34 @@ export async function checkAndRunDiscoveryAutopilot({ pipelines = [], usersList 
                 'Authorization': `Bearer ${supabaseAnonKey}`,
                 'Content-Type': 'application/json'
               },
-              body: JSON.stringify({ pipeline_id: pipe.id })
+              body: JSON.stringify({ pipeline_id: activePipe.id })
             });
 
             if (edgeRes.ok) {
               const edgeData = await edgeRes.json();
+              cloudHandled = true; // Cloud successfully processed the scheduled sweep check
               if (Array.isArray(edgeData.executed_runs) && edgeData.executed_runs.length > 0) {
                 const run = edgeData.executed_runs[0];
-                cloudHandled = true;
                 executedRuns.push({
-                  pipelineId: pipe.id,
-                  pipelineName: pipe.name,
+                  pipelineId: activePipe.id,
+                  pipelineName: activePipe.name,
                   insertedCount: run.inserted || 0,
                   duplicatesCount: run.duplicates_skipped || 0,
                   nextRun: run.next_run_at,
                   cloudExecuted: true
                 });
-                console.log(`[Discovery Autopilot] Cloud edge execution completed for "${pipe.name}": +${run.inserted} leads.`);
+                console.log(`[Discovery Autopilot] Cloud edge execution completed for "${activePipe.name}": +${run.inserted} leads.`);
               }
             }
           } catch (edgeErr) {
-            console.warn('[Discovery Autopilot] Cloud edge execution unreachable, falling back to local client:', edgeErr);
+            console.warn('[Discovery Autopilot] Cloud edge execution unreachable, checking offline fallback:', edgeErr);
           }
         }
 
-        // 2. Fall back to local client execution if cloud edge execution was not handled
+        // 2. Only fall back to local client execution if the cloud endpoint was completely unreachable (e.g. offline)
         if (!cloudHandled) {
           const result = await runColdDiscoveryBatch({
-            pipeline: pipe,
+            pipeline: activePipe,
             usersList,
             dryRun: false
           });
@@ -791,11 +805,11 @@ export async function checkAndRunDiscoveryAutopilot({ pipelines = [], usersList 
               discovery_config: updatedConfig,
               updated_at: new Date().toISOString()
             })
-            .eq('id', pipe.id);
+            .eq('id', activePipe.id);
 
           executedRuns.push({
-            pipelineId: pipe.id,
-            pipelineName: pipe.name,
+            pipelineId: activePipe.id,
+            pipelineName: activePipe.name,
             insertedCount: result.insertedCount || 0,
             duplicatesCount: result.duplicatesCount || 0,
             nextRun: nextRunTimestamp
