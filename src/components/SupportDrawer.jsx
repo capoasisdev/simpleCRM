@@ -1,49 +1,40 @@
-import { useState } from 'react';
-import {
-  X,
-  Headphones,
-  Send,
-  MessageCircle,
-  Mail,
-  CheckCircle2,
-  Sparkles,
-  HelpCircle,
-  Lightbulb,
-  AlertCircle,
-  ArrowUpRight,
-  Loader2
-} from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, Send, CheckCircle2, Loader2, MessageSquare } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import '../styles/support.css';
-
-const CATEGORIES = [
-  { id: 'query', label: 'Query', icon: HelpCircle },
-  { id: 'suggestion', label: 'Suggestion', icon: Lightbulb },
-  { id: 'support', label: 'Issue / Bug', icon: AlertCircle },
-  { id: 'feedback', label: 'Feedback', icon: Sparkles }
-];
 
 export default function SupportDrawer({
   isOpen,
   onClose,
   currentUser = {}
 }) {
-  const [category, setCategory] = useState('query');
-  const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setIsSuccess(false);
+      setErrorMsg('');
+      setMessage('');
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 60);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   const userEmail = currentUser?.email || 'user@simplecrm.com';
   const userName = currentUser?.name || 'CRM Team Member';
 
-  const handleSendQuery = async (e) => {
-    e.preventDefault();
-    if (!message.trim()) {
-      setErrorMsg('Please enter a message or description of your query.');
+  const handleSend = async (e) => {
+    if (e) e.preventDefault();
+    const cleanMsg = message.trim();
+    if (!cleanMsg) {
+      setErrorMsg('Please write your note before sending.');
       return;
     }
 
@@ -55,9 +46,9 @@ export default function SupportDrawer({
         user_id: currentUser?.id ? String(currentUser.id) : null,
         user_name: userName,
         user_email: userEmail,
-        type: category,
-        subject: subject.trim() || `${category.charAt(0).toUpperCase() + category.slice(1)} from ${userName}`,
-        message: message.trim(),
+        type: 'feedback',
+        subject: `Note from ${userName}`,
+        message: cleanMsg,
         status: 'open',
         metadata: {
           submitted_at: new Date().toISOString(),
@@ -70,228 +61,108 @@ export default function SupportDrawer({
         .from('support_tickets')
         .insert([ticketPayload]);
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       setIsSuccess(true);
-      setSubject('');
-      setMessage('');
+      setTimeout(() => {
+        onClose();
+      }, 1400);
     } catch (err) {
-      console.error('Error submitting support ticket:', err);
-      setErrorMsg(err.message || 'Failed to submit your query. Please try again or reach out via Email/WhatsApp.');
+      console.error('Error submitting feedback note:', err);
+      setErrorMsg(err.message || 'Failed to send note. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleReset = () => {
-    setIsSuccess(false);
-    setErrorMsg('');
-    setSubject('');
-    setMessage('');
+  const handleKeyDown = (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      handleSend();
+    }
   };
-
-  // WhatsApp click handler
-  const waMessage = encodeURIComponent(
-    `Hi Pranav, reaching out from SimpleCRM regarding ${category === 'suggestion' ? 'a feature suggestion' : category === 'support' ? 'a support issue' : 'a query'}.\n\nFrom: ${userName} (${userEmail})`
-  );
-  const waUrl = `https://api.whatsapp.com/send?text=${waMessage}`;
-
-  // Mailto click handler
-  const mailSubject = encodeURIComponent(`SimpleCRM [${category.toUpperCase()}]: ${subject.trim() || 'User Query'}`);
-  const mailBody = encodeURIComponent(`Hi Pranav,\n\nI have a ${category} regarding SimpleCRM:\n\nUser: ${userName}\nEmail: ${userEmail}\n\n---\n`);
-  const mailtoUrl = `mailto:pranav.p@capoasis.com?subject=${mailSubject}&body=${mailBody}`;
 
   return (
     <>
-      <div className="support-backdrop" onClick={onClose} aria-hidden="true" />
-      <aside className="support-drawer-panel" role="dialog" aria-label="Support & Help Hub">
-        {/* Header */}
-        <div className="support-drawer-header">
-          <div className="support-header-top-row">
-            <div className="support-title-group">
-              <div className="support-icon-badge">
-                <Headphones size={17} strokeWidth={2} />
-              </div>
-              <h2>Help & Feedback</h2>
+      <div className="support-modal-backdrop" onClick={onClose} aria-hidden="true" />
+      <div className="support-modal-dialog" role="dialog" aria-label="Feedback & Support">
+        <div className="support-modal-header">
+          <div className="support-modal-title-group">
+            <div className="support-modal-icon-badge">
+              <MessageSquare size={16} strokeWidth={2} />
             </div>
-            <button
-              type="button"
-              className="support-close-btn"
-              onClick={onClose}
-              aria-label="Close support drawer"
-            >
-              <X size={17} strokeWidth={2} />
-            </button>
+            <div>
+              <h2 className="support-modal-title">Feedback & Support</h2>
+              <p className="support-modal-subtitle">Send a direct note, suggestion, or bug report to Pranav.</p>
+            </div>
           </div>
-          <p className="support-subtitle">
-            Connect directly with Pranav for support, queries, or feature suggestions.
-          </p>
+          <button
+            type="button"
+            className="support-modal-close-btn"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <X size={17} strokeWidth={2} />
+          </button>
         </div>
 
-        {/* Content Body */}
-        <div className="support-drawer-body">
-          {/* Quick Direct Connect Options */}
-          <div>
-            <div className="support-section-label">
-              <MessageCircle size={13} strokeWidth={2} />
-              <span>Direct Channels</span>
-            </div>
-            <div className="support-channels-grid">
-              <a
-                href={waUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="support-channel-card whatsapp"
-                title="Open WhatsApp chat directly"
-              >
-                <div className="support-channel-icon-wrap whatsapp">
-                  <MessageCircle size={16} strokeWidth={2} />
-                </div>
-                <div className="support-channel-content">
-                  <span className="support-channel-title">
-                    WhatsApp
-                    <ArrowUpRight size={12} strokeWidth={2} />
-                  </span>
-                  <span className="support-channel-desc">Instant Chat</span>
-                </div>
-              </a>
-
-              <a
-                href={mailtoUrl}
-                className="support-channel-card email"
-                title="Send email directly to pranav.p@capoasis.com"
-              >
-                <div className="support-channel-icon-wrap email">
-                  <Mail size={16} strokeWidth={2} />
-                </div>
-                <div className="support-channel-content">
-                  <span className="support-channel-title">
-                    Email
-                    <ArrowUpRight size={12} strokeWidth={2} />
-                  </span>
-                  <span className="support-channel-desc">pranav.p@capoasis.com</span>
-                </div>
-              </a>
-            </div>
+        {isSuccess ? (
+          <div className="support-modal-success">
+            <CheckCircle2 size={32} strokeWidth={2.2} className="support-success-icon" />
+            <h3 className="support-success-heading">Note Sent</h3>
+            <p className="support-success-subheading">Thank you! Your note has been delivered directly to Pranav.</p>
           </div>
-
-          {/* In-App Form */}
-          {isSuccess ? (
-            <div className="support-success-container">
-              <div className="support-success-icon-wrap">
-                <CheckCircle2 size={28} strokeWidth={2.2} />
+        ) : (
+          <form onSubmit={handleSend} className="support-modal-form">
+            <div className="support-modal-body">
+              <textarea
+                ref={textareaRef}
+                className="support-modal-textarea"
+                placeholder="What's on your mind? Found a bug or have an idea? Type here..."
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={4}
+                maxLength={2000}
+                disabled={isSubmitting}
+              />
+              {errorMsg && <div className="support-modal-error">{errorMsg}</div>}
+              <div className="support-modal-meta">
+                <span className="support-modal-sender">From {userName} ({userEmail})</span>
+                <span className="support-modal-hint">Press ⌘+Enter to send</span>
               </div>
-              <h3 className="support-success-title">Query Received!</h3>
-              <p className="support-success-desc">
-                Thank you, <strong>{userName}</strong>. Your message has been logged directly in the system. Pranav will review it shortly.
-              </p>
+            </div>
+
+            <div className="support-modal-footer">
               <button
                 type="button"
-                className="support-secondary-btn"
-                onClick={handleReset}
+                className="support-btn-cancel"
+                onClick={onClose}
+                disabled={isSubmitting}
               >
-                Submit another query
+                Cancel
               </button>
-            </div>
-          ) : (
-            <form onSubmit={handleSendQuery} className="support-form-container">
-              <div>
-                <div className="support-section-label">
-                  <Sparkles size={13} strokeWidth={2} />
-                  <span>Send In-App Message</span>
-                </div>
-                <div className="support-type-pills">
-                  {CATEGORIES.map((cat) => {
-                    const IconComponent = cat.icon;
-                    const isActive = category === cat.id;
-                    return (
-                      <button
-                        type="button"
-                        key={cat.id}
-                        className={`support-type-pill ${isActive ? 'active' : ''}`}
-                        onClick={() => setCategory(cat.id)}
-                      >
-                        <IconComponent size={13} strokeWidth={isActive ? 2 : 1.75} />
-                        <span>{cat.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="support-field-group">
-                <label className="support-field-label" htmlFor="support-subject">
-                  Topic / Subject
-                </label>
-                <input
-                  id="support-subject"
-                  type="text"
-                  className="support-input"
-                  placeholder={
-                    category === 'suggestion'
-                      ? 'e.g., WhatsApp automated follow-ups'
-                      : category === 'support'
-                      ? 'e.g., Lead export CSV formatting'
-                      : 'e.g., Cold discovery sweep configuration'
-                  }
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                  maxLength={120}
-                />
-              </div>
-
-              <div className="support-field-group">
-                <div className="support-field-label">
-                  <label htmlFor="support-message">Message / Details</label>
-                  <span className="support-char-counter">{message.length}/1000</span>
-                </div>
-                <textarea
-                  id="support-message"
-                  className="support-textarea"
-                  placeholder={
-                    category === 'suggestion'
-                      ? 'Describe your idea or what feature you would love to see added...'
-                      : category === 'support'
-                      ? 'Explain what happened or what assistance you need...'
-                      : 'Ask your question or share your feedback...'
-                  }
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value.slice(0, 1000))}
-                  rows={4}
-                  required
-                />
-              </div>
-
-              {errorMsg && (
-                <div style={{ fontSize: 12, color: '#ef4444', marginTop: -4 }}>
-                  {errorMsg}
-                </div>
-              )}
-
               <button
                 type="submit"
-                className="support-submit-btn"
+                className="support-btn-send"
                 disabled={isSubmitting || !message.trim()}
               >
                 {isSubmitting ? (
                   <>
-                    <Loader2 size={15} className="spinner" />
+                    <Loader2 size={14} className="support-spinner" />
                     <span>Sending...</span>
                   </>
                 ) : (
                   <>
-                    <Send size={14} strokeWidth={2} />
-                    <span>Send to Pranav</span>
+                    <Send size={13} strokeWidth={2} />
+                    <span>Send Note</span>
                   </>
                 )}
               </button>
-            </form>
-          )}
-        </div>
-      </aside>
+            </div>
+          </form>
+        )}
+      </div>
     </>
   );
 }
-
