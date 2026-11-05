@@ -36,15 +36,25 @@ export function extractRatingAndReviews(text = '', index = 0) {
  * Free Layer: Queries OpenStreetMap Nominatim for exact physical venues, street addresses, and categories
  */
 async function fetchNominatimPlaces({ query = '', location = 'Bengaluru', country = 'India', count = 10 }) {
+  let effectiveLocation = (location || '').trim();
+  const effectiveCountry = (country || '').trim();
+
+  // If user has an abstract AI placeholder like "Major Metros", resolve to primary commercial metro
+  if (!effectiveLocation || /major metros|regional hubs|all regions|worldwide|global/i.test(effectiveLocation)) {
+    if (/united states|usa|us/i.test(effectiveCountry)) effectiveLocation = 'New York';
+    else if (/united kingdom|uk/i.test(effectiveCountry)) effectiveLocation = 'London';
+    else effectiveLocation = 'Bengaluru';
+  }
+
   const cleanQ = (query || '').trim().replace(/[,\-_]/g, ' ');
   const singularQ = cleanQ.replace(/ies\b/gi, 'y').replace(/s\b/gi, '');
 
+  // Must always anchor with effectiveLocation to prevent random global matches
   const queryCandidates = Array.from(new Set([
-    `${singularQ} ${location}`.trim(),
-    `${cleanQ} ${location}`.trim(),
-    `${cleanQ} in ${location}`.trim(),
-    `${cleanQ} ${location} ${country}`.trim(),
-    cleanQ
+    `${singularQ} ${effectiveLocation}`.trim(),
+    `${cleanQ} ${effectiveLocation}`.trim(),
+    `${cleanQ} in ${effectiveLocation}`.trim(),
+    `${cleanQ} ${effectiveLocation} ${effectiveCountry}`.trim()
   ])).filter(Boolean);
 
   for (const q of queryCandidates) {
