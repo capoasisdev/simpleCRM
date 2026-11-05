@@ -85,13 +85,13 @@ const DEFAULT_DISCOVERY_CONFIG = {
   schedule_days: [1, 2, 3, 4, 5], // 1=Mon .. 6=Sat, 0=Sun
   schedule_cadence: 'weekdays',
   schedule_time: '09:00',
-  sources: ['google_places'],
-  source: 'google_places',
+  sources: ['apollo'],
+  source: 'apollo',
   target_countries: ['India'],
   target_regions: ['Bengaluru'],
-  target_industries: ['Real Estate Agencies'],
-  target_company_sizes: [],
-  target_roles: [],
+  target_industries: ['Information Technology & Services'],
+  target_company_sizes: ['11–50', '51–200'],
+  target_roles: ['Founder', 'CEO', 'Managing Director', 'Owner'],
   target_personas: [],
   target_interests: [],
   search_queries: [],
@@ -100,7 +100,6 @@ const DEFAULT_DISCOVERY_CONFIG = {
   location: '',
   industry: '',
   webhook_url: '',
-  google_maps_api_key: '',
   batch_size: 25,
   drip_buffer: [],
   dedupe: DEFAULT_DEDUPE_RULES,
@@ -111,10 +110,10 @@ const DEFAULT_DISCOVERY_CONFIG = {
 
 export const B2B_DISCOVERY_SOURCES = [
   {
-    id: 'google_places',
-    name: 'Google Places & Local Business Directory',
-    tag: 'Verified Offices, Shops, Agencies & Commercial Centers',
-    icon: Compass
+    id: 'apollo',
+    name: 'Apollo.io B2B Intelligence',
+    tag: 'Verified Founders, Owners & Decision Makers',
+    icon: Users
   },
   {
     id: 'webhook',
@@ -128,12 +127,7 @@ export const DISCOVERY_SOURCES = B2B_DISCOVERY_SOURCES;
 
 const getSourceShortName = (source) => {
   if (!source) return '';
-  if (source.id === 'reddit') return 'Reddit';
-  if (source.id === 'quora') return 'Quora';
-  if (source.id === 'instagram') return 'Instagram';
-  if (source.id === 'linkedin') return 'LinkedIn';
-  if (source.id === 'web_discovery') return 'Forums & Reviews';
-  if (source.id === 'clutch') return 'Clutch';
+  if (source.id === 'apollo') return 'Apollo.io';
   if (source.id === 'google_places') return 'Google Maps';
   if (source.id === 'webhook') return 'Webhook';
   return source.name;
@@ -1294,7 +1288,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     if (config?.source) {
       return [config.source];
     }
-    return ['google_places'];
+    return ['apollo'];
   };
 
   const handleToggleDiscoverySource = (sourceId) => {
@@ -1312,7 +1306,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     const next = {
       ...(discoveryConfig || DEFAULT_DISCOVERY_CONFIG),
       sources: updated,
-      source: updated[0] || 'google_places'
+      source: updated[0] || 'apollo'
     };
     setDiscoveryConfig(next);
     saveDiscoveryPayload(next);
@@ -2823,32 +2817,97 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                   </div>
                 )}
 
-                {/* 4. Target Countries (Cold Discovery) */}
+                {/* 4. Target Roles & Titles (Cold Discovery) */}
                 {pipelineType === 'cold' && (
                   <div className="pipeline-prop-row">
                     <div className="pipeline-prop-label-col">
                       <div className="pipeline-prop-icon">
-                        <Globe size={20} />
+                        <Briefcase size={20} />
                       </div>
-                      <span className="pipeline-prop-name">Target Countries</span>
+                      <span className="pipeline-prop-name">Target Roles & Titles</span>
                     </div>
                     <div className="pipeline-prop-value-col">
                       <PillArrayInput
-                        value={getDiscoveryArray(discoveryConfig, 'target_countries', null)}
-                        onChange={(arr) => handleDiscoveryArrayChange('target_countries', null, arr)}
-                        placeholder="+ add country (e.g. India)..."
+                        value={getDiscoveryArray(discoveryConfig, 'target_roles', 'role')}
+                        onChange={(arr) => handleDiscoveryArrayChange('target_roles', 'role', arr)}
+                        placeholder="+ add role (e.g. Founder, CEO, Director)..."
                         disabled={!canEdit}
                       />
                     </div>
                     <div className="pipeline-prop-action-col">
-                      <button type="button" className="pipeline-prop-action-btn" title="Add country">
-                        <ChevronDown size={18} />
+                      <button type="button" className="pipeline-prop-action-btn" title="Add role">
+                        <Edit2 size={18} />
                       </button>
                     </div>
                   </div>
                 )}
 
-                {/* 5. Target Cities & Regions (Cold Discovery) */}
+                {/* 5. Company Size (Cold Discovery) */}
+                {pipelineType === 'cold' && (
+                  <div className="pipeline-prop-row">
+                    <div className="pipeline-prop-label-col">
+                      <div className="pipeline-prop-icon">
+                        <Users size={20} />
+                      </div>
+                      <span className="pipeline-prop-name">Company Size</span>
+                    </div>
+                    <div className="pipeline-prop-value-col">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        {COMPANY_SIZE_OPTIONS.map((size) => {
+                          const isSelected = Array.isArray(discoveryConfig?.target_company_sizes) && discoveryConfig.target_company_sizes.includes(size);
+                          return (
+                            <button
+                              key={size}
+                              type="button"
+                              className={`pipeline-prop-pill ${isSelected ? 'is-active' : ''}`}
+                              style={{
+                                background: isSelected ? '#0f172a' : '#f1f5f9',
+                                color: isSelected ? '#ffffff' : '#0f172a',
+                                cursor: canEdit ? 'pointer' : 'default',
+                                border: 'none'
+                              }}
+                              onClick={() => canEdit && handleCompanySizeToggle(size)}
+                            >
+                              {size}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="pipeline-prop-action-col">
+                      <button type="button" className="pipeline-prop-action-btn" title="Edit company size">
+                        <Edit2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 6. Target Categories & Industries (Cold Discovery) */}
+                {pipelineType === 'cold' && (
+                  <div className="pipeline-prop-row">
+                    <div className="pipeline-prop-label-col">
+                      <div className="pipeline-prop-icon">
+                        <Building2 size={20} />
+                      </div>
+                      <span className="pipeline-prop-name">Target Categories</span>
+                    </div>
+                    <div className="pipeline-prop-value-col">
+                      <PillArrayInput
+                        value={getDiscoveryArray(discoveryConfig, 'target_industries', 'industry')}
+                        onChange={(arr) => handleDiscoveryArrayChange('target_industries', 'industry', arr)}
+                        placeholder="+ add business category (e.g. Real Estate, Software)..."
+                        disabled={!canEdit}
+                      />
+                    </div>
+                    <div className="pipeline-prop-action-col">
+                      <button type="button" className="pipeline-prop-action-btn" title="Add category">
+                        <Edit2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 7. Target Cities & Regions (Cold Discovery) */}
                 {pipelineType === 'cold' && (
                   <div className="pipeline-prop-row">
                     <div className="pipeline-prop-label-col">
@@ -2873,32 +2932,32 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                   </div>
                 )}
 
-                {/* 6. Target Categories & Industries (Cold Discovery) */}
+                {/* 8. Target Countries (Cold Discovery) */}
                 {pipelineType === 'cold' && (
                   <div className="pipeline-prop-row">
                     <div className="pipeline-prop-label-col">
                       <div className="pipeline-prop-icon">
-                        <Building2 size={20} />
+                        <Globe size={20} />
                       </div>
-                      <span className="pipeline-prop-name">Target Categories</span>
+                      <span className="pipeline-prop-name">Target Countries</span>
                     </div>
                     <div className="pipeline-prop-value-col">
                       <PillArrayInput
-                        value={getDiscoveryArray(discoveryConfig, 'target_industries', 'industry')}
-                        onChange={(arr) => handleDiscoveryArrayChange('target_industries', 'industry', arr)}
-                        placeholder="+ add business category (e.g. Real Estate Agencies)..."
+                        value={getDiscoveryArray(discoveryConfig, 'target_countries', null)}
+                        onChange={(arr) => handleDiscoveryArrayChange('target_countries', null, arr)}
+                        placeholder="+ add country (e.g. India)..."
                         disabled={!canEdit}
                       />
                     </div>
                     <div className="pipeline-prop-action-col">
-                      <button type="button" className="pipeline-prop-action-btn" title="Add category">
-                        <Edit2 size={18} />
+                      <button type="button" className="pipeline-prop-action-btn" title="Add country">
+                        <ChevronDown size={18} />
                       </button>
                     </div>
                   </div>
                 )}
 
-                {/* 7. Search Keywords (Cold Discovery) */}
+                {/* 9. Search Keywords (Cold Discovery) */}
                 {pipelineType === 'cold' && (
                   <div className="pipeline-prop-row">
                     <div className="pipeline-prop-label-col">
@@ -2923,7 +2982,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                   </div>
                 )}
 
-                {/* 8. Webhook URL (if selected) */}
+                {/* 10. Webhook URL (if selected) */}
                 {pipelineType === 'cold' && getDiscoverySources(discoveryConfig).includes('webhook') && (
                   <div className="pipeline-prop-row">
                     <div className="pipeline-prop-label-col">
@@ -2946,35 +3005,6 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                     </div>
                     <div className="pipeline-prop-action-col">
                       <button type="button" className="pipeline-prop-action-btn" title="Edit webhook URL">
-                        <Edit2 size={18} />
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* 9. Optional Google Maps API Key */}
-                {pipelineType === 'cold' && (
-                  <div className="pipeline-prop-row">
-                    <div className="pipeline-prop-label-col">
-                      <div className="pipeline-prop-icon">
-                        <Compass size={20} />
-                      </div>
-                      <span className="pipeline-prop-name">Google Maps Key</span>
-                    </div>
-                    <div className="pipeline-prop-value-col">
-                      <input
-                        type="password"
-                        className="pipeline-prop-input"
-                        placeholder="Optional (leave blank for built-in zero-cost web engine)"
-                        value={discoveryConfig?.google_maps_api_key || ''}
-                        onChange={(e) => handleDiscoveryTextChange('google_maps_api_key', e.target.value)}
-                        onBlur={handleDiscoveryBlur}
-                        onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
-                        readOnly={!canEdit}
-                      />
-                    </div>
-                    <div className="pipeline-prop-action-col">
-                      <button type="button" className="pipeline-prop-action-btn" title="Edit Google Maps API key">
                         <Edit2 size={18} />
                       </button>
                     </div>

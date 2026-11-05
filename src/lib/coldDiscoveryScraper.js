@@ -12,21 +12,29 @@ import {
   buildEnrichmentPatch,
   DEFAULT_DEDUPE_RULES
 } from './coldDeduplication.js';
-import { fetchGooglePlacesCandidates } from './googlePlacesDiscovery.js';
+import { fetchApolloCandidates } from './apolloDiscovery.js';
 import { scoreCandidateBatch } from './leadAiScorer.js';
 
 /**
  * Evaluates whether a discovery configuration has at least one valid targeting criterion specified.
- * Supports Lead Drip Buffer or Category/Location criteria.
+ * Supports Lead Drip Buffer, Roles, Categories, Locations, or Queries.
  */
 export function hasDiscoveryTargetingCriteria(config) {
   if (!config) return false;
   if (Array.isArray(config.drip_buffer) && config.drip_buffer.length > 0) return true;
 
+  const hasRole = Boolean(
+    config.role?.trim() ||
+    (Array.isArray(config.target_roles) && config.target_roles.length > 0)
+  );
+
+  const hasIndustry = Boolean(
+    config.industry?.trim() ||
+    (Array.isArray(config.target_industries) && config.target_industries.length > 0)
+  );
+
   const hasQuery = Boolean(
     config.search_query?.trim() ||
-    config.industry?.trim() ||
-    (Array.isArray(config.target_industries) && config.target_industries.length > 0) ||
     (Array.isArray(config.search_queries) && config.search_queries.length > 0)
   );
 
@@ -39,7 +47,7 @@ export function hasDiscoveryTargetingCriteria(config) {
     (Array.isArray(config.target_locations) && config.target_locations.length > 0)
   );
 
-  return hasQuery || hasLocation;
+  return hasRole || hasIndustry || hasQuery || hasLocation;
 }
 
 /**
@@ -102,32 +110,21 @@ export async function fetchLiveDiscoveryCandidates(config, count = 15) {
       const webhookCandidates = await fetchWebhookDiscoveryCandidates(config.webhook_url, config, count);
       if (webhookCandidates.length > 0) return webhookCandidates;
     } catch (err) {
-      console.warn('[Discovery Webhook Failed, falling back to Google Places directory]:', err);
+      console.warn('[Discovery Webhook Failed, proceeding with Apollo B2B directory]:', err);
     }
   }
 
-  // 2. Google Places & Local Business Directory Discovery (Real, Verified Establishments)
-  const searchCategory = (config.target_industries && config.target_industries[0]) || config.search_query || config.industry || 'Commercial Businesses';
-  const searchLocation = (config.target_regions && config.target_regions[0]) || config.location || 'Bengaluru';
-  const searchCountry = (config.target_countries && config.target_countries[0]) || config.country || 'India';
-
+  // 2. Direct Apollo.io B2B Intelligence Discovery
   try {
-    const places = await fetchGooglePlacesCandidates({
-      query: searchCategory,
-      location: searchLocation,
-      country: searchCountry,
-      count,
-      apiKey: config.google_maps_api_key || ''
-    });
-
-    if (Array.isArray(places) && places.length > 0) {
-      return scoreCandidateBatch({ candidates: places, pipelineConfig: config });
+    const apolloCandidates = await fetchApolloCandidates({ config, count });
+    if (Array.isArray(apolloCandidates) && apolloCandidates.length > 0) {
+      return await scoreCandidateBatch({ candidates: apolloCandidates, pipelineConfig: config });
     }
+    return apolloCandidates || [];
   } catch (err) {
-    console.warn('[Google Places Discovery Failed]:', err);
+    console.error('[Apollo Discovery Execution Error]:', err);
+    throw err;
   }
-
-  return [];
 }
 
 /**

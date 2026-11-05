@@ -59,6 +59,25 @@ export default defineConfig({
             }
           });
         }
+      },
+      '/api/apollo': {
+        target: 'https://api.apollo.io',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/apollo/, ''),
+        secure: true,
+        configure: (proxy) => {
+          proxy.on('error', (err, _req, res) => {
+            console.error('[Vite Proxy] Apollo upstream error:', err.message);
+            if (res && typeof res.writeHead === 'function' && !res.headersSent) {
+              res.writeHead(502, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                statusCode: 502,
+                name: 'proxy_upstream_error',
+                message: `Proxy failed to connect to Apollo: ${err.message}`
+              }));
+            }
+          });
+        }
       }
     }
   }

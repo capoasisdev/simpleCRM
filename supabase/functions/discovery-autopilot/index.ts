@@ -48,58 +48,93 @@ async function verifyDomainDoH(domain: string): Promise<{ isValid: boolean; prov
 }
 
 /**
- * Fetches real local businesses from OpenStreetMap Nominatim with extratags
+ * Fetches real B2B decision makers from Apollo.io API
  * ZERO FAKE DATA GUARANTEE: If a phone or email is not publicly published, it is left as "" (empty string).
  */
-async function fetchDirectoryBusinesses(query: string, location: string, country: string, count = 25) {
+async function fetchApolloBusinesses(config: any, count = 25) {
+  const apiKey = Deno.env.get("APOLLO_API_KEY") || Deno.env.get("VITE_APOLLO_API_KEY");
+  if (!apiKey) {
+    console.warn("[Autopilot] APOLLO_API_KEY environment variable is not configured.");
+    return [];
+  }
+
+  const roles = Array.isArray(config.target_roles) && config.target_roles.length > 0
+    ? config.target_roles
+    : (config.role ? [config.role] : ["Founder", "Co-Founder", "Owner", "Chief Executive Officer", "Managing Director"]);
+
+  const locations = Array.from(new Set([
+    ...(Array.isArray(config.target_regions) ? config.target_regions : []),
+    ...(Array.isArray(config.target_countries) ? config.target_countries : []),
+    config.location,
+    config.country
+  ])).filter(Boolean);
+
+  const industries = Array.from(new Set([
+    ...(Array.isArray(config.target_industries) ? config.target_industries : []),
+    config.industry
+  ])).filter(Boolean);
+
   try {
-    const searchQuery = `${query || 'business'} in ${location || 'Bengaluru'}, ${country || 'India'}`.trim();
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&addressdetails=1&extratags=1&limit=${count}`;
-    const res = await fetch(url, {
-      method: "GET",
+    const res = await fetch("https://api.apollo.io/v1/mixed_people/search", {
+      method: "POST",
       headers: {
-        "Accept": "application/json",
-        "User-Agent": "SimpleCRM-CloudAutopilot/1.0"
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        "X-Api-Key": apiKey
       },
-      signal: AbortSignal.timeout(6000)
+      body: JSON.stringify({
+        api_key: apiKey,
+        page: 1,
+        per_page: Math.min(count, 50),
+        person_titles: roles,
+        ...(locations.length > 0 ? { person_locations: locations } : {}),
+        ...(industries.length > 0 ? { q_organization_keyword_tags: industries } : {})
+      }),
+      signal: AbortSignal.timeout(10000)
     });
 
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data.map((item: any) => {
-          const addr = item.address || {};
-          const street = [addr.house_number, addr.road, addr.neighbourhood, addr.suburb].filter(Boolean).join(", ");
-          const city = addr.city || addr.town || addr.city_district || addr.county || location || "Bengaluru";
-          const state = addr.state || "";
-          const postcode = addr.postcode || "";
-          const fullAddress = [street, city, postcode, state, country].filter(Boolean).join(", ");
-          const category = (item.type || item.class || "Commercial Office")
-            .replace(/_/g, " ")
-            .replace(/\b\w/g, (c: string) => c.toUpperCase());
+      const people = Array.isArray(data.people) ? data.people : [];
+      return people.map((p: any) => {
+        const org = p.organization || {};
+        const cleanName = (p.name || [p.first_name, p.last_name].filter(Boolean).join(" ") || "Decision Maker").trim();
+        const cleanCompany = (org.name || p.headline?.split(" at ")[1] || "Commercial Enterprise").trim();
+        const email = (p.email || "").trim().toLowerCase();
+        const phone = (p.sanitized_phone || p.phone_number || org.sanitized_phone || org.phone || "").trim();
+        const website = (org.primary_domain || org.website_url || "").trim();
+        const designation = (p.title || "Decision Maker").trim();
+        const city = (p.city || org.city || (locations[0] as string || "")).trim();
+        const country = (p.country || org.country || "India").trim();
+        const fullLocation = [city, country].filter(Boolean).join(", ");
 
-          const extratags = item.extratags || {};
-          const phone = extratags.phone || extratags["contact:phone"] || extratags["contact:mobile"] || "";
-          const website = extratags.website || extratags["contact:website"] || extratags.url || "";
-          const email = extratags.email || extratags["contact:email"] || "";
-          const name = item.name || item.display_name?.split(",")[0] || "Local Business";
-
-          return {
-            name,
-            company: name,
-            phone,
-            email,
-            website,
-            address: fullAddress,
-            city,
-            category
-          };
-        });
-      }
+        return {
+          name: cleanName,
+          company: cleanCompany,
+          phone,
+          email,
+          website: website.startsWith("http") ? website : (website ? `https://${website}` : ""),
+          address: fullLocation,
+          city,
+          category: designation,
+          custom_fields: {
+            company: cleanCompany,
+            designation,
+            linkedin_url: p.linkedin_url || "",
+            company_linkedin_url: org.linkedin_url || "",
+            company_size: org.estimated_num_employees ? `${org.estimated_num_employees} employees` : "",
+            location: fullLocation,
+            discovery_source: "apollo",
+            is_verified_email: Boolean(email),
+            is_real_scraped_phone: Boolean(phone)
+          }
+        };
+      });
     }
   } catch (err) {
-    console.warn("[Directory query note]:", err);
+    console.warn("[Autopilot Apollo API error]:", err);
   }
+
   return [];
 }
 
@@ -299,12 +334,8 @@ Deno.serve(async (req) => {
         remainingDripBuffer = dripBuffer.slice(batchSize);
         isFromDripBuffer = true;
       } else {
-        // Query real public business directory
-        const searchLocation = (config.target_regions && config.target_regions[0]) || config.location || "Bengaluru";
-        const searchCountry = (config.target_countries && config.target_countries[0]) || config.country || "India";
-        const searchQuery = config.search_query || (config.target_industries && config.target_industries[0]) || "local business";
-
-        rawCandidates = await fetchDirectoryBusinesses(searchQuery, searchLocation, searchCountry, batchSize * 2);
+        // Query real B2B decision makers via Apollo API
+        rawCandidates = await fetchApolloBusinesses(config, batchSize * 2);
       }
 
       const readyToInsert: any[] = [];
