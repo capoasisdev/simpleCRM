@@ -48,91 +48,89 @@ async function verifyDomainDoH(domain: string): Promise<{ isValid: boolean; prov
 }
 
 /**
- * Fetches real B2B decision makers from Apollo.io API
+ * Fetches real Google Maps businesses from Serper.dev Places API
  * ZERO FAKE DATA GUARANTEE: If a phone or email is not publicly published, it is left as "" (empty string).
  */
-async function fetchApolloBusinesses(config: any, count = 25) {
-  const apiKey = Deno.env.get("APOLLO_API_KEY") || Deno.env.get("VITE_APOLLO_API_KEY");
+async function fetchSerperPlaces(config: any, count = 25) {
+  const apiKey = Deno.env.get("SERPER_API_KEY") || Deno.env.get("VITE_SERPER_API_KEY");
   if (!apiKey) {
-    console.warn("[Autopilot] APOLLO_API_KEY environment variable is not configured.");
+    console.warn("[Autopilot] SERPER_API_KEY environment variable is not configured.");
     return [];
   }
 
-  const roles = Array.isArray(config.target_roles) && config.target_roles.length > 0
-    ? config.target_roles
-    : (config.role ? [config.role] : ["Founder", "Co-Founder", "Owner", "Chief Executive Officer", "Managing Director"]);
+  const searchCategory = (config.target_industries && config.target_industries[0]) ||
+    (config.search_queries && config.search_queries[0]) ||
+    config.search_query ||
+    config.industry ||
+    "Commercial Businesses";
 
-  const locations = Array.from(new Set([
-    ...(Array.isArray(config.target_regions) ? config.target_regions : []),
-    ...(Array.isArray(config.target_countries) ? config.target_countries : []),
-    config.location,
-    config.country
-  ])).filter(Boolean);
+  let searchLocation = (config.target_regions && config.target_regions[0]) || config.location || "Bengaluru";
+  const searchCountry = (config.target_countries && config.target_countries[0]) || config.country || "India";
 
-  const industries = Array.from(new Set([
-    ...(Array.isArray(config.target_industries) ? config.target_industries : []),
-    config.industry
-  ])).filter(Boolean);
+  if (!searchLocation || /major metros|regional hubs|all regions|worldwide|global/i.test(searchLocation)) {
+    if (/united states|usa|us/i.test(searchCountry)) searchLocation = "New York";
+    else if (/united kingdom|uk/i.test(searchCountry)) searchLocation = "London";
+    else searchLocation = "Bengaluru";
+  }
+
+  const fullQuery = `${searchCategory} in ${searchLocation}, ${searchCountry}`.trim();
 
   try {
-    const res = await fetch("https://api.apollo.io/v1/mixed_people/search", {
+    const res = await fetch("https://google.serper.dev/places", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-cache",
-        "X-Api-Key": apiKey
+        "X-API-KEY": apiKey,
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        api_key: apiKey,
-        page: 1,
-        per_page: Math.min(count, 50),
-        person_titles: roles,
-        ...(locations.length > 0 ? { person_locations: locations } : {}),
-        ...(industries.length > 0 ? { q_organization_keyword_tags: industries } : {})
+        q: fullQuery,
+        gl: searchCountry.toLowerCase().includes("us") ? "us" : "in",
+        hl: "en"
       }),
       signal: AbortSignal.timeout(10000)
     });
 
     if (res.ok) {
       const data = await res.json();
-      const people = Array.isArray(data.people) ? data.people : [];
-      return people.map((p: any) => {
-        const org = p.organization || {};
-        const cleanName = (p.name || [p.first_name, p.last_name].filter(Boolean).join(" ") || "Decision Maker").trim();
-        const cleanCompany = (org.name || p.headline?.split(" at ")[1] || "Commercial Enterprise").trim();
-        const email = (p.email || "").trim().toLowerCase();
-        const phone = (p.sanitized_phone || p.phone_number || org.sanitized_phone || org.phone || "").trim();
-        const website = (org.primary_domain || org.website_url || "").trim();
-        const designation = (p.title || "Decision Maker").trim();
-        const city = (p.city || org.city || (locations[0] as string || "")).trim();
-        const country = (p.country || org.country || "India").trim();
-        const fullLocation = [city, country].filter(Boolean).join(", ");
+      const places = Array.isArray(data.places) ? data.places : [];
+      return places.map((p: any) => {
+        const cleanTitle = (p.title || "Local Business").trim();
+        const cleanAddress = (p.address || `${searchLocation}, ${searchCountry}`).trim();
+        const phone = (p.phoneNumber || "").trim();
+        const website = (p.website || "").trim();
+        const category = (p.category || searchCategory || "Local Business").trim();
+        const mapsUrl = p.cid
+          ? `https://www.google.com/maps?cid=${p.cid}`
+          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${cleanTitle} ${cleanAddress}`)}`;
 
         return {
-          name: cleanName,
-          company: cleanCompany,
+          name: cleanTitle,
+          company: cleanTitle,
           phone,
-          email,
-          website: website.startsWith("http") ? website : (website ? `https://${website}` : ""),
-          address: fullLocation,
-          city,
-          category: designation,
+          email: "",
+          website,
+          address: cleanAddress,
+          city: searchLocation,
+          category,
           custom_fields: {
-            company: cleanCompany,
-            designation,
-            linkedin_url: p.linkedin_url || "",
-            company_linkedin_url: org.linkedin_url || "",
-            company_size: org.estimated_num_employees ? `${org.estimated_num_employees} employees` : "",
-            location: fullLocation,
-            discovery_source: "apollo",
-            is_verified_email: Boolean(email),
+            company: cleanTitle,
+            designation: "Business Owner / Management",
+            address: cleanAddress,
+            phone,
+            website,
+            rating: p.rating || null,
+            review_count: p.ratingCount || 0,
+            category,
+            google_maps_url: mapsUrl,
+            location: `${searchLocation}, ${searchCountry}`,
+            discovery_source: "google_places",
             is_real_scraped_phone: Boolean(phone)
           }
         };
       });
     }
   } catch (err) {
-    console.warn("[Autopilot Apollo API error]:", err);
+    console.warn("[Autopilot Serper Places error]:", err);
   }
 
   return [];
@@ -334,8 +332,8 @@ Deno.serve(async (req) => {
         remainingDripBuffer = dripBuffer.slice(batchSize);
         isFromDripBuffer = true;
       } else {
-        // Query real B2B decision makers via Apollo API
-        rawCandidates = await fetchApolloBusinesses(config, batchSize * 2);
+        // Query real Google Maps businesses via Serper API
+        rawCandidates = await fetchSerperPlaces(config, batchSize * 2);
       }
 
       const readyToInsert: any[] = [];

@@ -12,7 +12,7 @@ import {
   buildEnrichmentPatch,
   DEFAULT_DEDUPE_RULES
 } from './coldDeduplication.js';
-import { fetchApolloCandidates } from './apolloDiscovery.js';
+import { fetchSerperGooglePlaces } from './serperDiscovery.js';
 import { scoreCandidateBatch } from './leadAiScorer.js';
 
 /**
@@ -110,19 +110,34 @@ export async function fetchLiveDiscoveryCandidates(config, count = 15) {
       const webhookCandidates = await fetchWebhookDiscoveryCandidates(config.webhook_url, config, count);
       if (webhookCandidates.length > 0) return webhookCandidates;
     } catch (err) {
-      console.warn('[Discovery Webhook Failed, proceeding with Apollo B2B directory]:', err);
+      console.warn('[Discovery Webhook Failed, proceeding with Google Places]:', err);
     }
   }
 
-  // 2. Direct Apollo.io B2B Intelligence Discovery
+  // 2. Verified Google Places & Maps Discovery powered by Serper
+  const searchCategory = (config.target_industries && config.target_industries[0]) ||
+    (config.search_queries && config.search_queries[0]) ||
+    config.search_query ||
+    config.industry ||
+    'Commercial Businesses';
+
+  const searchLocation = (config.target_regions && config.target_regions[0]) || config.location || 'Bengaluru';
+  const searchCountry = (config.target_countries && config.target_countries[0]) || config.country || 'India';
+
   try {
-    const apolloCandidates = await fetchApolloCandidates({ config, count });
-    if (Array.isArray(apolloCandidates) && apolloCandidates.length > 0) {
-      return await scoreCandidateBatch({ candidates: apolloCandidates, pipelineConfig: config });
+    const places = await fetchSerperGooglePlaces({
+      query: searchCategory,
+      location: searchLocation,
+      country: searchCountry,
+      count
+    });
+
+    if (Array.isArray(places) && places.length > 0) {
+      return await scoreCandidateBatch({ candidates: places, pipelineConfig: config });
     }
-    return apolloCandidates || [];
+    return places || [];
   } catch (err) {
-    console.error('[Apollo Discovery Execution Error]:', err);
+    console.error('[Google Places Discovery Error]:', err);
     throw err;
   }
 }
