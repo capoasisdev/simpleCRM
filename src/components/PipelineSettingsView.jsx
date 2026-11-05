@@ -1380,14 +1380,12 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         }
       }
 
-      const personaCount = updatedConfig.target_personas?.length || 0;
-      const interestCount = updatedConfig.target_interests?.length || 0;
+      const categoryCount = updatedConfig.target_industries?.length || 0;
       const roleCount = updatedConfig.target_roles?.length || 0;
-      const detailMsg = effectiveMode === 'b2c'
-        ? `${personaCount} personas and ${interestCount} interests`
-        : `${roleCount} roles, ${personaCount} personas, ${interestCount} interests`;
+      const cityCount = updatedConfig.target_regions?.length || 0;
+      const detailMsg = `${categoryCount} categories, ${roleCount} roles, across ${cityCount} cities`;
 
-      setAiPromptFeedback(`Configured ${effectiveMode.toUpperCase()} targeting for "${generated.name}" with ${detailMsg}.`);
+      setAiPromptFeedback(`Configured B2B targeting for "${generated.name}" with ${detailMsg}.`);
       setTimeout(() => setAiPromptFeedback(''), 7000);
       showToast(`✨ Pipeline auto-configured for: "${generated.name}"`);
       setAiPromptInput('');
