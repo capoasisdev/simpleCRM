@@ -3270,7 +3270,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                           />
                         </div>
 
-                        <div className="pipeline-numbered-actions">
+                        <div className="pipeline-numbered-actions pipeline-fields-actions-box">
                           {field.key === 'name' ? (
                             <span
                               className="btn-entry-icon active"
@@ -3290,24 +3290,24 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                             </button>
                           )}
 
-                          <div className="pipeline-arrows-group">
+                          <div className="pipeline-field-reorder-stepper">
                             <button
                               type="button"
-                              className="btn-arrow-standalone"
+                              className="btn-field-stepper-arrow"
                               disabled={!canEdit || idx === 0}
                               onClick={() => handleMoveFieldUp(idx)}
                               data-tooltip="Move up"
                             >
-                              <ChevronUp size={18} strokeWidth={2.25} />
+                              <ChevronUp size={12} strokeWidth={2.4} />
                             </button>
                             <button
                               type="button"
-                              className="btn-arrow-standalone"
+                              className="btn-field-stepper-arrow"
                               disabled={!canEdit || idx === pipelineFields.length - 1}
                               onClick={() => handleMoveFieldDown(idx)}
                               data-tooltip="Move down"
                             >
-                              <ChevronDown size={18} strokeWidth={2.25} />
+                              <ChevronDown size={12} strokeWidth={2.4} />
                             </button>
                           </div>
 
@@ -3388,7 +3388,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                         />
                       </div>
 
-                      <div className="pipeline-numbered-actions">
+                      <div className="pipeline-numbered-actions pipeline-fields-actions-box">
                         <button
                           type="submit"
                           disabled={!newFieldName.trim()}
@@ -3398,13 +3398,6 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                         >
                           <Plus size={17} strokeWidth={2.4} />
                         </button>
-                        <span
-                          className="btn-number-trash"
-                          style={{ visibility: 'hidden', pointerEvents: 'none' }}
-                          aria-hidden="true"
-                        >
-                          <Trash2 size={16} />
-                        </span>
                       </div>
                     </form>
                   )}
