@@ -6,7 +6,7 @@
   background-color: rgba(15, 23, 42, 0.42);
   backdrop-filter: blur(2px);
   z-index: 1050;
-  animation: supportModalFadeIn 0.15s ease-out;
+  animation: supportModalFadeIn 0.2s ease-out forwards;
 }
 
 @keyframes supportModalFadeIn {
@@ -30,13 +30,14 @@
   flex-direction: column;
   overflow: hidden;
   font-family: inherit;
-  animation: supportModalPopIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: supportModalPopIn 0.24s cubic-bezier(0.16, 1, 0.3, 1.05) forwards;
+  will-change: transform, opacity;
 }
 
 @keyframes supportModalPopIn {
   from {
     opacity: 0;
-    transform: translate(-50%, -46%) scale(0.97);
+    transform: translate(-50%, -50%) scale(0.90);
   }
   to {
     opacity: 1;
