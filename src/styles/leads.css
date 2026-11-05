@@ -931,94 +931,95 @@
   color: #a16207;
 }
 
-/* Lead Drawer: Local Business & Location Card */
+/* Lead Drawer: Minimal Google Maps & Location Header */
 .lead-local-business-card {
-  background: linear-gradient(135deg, #f8fafc 0%, #f0fdf4 100%);
-  border: 1px solid #bbf7d0;
-  border-radius: 10px;
-  padding: 13px 15px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-}
-
-.lead-local-card-header {
+  margin: 14px 18px 12px 18px;
+  padding: 10px 14px;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.lead-local-header-left {
-  display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
-  font-size: 13px;
-  font-weight: 650;
-  color: #166534;
-}
-
-.lead-local-map-icon {
-  color: #15803d;
-  flex-shrink: 0;
-}
-
-.lead-local-rating-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: #ffffff;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #854d0e;
-  border: 1px solid #fef08a;
-}
-
-.lead-local-category-tag {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  color: #15803d;
-  background: #dcfce7;
-  padding: 1.5px 7px;
-  border-radius: 4px;
-  margin-bottom: 6px;
-}
-
-.lead-local-address-text {
-  font-size: 12px;
-  line-height: 1.45;
-  color: #334155;
-  margin-bottom: 10px;
-}
-
-.lead-local-actions-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.lead-local-maps-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: #ffffff;
-  border: 1px solid #86efac;
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #166534;
-  text-decoration: none;
-  cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.lead-local-maps-btn:hover {
-  background: #f0fdf4;
-  border-color: #4ade80;
-  color: #14532d;
+.lead-local-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lead-local-address-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+}
+
+.lead-local-map-icon {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.lead-local-address-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lead-local-maps-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #2563eb;
+  text-decoration: none;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.lead-local-maps-link:hover {
+  color: #1d4ed8;
+  background-color: #eff6ff;
+  text-decoration: none;
+}
+
+.lead-local-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.lead-local-category-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: #475569;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  padding: 1px 7px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.lead-local-rating-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: #64748b;
 }
 
 .lead-contact-icon {

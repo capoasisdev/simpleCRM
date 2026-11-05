@@ -2422,18 +2422,6 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
                 <span>{lead.custom_fields.icp_score}%</span>
               </span>
             )}
-            {lead.custom_fields?.rating && (
-              <span
-                className="lead-card-rating-pill"
-                title={`${lead.custom_fields.rating}★ rating on Google Maps (${lead.custom_fields.review_count || 0} reviews)`}
-              >
-                <span className="lead-card-rating-star">⭐</span>
-                <span className="lead-card-rating-num">{lead.custom_fields.rating}</span>
-                {lead.custom_fields.review_count && (
-                  <span className="lead-card-rating-count">({lead.custom_fields.review_count})</span>
-                )}
-              </span>
-            )}
           </div>
 
           {!isFollowUpCol && isAdmin && (
@@ -3785,49 +3773,46 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
                   </div>
                 )}
 
-                {/* Local Business & Google Maps Location Panel */}
-                {selectedLead.custom_fields && (selectedLead.custom_fields.is_local_business || selectedLead.custom_fields.google_maps_url || selectedLead.custom_fields.rating) && (
+                {/* Minimal Local Business & Google Maps Location Panel */}
+                {selectedLead.custom_fields && (selectedLead.custom_fields.is_local_business || selectedLead.custom_fields.google_maps_url || selectedLead.custom_fields.address || selectedLead.custom_fields.rating) && (
                   <div className="lead-local-business-card">
-                    <div className="lead-local-card-header">
-                      <div className="lead-local-header-left">
-                        <MapPin size={15} className="lead-local-map-icon" />
-                        <span>Google Maps & Local Presence</span>
+                    <div className="lead-local-top-row">
+                      <div className="lead-local-address-wrap">
+                        <MapPin size={14} strokeWidth={2} className="lead-local-map-icon" />
+                        <span className="lead-local-address-text" title={selectedLead.custom_fields.address || selectedLead.city || 'Google Maps Listing'}>
+                          {selectedLead.custom_fields.address || `${selectedLead.city || 'Local Business'}, ${selectedLead.custom_fields.country || ''}`.trim() || 'Google Maps Listing'}
+                        </span>
                       </div>
-                      {selectedLead.custom_fields.rating && (
-                        <div className="lead-local-rating-badge">
-                          <span>⭐ {selectedLead.custom_fields.rating}</span>
-                          {selectedLead.custom_fields.review_count && (
-                            <span style={{ opacity: 0.85, fontWeight: 500 }}>
-                              ({selectedLead.custom_fields.review_count} reviews)
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {selectedLead.custom_fields.category && (
-                      <div className="lead-local-category-tag">
-                        {selectedLead.custom_fields.category}
-                      </div>
-                    )}
-
-                    {selectedLead.custom_fields.address && (
-                      <div className="lead-local-address-text">
-                        {selectedLead.custom_fields.address}
-                      </div>
-                    )}
-
-                    {selectedLead.custom_fields.google_maps_url && (
-                      <div className="lead-local-actions-row">
+                      {selectedLead.custom_fields.google_maps_url && (
                         <a
                           href={selectedLead.custom_fields.google_maps_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="lead-local-maps-btn"
+                          className="lead-local-maps-link"
+                          title="Open location on Google Maps"
                         >
-                          <span>Open on Google Maps</span>
+                          <span>Open in Maps</span>
                           <ArrowUpRight size={13} />
                         </a>
+                      )}
+                    </div>
+
+                    {(selectedLead.custom_fields.category || selectedLead.custom_fields.rating) && (
+                      <div className="lead-local-meta-row">
+                        {selectedLead.custom_fields.category && (
+                          <span className="lead-local-category-tag">
+                            {selectedLead.custom_fields.category}
+                          </span>
+                        )}
+                        {selectedLead.custom_fields.rating && (
+                          <span className="lead-local-rating-text">
+                            <span style={{ color: '#eab308' }}>★</span>
+                            <span style={{ fontWeight: 600, color: '#0f172a' }}>{selectedLead.custom_fields.rating}</span>
+                            {selectedLead.custom_fields.review_count && (
+                              <span style={{ color: '#64748b' }}>({selectedLead.custom_fields.review_count} reviews)</span>
+                            )}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
