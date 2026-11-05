@@ -40,7 +40,7 @@ import {
   Wallet,
   CreditCard,
   Compass,
-  Headphones
+  Headset
 } from 'lucide-react';
 import ProspectingView from './ProspectingView';
 import { checkAndRunDiscoveryAutopilot } from '../lib/coldDiscoveryScraper';
@@ -1105,7 +1105,7 @@ export default function DashboardView({ currentUser, onLogout }) {
             onClick={() => setIsSupportDrawerOpen(true)}
             title="Help, Suggestions & Support"
           >
-            <Headphones size={18} strokeWidth={1.5} />
+            <Headset size={18} strokeWidth={1.5} />
           </button>
 
           <button
@@ -2075,7 +2075,7 @@ export default function DashboardView({ currentUser, onLogout }) {
               role="menuitem"
             >
               <div className="mobile-more-icon-wrap">
-                <Headphones size={18} strokeWidth={1.75} />
+                <Headset size={18} strokeWidth={1.75} />
               </div>
               <span>Help & Support</span>
             </button>

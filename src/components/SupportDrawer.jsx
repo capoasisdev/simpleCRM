@@ -270,7 +270,8 @@ export default function SupportDrawer({
               <textarea
                 ref={textareaRef}
                 className="support-modal-textarea"
-                placeholder="What's on your mind? Found a bug or have an idea? Type here... (Paste screenshots with ⌘+V)"
+                placeholder="What's on your mind?
+Send a direct note, suggestion, or bug report to Developers."
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onPaste={handlePaste}
