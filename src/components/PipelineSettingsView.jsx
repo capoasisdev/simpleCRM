@@ -1773,6 +1773,26 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     showToast(`Removed field "${target?.label || fieldKey}"`);
   };
 
+  const handleMoveFieldUp = (index) => {
+    if (index <= 0) return;
+    const copy = [...pipelineFields];
+    const temp = copy[index - 1];
+    copy[index - 1] = copy[index];
+    copy[index] = temp;
+    setPipelineFields(copy);
+    savePipelineFields(copy);
+  };
+
+  const handleMoveFieldDown = (index) => {
+    if (index >= pipelineFields.length - 1) return;
+    const copy = [...pipelineFields];
+    const temp = copy[index + 1];
+    copy[index + 1] = copy[index];
+    copy[index] = temp;
+    setPipelineFields(copy);
+    savePipelineFields(copy);
+  };
+
   const savePipelineFields = async (updated) => {
     if (!editingPipelineId) return;
     try {
@@ -3269,6 +3289,27 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
                               <CreditCard size={17} strokeWidth={2.2} />
                             </button>
                           )}
+
+                          <div className="pipeline-arrows-group">
+                            <button
+                              type="button"
+                              className="btn-arrow-standalone"
+                              disabled={!canEdit || idx === 0}
+                              onClick={() => handleMoveFieldUp(idx)}
+                              data-tooltip="Move up"
+                            >
+                              <ChevronUp size={18} strokeWidth={2.25} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-arrow-standalone"
+                              disabled={!canEdit || idx === pipelineFields.length - 1}
+                              onClick={() => handleMoveFieldDown(idx)}
+                              data-tooltip="Move down"
+                            >
+                              <ChevronDown size={18} strokeWidth={2.25} />
+                            </button>
+                          </div>
 
                           {field.is_core ? (
                             <span
