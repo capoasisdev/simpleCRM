@@ -10,6 +10,7 @@
  */
 
 import { supabase } from './supabase';
+import { getActiveCompanyId, readTenantString, writeTenantString, removeTenantCache } from './tenant';
 import { createStickyNote } from './todos';
 import { recordActivity, getStoredActivities } from './activities';
 import {
@@ -42,7 +43,7 @@ export const OPENROUTER_MODELS = [
 export function getOpenRouterApiKey() {
   try {
     return (
-      localStorage.getItem(OPENROUTER_STORAGE_KEY) ||
+      readTenantString(OPENROUTER_STORAGE_KEY) ||
       import.meta.env.VITE_OPENROUTER_API_KEY ||
       ''
     );
@@ -54,9 +55,9 @@ export function getOpenRouterApiKey() {
 export function setOpenRouterApiKey(key) {
   try {
     if (key) {
-      localStorage.setItem(OPENROUTER_STORAGE_KEY, key.trim());
+      writeTenantString(OPENROUTER_STORAGE_KEY, key.trim());
     } else {
-      localStorage.removeItem(OPENROUTER_STORAGE_KEY);
+      removeTenantCache(OPENROUTER_STORAGE_KEY);
     }
   } catch {}
 }
@@ -159,20 +160,24 @@ export function resolveStageName(stageIdOrName, pipelinesList = []) {
  */
 export async function fetchFullActivities(passedActivities = []) {
   const local = getStoredActivities();
+  const companyId = getActiveCompanyId();
   let dbActivities = [];
 
-  try {
-    const { data, error } = await supabase
-      .from('lead_activities')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(100);
+  if (companyId) {
+    try {
+      const { data, error } = await supabase
+        .from('lead_activities')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(100);
 
-    if (!error && Array.isArray(data)) {
-      dbActivities = data;
+      if (!error && Array.isArray(data)) {
+        dbActivities = data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch lead_activities for AI context:', err);
     }
-  } catch (err) {
-    console.warn('Could not fetch lead_activities for AI context:', err);
   }
 
   const map = new Map();
@@ -744,6 +749,7 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
       };
     }
 
+    const now = Date.now();
     const leadItems = context.staleLeads.map((l) => {
       const days = Math.floor((now - (getLeadTimestamp(l) || now)) / (24 * 60 * 60 * 1000));
       return `• **${l.name || 'Unnamed'}** (${l.phone || 'No phone'}) - ${days} days old in *${resolveStageName(l.stage, pipelinesList)}* [Rep: ${l.assigned_to || 'Unassigned'}]`;
@@ -799,9 +805,9 @@ export function queryLocalCrmEngine(userQuery, { leads = [], deals = [], pipelin
   if (q.includes('draft') || q.includes('message') || q.includes('whatsapp') || q.includes('sms') || q.includes('email')) {
     const foundLead = scopedLeads.find((l) => l.name && q.includes(l.name.toLowerCase())) || scopedLeads[0];
     const leadName = foundLead?.name || 'Valued Client';
-    const repName = currentUser?.name || 'CapOasis Team';
+    const repName = currentUser?.name || 'Sales Team';
 
-    const draftText = `Hi ${leadName},\n\nI hope you're having a productive week! I'm following up on our recent discussion regarding your franchise inquiry with CapOasis.\n\nWe have prepared the detailed feasibility insights and investment overview for you. Would you be available for a brief 10-minute catchup tomorrow to walk through any questions?\n\nBest regards,\n${repName}\nCapOasis`;
+    const draftText = `Hi ${leadName},\n\nI hope you're having a productive week! I'm following up on our recent discussion regarding your inquiry.\n\nWe have prepared the detailed overview for you. Would you be available for a brief 10-minute catchup tomorrow to walk through any questions?\n\nBest regards,\n${repName}`;
 
     return {
       text: `### 📝 Personalized Follow-up Draft\n\nHere is a tailored follow-up message for **${leadName}**:\n\n\`\`\`\n${draftText}\n\`\`\``,
@@ -989,6 +995,14 @@ export async function executeCrmAction(action, { currentUser = {} }) {
         };
       }
 
+      const activeCompanyId = getActiveCompanyId();
+      if (!activeCompanyId) {
+        return {
+          success: false,
+          message: 'Workspace error: No active company selected.'
+        };
+      }
+
       // If scope is assigned, verify the lead is assigned to this user
       const leadScope = getLeadScope(currentUser);
       if (leadScope === 'assigned' && currentUser.role !== 'admin') {
@@ -996,6 +1010,7 @@ export async function executeCrmAction(action, { currentUser = {} }) {
           .from('leads')
           .select('assigned_to')
           .eq('id', action.leadId)
+          .eq('company_id', activeCompanyId)
           .single();
 
         if (leadRecord && !isLeadAssignedToUser(leadRecord, currentUser)) {
@@ -1009,7 +1024,8 @@ export async function executeCrmAction(action, { currentUser = {} }) {
       const { error } = await supabase
         .from('leads')
         .update({ stage: action.newStage })
-        .eq('id', action.leadId);
+        .eq('id', action.leadId)
+        .eq('company_id', activeCompanyId);
 
       if (error) throw error;
 
@@ -1082,9 +1098,18 @@ export async function executeCrmAction(action, { currentUser = {} }) {
         }
       };
 
+      const activeCompanyId = getActiveCompanyId();
+      if (!activeCompanyId) {
+        return {
+          success: false,
+          message: 'Workspace error: No active company selected.'
+        };
+      }
+
       const { data: newPipe, error: insertErr } = await supabase
         .from('pipelines')
         .insert([{
+          company_id: activeCompanyId,
           name: p.name,
           pipeline_type: 'cold',
           is_default: false,
@@ -1142,7 +1167,7 @@ async function callOpenRouter(messages, apiKey, onChunk = null) {
           'Authorization': `Bearer ${apiKey.trim()}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
-          'X-Title': 'SimpleCRM'
+          'X-Title': 'simplecrm'
         },
         body: JSON.stringify({
           model,
@@ -1350,7 +1375,7 @@ export async function askAiAssistant(userMessage, { leads = [], deals = [], pipe
       .map((l) => `${l.id} | ${l.name || 'Unknown'} | ${resolveStageName(l.stage, pipelinesList)} | ${l.assigned_to || '-'} | ${l.city || '-'} | ${l.phone || '-'} | ${l.email || '-'}`)
       .join('\n');
 
-    const systemPrompt = `You are the executive AI Sales & Operations Assistant for SimpleCRM (CapOasis).
+    const systemPrompt = `You are the executive AI Sales & Operations Assistant for simplecrm.
 You are currently assisting: ${userName} (Role: ${userRole}, Data Scope: ${isScopeAll ? 'All CRM Data (Admin/Full)' : 'Assigned Leads Only'}).
 
 STRICT ROLE-BASED ACCESS CONTROL (RBAC) RULES:

@@ -24,6 +24,7 @@ import {
   Menu
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getActiveCompanyId } from '../lib/tenant';
 import { fetchWhatsAppMessages } from '../lib/whatsapp';
 import { fetchEmailLogs, fetchEmailTemplates, sendEmailViaResend, renderEmailVariables } from '../lib/email';
 import { getMessagesScope, isLeadAssignedToUser, hasPermission } from '../lib/permissions';
@@ -226,6 +227,11 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
   // Load initial messages, emails, pipelines, and leads
   useEffect(() => {
     let isMounted = true;
+    const companyId = getActiveCompanyId();
+    if (!companyId) {
+      setIsLoading(false);
+      return;
+    }
 
     async function loadData() {
       setIsLoading(true);
@@ -233,10 +239,11 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
         const [msgs, emails, pipesRes, leadsRes] = await Promise.all([
           fetchWhatsAppMessages(),
           fetchEmailLogs(),
-          supabase.from('pipelines').select('*'),
+          supabase.from('pipelines').select('*').eq('company_id', companyId),
           supabase
             .from('leads')
             .select('id, name, phone, email, assigned_to, stage, pipeline_id, created_at')
+            .eq('company_id', companyId)
             .order('created_at', { ascending: false })
         ]);
 
@@ -277,7 +284,7 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
       .channel('messages-leads-realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'leads' },
+        { event: '*', schema: 'public', table: 'leads', filter: `company_id=eq.${companyId}` },
         (payload) => {
           if (payload.eventType === 'INSERT' && payload.new) {
             setLeadsList((prev) => [payload.new, ...prev.filter((l) => l.id !== payload.new.id)]);
@@ -295,7 +302,7 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
       .channel('whatsapp-messages-realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'whatsapp_messages' },
+        { event: '*', schema: 'public', table: 'whatsapp_messages', filter: `company_id=eq.${companyId}` },
         (payload) => {
           if (payload.new) {
             setRawWhatsAppMessages((prev) => [payload.new, ...prev.filter((m) => m.id !== payload.new.id)]);
@@ -309,7 +316,7 @@ export default function MessagesView({ currentUser, onNavigateToLead }) {
       .channel('email-logs-realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'email_logs' },
+        { event: '*', schema: 'public', table: 'email_logs', filter: `company_id=eq.${companyId}` },
         (payload) => {
           if (payload.new) {
             setRawEmailLogs((prev) => [payload.new, ...prev.filter((m) => m.id !== payload.new.id)]);

@@ -1,672 +1,641 @@
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  constantTimeEqual,
+  corsHeaders,
+  createServiceClients,
+  jsonResponse,
+} from "../_shared/authBridge.ts";
+import { isCompanySubscriptionActive } from "../_shared/billing.ts";
+import { resolveCompanyLeadAssignee } from "../_shared/leadDistribution.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+async function verifyMetaSignature(
+  rawBody: string,
+  signatureHeader: string,
+  appSecret: string
+): Promise<boolean> {
+  if (!signatureHeader || !appSecret) return false;
+  const trimmed = signatureHeader.trim();
+  if (!trimmed.toLowerCase().startsWith("sha256=")) return false;
+  const providedHex = trimmed.slice(7).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(providedHex)) return false;
+
+  try {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(appSecret.trim()),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const sigBuffer = await crypto.subtle.sign("HMAC", key, encoder.encode(rawBody));
+    const bytes = new Uint8Array(sigBuffer);
+    let expectedHex = "";
+    for (let i = 0; i < bytes.length; i++) {
+      expectedHex += bytes[i].toString(16).padStart(2, "0");
+    }
+    return constantTimeEqual(providedHex, expectedHex);
+  } catch {
+    return false;
+  }
+}
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const supabaseServiceKey =
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-    Deno.env.get("SUPABASE_ANON_KEY") ??
-    "";
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  const { adminClient } = createServiceClients();
 
-  // 1. Meta Webhook Verification (GET)
+  // 1. Meta Webhook Verification Challenge (GET)
   if (req.method === "GET") {
     const url = new URL(req.url);
     const mode = url.searchParams.get("hub.mode");
-    const token = url.searchParams.get("hub.verify_token");
-    const challenge = url.searchParams.get("hub.challenge");
+    const token = (url.searchParams.get("hub.verify_token") ?? "").trim();
+    const challenge = url.searchParams.get("hub.challenge") ?? "";
 
-    console.log(`[Meta Webhook] Verification attempt: mode=${mode}, token=${token}`);
+    console.log(`[Meta Webhook] Verification attempt: mode=${mode}, hasToken=${Boolean(token)}`);
 
-    if (mode === "subscribe") {
-      // Fetch expected verify_token from meta_config table
-      let expectedToken: string | null = null;
-      try {
-        const { data } = await supabase
-          .from("meta_config")
-          .select("verify_token")
-          .order("created_at", { ascending: true })
-          .limit(1)
-          .maybeSingle();
+    if (mode !== "subscribe") {
+      return new Response("Invalid request mode", { status: 400 });
+    }
 
-        if (data?.verify_token) {
-          expectedToken = data.verify_token;
-        }
-      } catch (err) {
-        console.warn("[Meta Webhook] Could not fetch verify_token from DB:", err);
-      }
+    if (!token) {
+      return new Response("Forbidden: Missing verify token", { status: 403 });
+    }
 
-      // If token matches DB token, or matches fallback, or if no token configured yet
-      if (!expectedToken || token === expectedToken) {
-        console.log("[Meta Webhook] Verification succeeded. Returning challenge.");
+    const platformVerifyToken = (Deno.env.get("META_VERIFY_TOKEN") ?? "").trim();
+    if (platformVerifyToken && constantTimeEqual(token, platformVerifyToken)) {
+      console.log("[Meta Webhook] Verification succeeded via platform verify_token.");
+      return new Response(challenge, {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      });
+    }
+
+    try {
+      const { data: matchedConfig } = await adminClient
+        .from("meta_config")
+        .select("id")
+        .eq("verify_token", token)
+        .limit(1)
+        .maybeSingle();
+
+      if (matchedConfig) {
+        console.log("[Meta Webhook] Verification succeeded via tenant meta_config.");
         return new Response(challenge, {
           status: 200,
           headers: { "Content-Type": "text/plain" },
         });
       }
-
-      console.warn(`[Meta Webhook] Token mismatch. Expected: ${expectedToken}, Got: ${token}`);
-      return new Response("Forbidden: Verify token mismatch", { status: 403 });
+    } catch (err) {
+      console.warn("[Meta Webhook] Failed querying tenant verify_token:", err);
     }
 
-    return new Response("Invalid request mode", { status: 400 });
+    console.warn("[Meta Webhook] Verification token mismatch.");
+    return new Response("Forbidden: Verify token mismatch", { status: 403 });
   }
 
   // 2. Incoming Webhook Event (POST)
   if (req.method === "POST") {
     try {
-      const payload = await req.json();
-      console.log("[Meta Webhook] Received event payload:", JSON.stringify(payload));
+      const rawBody = await req.text();
+      let payload: Record<string, any> = {};
+      try {
+        payload = JSON.parse(rawBody);
+      } catch {
+        return jsonResponse({ error: "Invalid JSON payload." }, 400);
+      }
 
-      if (payload.object === "page") {
-        // Fetch current meta_config to get access_token and id
-        const { data: config } = await supabase
+      if (payload.object !== "page") {
+        return new Response("Not a page object", { status: 400, headers: corsHeaders });
+      }
+
+      const signatureHeader = (req.headers.get("x-hub-signature-256") ?? "").trim();
+      const platformAppSecret = (Deno.env.get("META_APP_SECRET") ?? "").trim();
+      const platformSignatureValid =
+        Boolean(signatureHeader && platformAppSecret) &&
+        (await verifyMetaSignature(rawBody, signatureHeader, platformAppSecret));
+
+      const metaConfigCache = new Map<string, Record<string, any> | null>();
+      const companyRecordCache = new Map<string, Record<string, any> | null>();
+      let processedCount = 0;
+      const skippedReasons: string[] = [];
+
+      const getCompanyMetaConfig = async (companyId: string) => {
+        if (metaConfigCache.has(companyId)) return metaConfigCache.get(companyId) || null;
+        const { data } = await adminClient
           .from("meta_config")
-          .select("id, access_token")
+          .select("*")
+          .eq("company_id", companyId)
           .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle();
+        metaConfigCache.set(companyId, data || null);
+        return data || null;
+      };
 
-        const accessToken = config?.access_token || "";
+      const getCompanyBillingRecord = async (companyId: string) => {
+        if (companyRecordCache.has(companyId)) return companyRecordCache.get(companyId) || null;
+        const { data } = await adminClient
+          .from("companies")
+          .select("id, subscription_status, trial_ends_at, is_billing_exempt")
+          .eq("id", companyId)
+          .maybeSingle();
+        companyRecordCache.set(companyId, data || null);
+        return data || null;
+      };
 
-        for (const entry of payload.entry || []) {
-          for (const change of entry.changes || []) {
-            if (change.field === "leadgen") {
-              const leadgenId = change.value?.leadgen_id;
-              const formId = change.value?.form_id;
-              console.log(`[Meta Webhook] New lead event: leadgen_id=${leadgenId}, form_id=${formId}`);
+      for (const entry of payload.entry || []) {
+        const entryPageId = entry?.id ? String(entry.id).trim() : null;
 
-              // Deduplication check: if lead with this leadgen_id already exists, skip
-              if (leadgenId) {
-                try {
-                  const { data: existingLead } = await supabase
-                    .from("leads")
-                    .select("id")
-                    .eq("leadgen_id", String(leadgenId))
-                    .limit(1)
-                    .maybeSingle();
+        for (const change of entry.changes || []) {
+          if (change?.field !== "leadgen") continue;
 
-                  if (existingLead) {
-                    console.log(`[Meta Webhook] Duplicate lead retry ignored: leadgen_id ${leadgenId} is already saved as lead ${existingLead.id}`);
-                    continue;
-                  }
-                } catch (checkErr) {
-                  console.warn("[Meta Webhook] Deduplication lookup error:", checkErr);
-                }
+          const leadgenId = change.value?.leadgen_id ? String(change.value.leadgen_id).trim() : null;
+          const formId = change.value?.form_id ? String(change.value.form_id).trim() : null;
+          const changePageId = change.value?.page_id
+            ? String(change.value.page_id).trim()
+            : entryPageId;
+
+          console.log(
+            `[Meta Webhook] Leadgen event: page_id=${changePageId || "none"}, form_id=${formId || "none"}, leadgen_id=${leadgenId || "none"}`
+          );
+
+          // Step A: Resolve connected_forms by form_id first
+          let connectedForm: Record<string, any> | null = null;
+          if (formId) {
+            const { data: cForm, error: formLookupErr } = await adminClient
+              .from("connected_forms")
+              .select("*")
+              .eq("form_id", formId)
+              .limit(1)
+              .maybeSingle();
+
+            if (formLookupErr) {
+              console.warn("[Meta Webhook] connected_forms lookup warning:", formLookupErr);
+            } else if (cForm) {
+              if (cForm.is_active === false) {
+                console.log(`[Meta Webhook] Skipping disabled form ${formId}`);
+                skippedReasons.push("inactive_form");
+                continue;
               }
+              connectedForm = cForm;
+            }
+          }
 
-              // 0. Lookup dedicated Connected Form configuration
-              let connectedForm: any = null;
-              if (formId) {
-                try {
-                  const { data: cForm } = await supabase
-                    .from("connected_forms")
-                    .select("*")
-                    .eq("form_id", String(formId))
-                    .eq("is_active", true)
-                    .limit(1)
-                    .maybeSingle();
+          let companyId: string | null = connectedForm?.company_id
+            ? String(connectedForm.company_id)
+            : null;
+          let tenantMetaConfig: Record<string, any> | null = null;
 
-                  if (cForm) {
-                    connectedForm = cForm;
-                    console.log(`[Meta Webhook] Matched connected form: "${cForm.form_name}" (Pipeline: ${cForm.pipeline_id || 'default'}, Mode: ${cForm.allocation_mode})`);
-                  }
-                } catch (formLookupErr) {
-                  console.warn("[Meta Webhook] Failed to lookup connected form:", formLookupErr);
+          // Step B: Fall back to page_id -> meta_config lookup if form isn't registered yet
+          if (!companyId && changePageId) {
+            const { data: pageConfig } = await adminClient
+              .from("meta_config")
+              .select("*")
+              .eq("page_id", changePageId)
+              .order("created_at", { ascending: true })
+              .limit(1)
+              .maybeSingle();
+
+            if (pageConfig?.company_id) {
+              companyId = String(pageConfig.company_id);
+              tenantMetaConfig = pageConfig;
+              metaConfigCache.set(companyId, pageConfig);
+            }
+          }
+
+          if (!companyId) {
+            console.warn("[Meta Webhook] Skipping unmapped page/form:", {
+              pageId: changePageId,
+              formId,
+              leadgenId,
+            });
+            skippedReasons.push("unmapped_page_or_form");
+            continue;
+          }
+
+          if (!tenantMetaConfig) {
+            tenantMetaConfig = await getCompanyMetaConfig(companyId);
+          }
+
+          // Verify X-Hub-Signature-256 whenever header is present
+          if (signatureHeader && !platformSignatureValid) {
+            const tenantAppSecret = tenantMetaConfig?.app_secret
+              ? String(tenantMetaConfig.app_secret).trim()
+              : "";
+            const tenantSigValid = tenantAppSecret
+              ? await verifyMetaSignature(rawBody, signatureHeader, tenantAppSecret)
+              : false;
+            if (!tenantSigValid) {
+              console.warn(`[Meta Webhook] Invalid X-Hub-Signature-256 for company=${companyId}`);
+              return jsonResponse({ error: "Invalid webhook signature." }, 403);
+            }
+          }
+
+          // Check company subscription eligibility
+          const billingRecord = await getCompanyBillingRecord(companyId);
+          if (!isCompanySubscriptionActive(billingRecord, { allowPastDue: true })) {
+            console.warn(
+              `[Meta Webhook] Skipping event for company=${companyId} with subscription_status=${billingRecord?.subscription_status}`
+            );
+            skippedReasons.push("subscription_inactive");
+            continue;
+          }
+
+          // Company-scoped leadgen_id deduplication
+          if (leadgenId) {
+            const { data: existingLead } = await adminClient
+              .from("leads")
+              .select("id")
+              .eq("company_id", companyId)
+              .eq("leadgen_id", leadgenId)
+              .limit(1)
+              .maybeSingle();
+
+            if (existingLead) {
+              console.log(
+                `[Meta Webhook] Duplicate lead retry ignored for company=${companyId}: leadgen_id=${leadgenId}`
+              );
+              skippedReasons.push("duplicate_leadgen_id");
+              continue;
+            }
+          }
+
+          const effectiveToken =
+            (connectedForm?.access_token && String(connectedForm.access_token).trim()) ||
+            (tenantMetaConfig?.access_token && String(tenantMetaConfig.access_token).trim()) ||
+            "";
+
+          if (!effectiveToken) {
+            console.warn(
+              `[Meta Webhook] Missing page access_token for company=${companyId} (form_id=${formId})`
+            );
+            skippedReasons.push("missing_page_access_token");
+            continue;
+          }
+
+          let leadName = "Meta Lead";
+          let leadEmail: string | null = null;
+          let leadPhone: string | null = null;
+          let leadCity: string | null = null;
+          let formName = connectedForm?.form_name || "Instant Form";
+          const customFields: Record<string, string> = {};
+
+          if (leadgenId) {
+            try {
+              const graphUrl = `https://graph.facebook.com/v20.0/${encodeURIComponent(leadgenId)}?access_token=${encodeURIComponent(effectiveToken)}`;
+              const leadRes = await fetch(graphUrl);
+              const leadData = await leadRes.json();
+
+              if (leadData.error) {
+                console.error(
+                  `[Meta Webhook CRITICAL] Graph API error for company=${companyId}:`,
+                  JSON.stringify(leadData.error)
+                );
+                if (leadData.error.code === 190 && tenantMetaConfig?.id) {
+                  await adminClient
+                    .from("meta_config")
+                    .update({
+                      is_connected: false,
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq("id", tenantMetaConfig.id)
+                    .eq("company_id", companyId);
                 }
-              }
-
-              // Determine token to use (form-specific or global fallback)
-              const effectiveToken = connectedForm?.access_token || accessToken;
-
-              let leadName = "Meta Lead";
-              let leadEmail = null;
-              let leadPhone = null;
-              let leadCity = null;
-              let formName = connectedForm?.form_name || "Instant Form";
-              const customFields: Record<string, string> = {};
-
-              if (leadgenId && effectiveToken) {
-                try {
-                  const graphUrl = `https://graph.facebook.com/v20.0/${leadgenId}?access_token=${effectiveToken}`;
-                  const leadRes = await fetch(graphUrl);
-                  const leadData = await leadRes.json();
-
-                  console.log("[Meta Webhook] Graph API Lead response:", JSON.stringify(leadData));
-
-                  if (leadData.error) {
-                    console.error("[Meta Webhook CRITICAL] Meta Graph API returned error:", JSON.stringify(leadData.error));
-                    if (leadData.error.code === 190) {
-                      try {
-                        await supabase
-                          .from("meta_config")
-                          .update({
-                            is_connected: false,
-                            updated_at: new Date().toISOString()
-                          })
-                          .eq("id", config?.id);
-                      } catch (confErr) {
-                        console.warn("[Meta Webhook] Could not update meta_config status:", confErr);
-                      }
-                    }
-                    console.warn(`[Meta Webhook] Aborting lead insertion for leadgen_id=${leadgenId} due to Graph API authentication failure.`);
-                    continue;
-                  }
-
-                  if (leadData.field_data) {
-                    let firstName = "";
-                    let lastName = "";
-
-                    for (const field of leadData.field_data) {
-                      const rawName = field.name || "";
-                      const name = rawName.toLowerCase();
-                      const val = field.values?.[0] || "";
-
-                      if (name === "full_name") {
-                        leadName = val || leadName;
-                      } else if (name === "first_name") {
-                        firstName = val || "";
-                      } else if (name === "last_name") {
-                        lastName = val || "";
-                      } else if (name === "email") {
-                        leadEmail = val || null;
-                      } else if (name === "phone_number" || name === "phone") {
-                        leadPhone = val || null;
-                      } else if (name === "city") {
-                        leadCity = val || null;
-                        customFields["City"] = val;
-                      } else {
-                        // Custom form question: prettify key if it's snake_case
-                        const cleanLabel = rawName
-                          .replace(/_/g, " ")
-                          .replace(/\?$/, "?")
-                          .trim();
-                        const formattedLabel = cleanLabel.charAt(0).toUpperCase() + cleanLabel.slice(1);
-                        customFields[formattedLabel] = val;
-                      }
-                    }
-
-                    if (leadName === "Meta Lead" && (firstName || lastName)) {
-                      leadName = `${firstName} ${lastName}`.trim();
-                    }
-                  }
-
-                  // If form name not set by connected form, optionally fetch from Graph API
-                  if (!connectedForm?.form_name && formId) {
-                    try {
-                      const formRes = await fetch(`https://graph.facebook.com/v20.0/${formId}?fields=name&access_token=${effectiveToken}`);
-                      const formJson = await formRes.json();
-                      if (formJson?.name) formName = formJson.name;
-                    } catch {}
-                  }
-                } catch (graphErr) {
-                  console.error("[Meta Webhook] Failed to fetch lead details from Graph API:", graphErr);
-                }
-              }
-
-              // 1. Check if Form is linked to a Pipeline
-              if (!connectedForm?.pipeline_id) {
-                console.warn(`[Meta Webhook] Form "${formName}" (ID: ${formId}) is not linked to any pipeline. Skipping lead insertion.`);
+                skippedReasons.push("graph_api_error");
                 continue;
               }
 
-              const targetPipelineId = connectedForm.pipeline_id;
-              let entryStage = connectedForm.entry_stage_id || "new";
+              if (Array.isArray(leadData.field_data)) {
+                let firstName = "";
+                let lastName = "";
 
-              // 2. Resolve Assignee
-              let assignedTo = "pranav";
-              const allocationMode = connectedForm?.allocation_mode || "inherit_global";
+                for (const field of leadData.field_data) {
+                  const rawName = field.name || "";
+                  const name = rawName.toLowerCase();
+                  const val = field.values?.[0] || "";
 
-              if (allocationMode === "specific_user") {
-                assignedTo = connectedForm.assigned_to || "pranav";
-              } else if (allocationMode === "unassigned") {
-                assignedTo = "unassigned";
-              } else if (allocationMode === "round_robin" && Array.isArray(connectedForm.user_rules) && connectedForm.user_rules.length > 0) {
-                const activeRules = connectedForm.user_rules.filter((r: any) => r.enabled !== false);
-                if (activeRules.length > 0) {
-                  const currentIndex = (connectedForm.round_robin_index || 0) % activeRules.length;
-                  const selected = activeRules[currentIndex];
-                  assignedTo = selected.name || selected.email || "pranav";
-
-                  // Increment form's own round robin index
-                  const nextIndex = (connectedForm.round_robin_index || 0) + 1;
-                  try {
-                    await supabase
-                      .from("connected_forms")
-                      .update({ round_robin_index: nextIndex, updated_at: new Date().toISOString() })
-                      .eq("id", connectedForm.id);
-                  } catch (idxErr) {
-                    console.warn("[Meta Webhook] Failed to update form round_robin_index:", idxErr);
-                  }
-                }
-              } else if (allocationMode === "weighted" && Array.isArray(connectedForm.user_rules) && connectedForm.user_rules.length > 0) {
-                const weightedEligible = connectedForm.user_rules.filter((r: any) => r.enabled !== false && Number(r.weight) > 0);
-                const sumWeight = weightedEligible.reduce((acc: number, r: any) => acc + Number(r.weight), 0);
-
-                if (weightedEligible.length > 0 && sumWeight > 0) {
-                  const rand = Math.random() * sumWeight;
-                  let running = 0;
-                  let chosen = weightedEligible[0];
-                  for (const r of weightedEligible) {
-                    running += Number(r.weight);
-                    if (rand <= running) {
-                      chosen = r;
-                      break;
-                    }
-                  }
-                  assignedTo = chosen.name || chosen.email || "pranav";
-                }
-              } else {
-                // Check if the mapped pipeline has its own lead_distribution
-                let resolvedFromPipeline = false;
-                if (targetPipelineId) {
-                  try {
-                    const { data: pipeData } = await supabase
-                      .from("pipelines")
-                      .select("lead_distribution")
-                      .eq("id", targetPipelineId)
-                      .maybeSingle();
-
-                    if (pipeData?.lead_distribution && typeof pipeData.lead_distribution === "object") {
-                      const pDist = pipeData.lead_distribution as any;
-                      const mode = pDist.mode || "round_robin";
-                      const defaultAssignee = pDist.default_assignee || "pranav";
-                      const rules = (pDist.user_rules || []) as Array<{
-                        id: string;
-                        name: string;
-                        email: string;
-                        enabled: boolean;
-                        weight: number;
-                      }>;
-                      const activeRules = rules.filter((r) => r.enabled !== false);
-
-                      if (mode === "unassigned") {
-                        assignedTo = "unassigned";
-                        resolvedFromPipeline = true;
-                      } else if (mode === "single") {
-                        assignedTo = defaultAssignee;
-                        resolvedFromPipeline = true;
-                      } else if (mode === "round_robin") {
-                        if (activeRules.length > 0) {
-                          const currentIndex = (pDist.round_robin_index || 0) % activeRules.length;
-                          const selected = activeRules[currentIndex];
-                          assignedTo = selected.name || selected.email || defaultAssignee;
-
-                          const nextIndex = (pDist.round_robin_index || 0) + 1;
-                          await supabase
-                            .from("pipelines")
-                            .update({
-                              lead_distribution: { ...pDist, round_robin_index: nextIndex },
-                              updated_at: new Date().toISOString()
-                            })
-                            .eq("id", targetPipelineId);
-                        } else {
-                          assignedTo = defaultAssignee;
-                        }
-                        resolvedFromPipeline = true;
-                      } else if (mode === "weighted") {
-                        const weightedEligible = activeRules.filter((r) => Number(r.weight) > 0);
-                        const sumWeight = weightedEligible.reduce((acc, r) => acc + Number(r.weight), 0);
-
-                        if (weightedEligible.length > 0 && sumWeight > 0) {
-                          const rand = Math.random() * sumWeight;
-                          let running = 0;
-                          let chosen = weightedEligible[0];
-                          for (const r of weightedEligible) {
-                            running += Number(r.weight);
-                            if (rand <= running) {
-                              chosen = r;
-                              break;
-                            }
-                          }
-                          assignedTo = chosen.name || chosen.email || defaultAssignee;
-                        } else {
-                          assignedTo = defaultAssignee;
-                        }
-                        resolvedFromPipeline = true;
-                      }
-                    }
-                  } catch (pErr) {
-                    console.warn("[Meta Webhook] Failed to resolve pipeline lead_distribution:", pErr);
+                  if (name === "full_name") {
+                    leadName = val || leadName;
+                  } else if (name === "first_name") {
+                    firstName = val || "";
+                  } else if (name === "last_name") {
+                    lastName = val || "";
+                  } else if (name === "email") {
+                    leadEmail = val || null;
+                  } else if (name === "phone_number" || name === "phone") {
+                    leadPhone = val || null;
+                  } else if (name === "city") {
+                    leadCity = val || null;
+                    customFields["City"] = val;
+                  } else {
+                    const cleanLabel = rawName.replace(/_/g, " ").replace(/\?$/, "?").trim();
+                    const formattedLabel = cleanLabel.charAt(0).toUpperCase() + cleanLabel.slice(1);
+                    customFields[formattedLabel] = val;
                   }
                 }
 
-                if (!resolvedFromPipeline) {
-                  // Fallback to Global Lead Routing Config
-                  try {
-                    const { data: routingConfig } = await supabase
-                      .from("lead_routing_config")
-                      .select("*")
-                      .order("created_at", { ascending: true })
-                      .limit(1)
-                      .maybeSingle();
-
-                    if (routingConfig) {
-                      const mode = routingConfig.mode || "round_robin";
-                      const defaultAssignee = routingConfig.default_assignee || "pranav";
-                      const rules = (routingConfig.user_rules || []) as Array<{
-                        id: string;
-                        name: string;
-                        email: string;
-                        enabled: boolean;
-                        weight: number;
-                      }>;
-
-                      const activeRules = rules.filter((r) => r.enabled !== false);
-
-                      if (mode === "unassigned") {
-                        assignedTo = "unassigned";
-                      } else if (mode === "single") {
-                        assignedTo = defaultAssignee;
-                      } else if (mode === "round_robin") {
-                        if (activeRules.length > 0) {
-                          const currentIndex = (routingConfig.round_robin_index || 0) % activeRules.length;
-                          const selected = activeRules[currentIndex];
-                          assignedTo = selected.name || selected.email || defaultAssignee;
-
-                          // Increment round robin index
-                          const nextIndex = (routingConfig.round_robin_index || 0) + 1;
-                          await supabase
-                            .from("lead_routing_config")
-                            .update({ round_robin_index: nextIndex, updated_at: new Date().toISOString() })
-                            .eq("id", routingConfig.id);
-                        } else {
-                          assignedTo = defaultAssignee;
-                        }
-                      } else if (mode === "weighted") {
-                        const weightedEligible = activeRules.filter((r) => Number(r.weight) > 0);
-                        const sumWeight = weightedEligible.reduce((acc, r) => acc + Number(r.weight), 0);
-
-                        if (weightedEligible.length > 0 && sumWeight > 0) {
-                          const rand = Math.random() * sumWeight;
-                          let running = 0;
-                          let chosen = weightedEligible[0];
-                          for (const r of weightedEligible) {
-                            running += Number(r.weight);
-                            if (rand <= running) {
-                              chosen = r;
-                              break;
-                            }
-                          }
-                          assignedTo = chosen.name || chosen.email || defaultAssignee;
-                        } else {
-                          assignedTo = defaultAssignee;
-                        }
-                      }
-                    }
-                  } catch (routingErr) {
-                    console.warn("[Meta Webhook] Failed to resolve global lead routing config, using default:", routingErr);
-                  }
+                if (leadName === "Meta Lead" && (firstName || lastName)) {
+                  leadName = `${firstName} ${lastName}`.trim();
                 }
               }
 
-              // Insert into leads table
-              const now = new Date();
-              const today = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
-              const { data: insertedLead, error: insertError } = await supabase.from("leads").insert({
-                name: leadName,
-                phone: leadPhone,
-                email: leadEmail,
-                city: leadCity,
-                form_id: formId || null,
-                form_name: formName,
-                pipeline_id: targetPipelineId,
-                stage: entryStage,
-                assigned_to: assignedTo,
-                leadgen_id: leadgenId ? String(leadgenId) : null,
-                custom_fields: customFields,
-                date: today,
-              }).select().maybeSingle();
+              if (!connectedForm?.form_name && formId) {
+                try {
+                  const formRes = await fetch(
+                    `https://graph.facebook.com/v20.0/${encodeURIComponent(formId)}?fields=name&access_token=${encodeURIComponent(effectiveToken)}`
+                  );
+                  const formJson = await formRes.json();
+                  if (formJson?.name) formName = formJson.name;
+                } catch {}
+              }
+            } catch (graphErr) {
+              console.error("[Meta Webhook] Graph API fetch exception:", graphErr);
+              skippedReasons.push("graph_api_exception");
+              continue;
+            }
+          }
 
-              if (insertError) {
-                console.error("[Meta Webhook] Failed to insert lead into Supabase:", insertError);
-              } else {
-                console.log(`[Meta Webhook] Successfully saved lead: ${leadName} (ID: ${insertedLead?.id}) -> Pipeline: ${targetPipelineId || 'default'} (Stage: ${entryStage}, Assigned to: ${assignedTo}) with ${Object.keys(customFields).length} form fields`);
+          if (!connectedForm?.pipeline_id) {
+            console.warn(
+              `[Meta Webhook] Form "${formName}" (ID: ${formId}, company=${companyId}) is not linked to any pipeline.`
+            );
+            skippedReasons.push("unmapped_pipeline");
+            continue;
+          }
 
-                // Check and dispatch Stage Automations (Email & WhatsApp)
-                if (insertedLead?.id) {
-                  try {
-                    let targetPipe: any = null;
-                    if (targetPipelineId) {
-                      const { data: pipeData } = await supabase
-                        .from("pipelines")
-                        .select("id, stages, stage_automations")
-                        .eq("id", targetPipelineId)
-                        .limit(1)
-                        .maybeSingle();
-                      targetPipe = pipeData;
+          const targetPipelineId = connectedForm.pipeline_id;
+          const entryStage = connectedForm.entry_stage_id || "new";
+
+          const { data: targetPipe } = await adminClient
+            .from("pipelines")
+            .select("id, stages, stage_automations")
+            .eq("id", targetPipelineId)
+            .eq("company_id", companyId)
+            .limit(1)
+            .maybeSingle();
+
+          if (!targetPipe) {
+            console.warn(
+              `[Meta Webhook] Pipeline ${targetPipelineId} not found for company=${companyId}`
+            );
+            skippedReasons.push("unmapped_pipeline");
+            continue;
+          }
+
+          const assignedTo = await resolveCompanyLeadAssignee({
+            adminClient,
+            companyId,
+            connectedForm,
+            pipelineId: targetPipelineId,
+            logPrefix: "[Meta Webhook]",
+          });
+
+          const now = new Date();
+          const today = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
+
+          const { data: insertedLead, error: insertError } = await adminClient
+            .from("leads")
+            .insert({
+              company_id: companyId,
+              name: leadName,
+              phone: leadPhone,
+              email: leadEmail,
+              city: leadCity,
+              form_id: formId || null,
+              form_name: formName,
+              pipeline_id: targetPipelineId,
+              stage: entryStage,
+              assigned_to: assignedTo,
+              leadgen_id: leadgenId || null,
+              custom_fields: customFields,
+              date: today,
+            })
+            .select()
+            .maybeSingle();
+
+          if (insertError) {
+            console.error("[Meta Webhook] Failed to insert lead:", insertError);
+            continue;
+          }
+
+          processedCount++;
+          console.log(
+            `[Meta Webhook] Saved lead ${insertedLead?.id} for company=${companyId} -> Pipeline ${targetPipelineId} (Stage: ${entryStage}, Assigned: ${assignedTo})`
+          );
+
+          // Stage Automations (scoped strictly to companyId)
+          if (insertedLead?.id && Array.isArray(targetPipe.stage_automations)) {
+            try {
+              const auto = targetPipe.stage_automations.find(
+                (a: any) => a.stage_id === entryStage
+              );
+              const stageObj = (targetPipe.stages || []).find((s: any) => s.id === entryStage);
+              const stageName = stageObj?.label || entryStage;
+
+              // 1. Automated Email Dispatch (tenant Resend credentials only)
+              if (auto?.email_active && auto.email_template_id && leadEmail) {
+                try {
+                  const { data: emailSettings } = await adminClient
+                    .from("email_settings")
+                    .select("api_key, from_name, from_email, reply_to, is_connected")
+                    .eq("company_id", companyId)
+                    .order("created_at", { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                  const { data: template } = await adminClient
+                    .from("email_templates")
+                    .select("id, name, subject, body_html")
+                    .eq("id", auto.email_template_id)
+                    .eq("company_id", companyId)
+                    .limit(1)
+                    .maybeSingle();
+
+                  if (emailSettings?.is_connected !== false && emailSettings?.api_key && template) {
+                    let finalSubject = template.subject || "Welcome";
+                    let finalHtml = template.body_html || "";
+
+                    const mergeVars: Record<string, string> = {
+                      "{{name}}": leadName || "",
+                      "{{company}}": customFields["Company"] || leadCity || "",
+                      "{{phone}}": leadPhone || "",
+                      "{{stage}}": stageName,
+                    };
+
+                    for (const [k, v] of Object.entries(mergeVars)) {
+                      finalSubject = finalSubject.replaceAll(k, v);
+                      finalHtml = finalHtml.replaceAll(k, v);
                     }
-                    if (!targetPipe) {
-                      const { data: defaultPipe } = await supabase
-                        .from("pipelines")
-                        .select("id, stages, stage_automations")
-                        .eq("is_default", true)
-                        .limit(1)
-                        .maybeSingle();
-                      targetPipe = defaultPipe;
-                    }
 
-                    if (targetPipe && Array.isArray(targetPipe.stage_automations)) {
-                      const auto = targetPipe.stage_automations.find((a: any) => a.stage_id === entryStage);
-                      const stageObj = (targetPipe.stages || []).find((s: any) => s.id === entryStage);
-                      const stageName = stageObj?.label || entryStage;
+                    const senderFrom = `${emailSettings.from_name || "simplecrm"} <${emailSettings.from_email || "onboarding@resend.dev"}>`;
+                    const resendRes = await fetch("https://api.resend.com/emails", {
+                      method: "POST",
+                      headers: {
+                        Authorization: `Bearer ${emailSettings.api_key.trim()}`,
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({
+                        from: senderFrom,
+                        to: [leadEmail.trim()],
+                        reply_to: emailSettings.reply_to?.trim() || undefined,
+                        subject: finalSubject,
+                        html: finalHtml,
+                      }),
+                    });
 
-                      // 1. Automated Email Dispatch (Resend)
-                      if (auto?.email_active && auto.email_template_id && leadEmail) {
-                        try {
-                          const { data: emailSettings } = await supabase
-                            .from("email_settings")
-                            .select("api_key, from_name, from_email, reply_to")
-                            .order("created_at", { ascending: false })
-                            .limit(1)
-                            .maybeSingle();
+                    const resendJson = await resendRes.json().catch(() => ({}));
+                    const emailStatus = resendRes.ok ? "sent" : "failed";
 
-                          const { data: template } = await supabase
-                            .from("email_templates")
-                            .select("id, name, subject, body_html")
-                            .eq("id", auto.email_template_id)
-                            .limit(1)
-                            .maybeSingle();
+                    await adminClient.from("email_logs").insert({
+                      company_id: companyId,
+                      lead_id: insertedLead.id,
+                      lead_name: leadName,
+                      lead_email: leadEmail,
+                      pipeline_id: targetPipe.id,
+                      stage_id: entryStage,
+                      template_name: template.name,
+                      subject: finalSubject,
+                      body: finalHtml,
+                      status: emailStatus,
+                      error_message: resendRes.ok ? null : resendJson?.message || "Resend error",
+                      is_automated: true,
+                    });
 
-                          if (emailSettings?.api_key && template) {
-                            let finalSubject = template.subject || 'Welcome';
-                            let finalHtml = template.body_html || '';
-
-                            const mergeVars: Record<string, string> = {
-                              '{{name}}': leadName || '',
-                              '{{company}}': customFields['Company'] || leadCity || '',
-                              '{{phone}}': leadPhone || '',
-                              '{{stage}}': stageName
-                            };
-
-                            for (const [k, v] of Object.entries(mergeVars)) {
-                              finalSubject = finalSubject.replaceAll(k, v);
-                              finalHtml = finalHtml.replaceAll(k, v);
-                            }
-
-                            const senderFrom = `${emailSettings.from_name || 'SaladO india'} <${emailSettings.from_email || 'noreply@mail.capoasis.com'}>`;
-                            console.log(`[Meta Webhook] Dispatching automated email to ${leadEmail} using template "${template.name}" via Resend...`);
-
-                            const resendRes = await fetch("https://api.resend.com/emails", {
-                              method: "POST",
-                              headers: {
-                                "Authorization": `Bearer ${emailSettings.api_key.trim()}`,
-                                "Content-Type": "application/json"
-                              },
-                              body: JSON.stringify({
-                                from: senderFrom,
-                                to: [leadEmail.trim()],
-                                reply_to: emailSettings.reply_to?.trim() || undefined,
-                                subject: finalSubject,
-                                html: finalHtml
-                              })
-                            });
-
-                            const resendJson = await resendRes.json();
-                            const emailStatus = resendRes.ok ? 'sent' : 'failed';
-                            console.log(`[Meta Webhook] Resend response (${resendRes.status}):`, JSON.stringify(resendJson));
-
-                            // Record in email_logs
-                            await supabase.from("email_logs").insert({
-                              lead_id: insertedLead.id,
-                              lead_name: leadName,
-                              lead_email: leadEmail,
-                              pipeline_id: targetPipe.id,
-                              stage_id: entryStage,
-                              template_name: template.name,
-                              subject: finalSubject,
-                              body: finalHtml,
-                              status: emailStatus,
-                              error_message: resendRes.ok ? null : (resendJson?.message || 'Resend error'),
-                              is_automated: true
-                            });
-
-                            // Record in lead_activities
-                            await supabase.from("lead_activities").insert({
-                              lead_id: insertedLead.id,
-                              lead_name: leadName,
-                              type: 'email_sent',
-                              to_stage: entryStage,
-                              details: `Automated Email "${template.name}" sent to ${leadEmail} on entering stage "${stageName}"`,
-                              user_name: 'Automation'
-                            });
-                          } else {
-                            console.warn("[Meta Webhook] Missing Resend API key or template not found for automation:", {
-                              hasKey: Boolean(emailSettings?.api_key),
-                              templateId: auto.email_template_id
-                            });
-                          }
-                        } catch (emailErr: any) {
-                          console.error("[Meta Webhook] Failed to dispatch automated email:", emailErr?.message || emailErr);
-                        }
-                      }
-
-                      // 2. Automated WhatsApp Dispatch
-                      if (auto?.is_active && auto.template_name && leadPhone) {
-                        try {
-                          const { data: metaConfig } = await supabase
-                            .from("meta_config")
-                            .select("whatsapp_access_token, whatsapp_phone_number_id, whatsapp_templates")
-                            .order("created_at", { ascending: true })
-                            .limit(1)
-                            .maybeSingle();
-
-                          const waToken = metaConfig?.whatsapp_access_token?.trim();
-                          const waPhoneId = metaConfig?.whatsapp_phone_number_id?.trim();
-
-                          if (waToken && waPhoneId) {
-                            let cleanPhone = leadPhone.replace(/[^0-9]/g, '');
-                            if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
-
-                            // Dynamically resolve template language from approved templates list
-                            let langCode = "en_US";
-                            if (Array.isArray(metaConfig?.whatsapp_templates)) {
-                              const tmpl = metaConfig.whatsapp_templates.find((t: any) => t.name === auto.template_name);
-                              if (tmpl?.language) {
-                                langCode = tmpl.language;
-                              }
-                            } else if (auto.language_code) {
-                              langCode = auto.language_code;
-                            }
-
-                            console.log(`[Meta Webhook] Dispatching automated WhatsApp to ${cleanPhone} (template: "${auto.template_name}", lang: "${langCode}")...`);
-
-                            const templatePayload: any = {
-                              name: auto.template_name,
-                              language: { code: langCode }
-                            };
-
-                            // Add parameter variables for templates that support body text (like {{1}} for contact name)
-                            if (auto.template_name !== "hello_world") {
-                              templatePayload.components = [
-                                {
-                                  type: "body",
-                                  parameters: [
-                                    { type: "text", text: leadName || "there" }
-                                  ]
-                                }
-                              ];
-                            }
-
-                            const waRes = await fetch(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, {
-                              method: "POST",
-                              headers: {
-                                "Authorization": `Bearer ${waToken}`,
-                                "Content-Type": "application/json"
-                              },
-                              body: JSON.stringify({
-                                messaging_product: "whatsapp",
-                                to: cleanPhone,
-                                type: "template",
-                                template: templatePayload
-                              })
-                            });
-
-                            const waJson = await waRes.json();
-                            console.log(`[Meta Webhook] WhatsApp response (${waRes.status}):`, JSON.stringify(waJson));
-
-                            if (waRes.ok) {
-                              await supabase.from("lead_activities").insert({
-                                lead_id: insertedLead.id,
-                                lead_name: leadName,
-                                type: 'whatsapp_sent',
-                                to_stage: entryStage,
-                                details: `Automated WhatsApp "${auto.template_name}" sent to ${cleanPhone} on entering stage "${stageName}"`,
-                                user_name: 'Automation'
-                              });
-                            } else {
-                              const errMsg = waJson?.error?.message || `WhatsApp API error (${waRes.status})`;
-                              console.warn(`[Meta Webhook] WhatsApp delivery not completed: ${errMsg}`);
-                              await supabase.from("lead_activities").insert({
-                                lead_id: insertedLead.id,
-                                lead_name: leadName,
-                                type: 'whatsapp_failed',
-                                to_stage: entryStage,
-                                details: `Automated WhatsApp "${auto.template_name}" failed: ${errMsg}`,
-                                user_name: 'Automation'
-                              });
-                            }
-                          } else {
-                            console.warn("[Meta Webhook] WhatsApp automation skipped: Missing whatsapp_phone_number_id or whatsapp_access_token in meta_config.");
-                          }
-                        } catch (waErr: any) {
-                          console.error("[Meta Webhook] Failed to dispatch automated WhatsApp:", waErr?.message || waErr);
-                        }
-                      }
-                    }
-                  } catch (autoErr: any) {
-                    console.error("[Meta Webhook] Stage automations dispatch error:", autoErr?.message || autoErr);
+                    await adminClient.from("lead_activities").insert({
+                      company_id: companyId,
+                      lead_id: insertedLead.id,
+                      lead_name: leadName,
+                      type: "email_sent",
+                      to_stage: entryStage,
+                      details: `Automated Email "${template.name}" sent to ${leadEmail} on entering stage "${stageName}"`,
+                      user_name: "Automation",
+                    });
                   }
+                } catch (emailErr: any) {
+                  console.error(
+                    "[Meta Webhook] Automated email error:",
+                    emailErr?.message || emailErr
+                  );
                 }
               }
+
+              // 2. Automated WhatsApp Dispatch (strictly using tenantMetaConfig)
+              if (auto?.is_active && auto.template_name && leadPhone) {
+                try {
+                  const waToken = tenantMetaConfig?.whatsapp_access_token?.trim();
+                  const waPhoneId = tenantMetaConfig?.whatsapp_phone_number_id?.trim();
+
+                  if (waToken && waPhoneId) {
+                    let cleanPhone = leadPhone.replace(/[^0-9]/g, "");
+                    if (cleanPhone.length === 10) cleanPhone = "91" + cleanPhone;
+
+                    let langCode = "en_US";
+                    if (Array.isArray(tenantMetaConfig?.whatsapp_templates)) {
+                      const tmpl = tenantMetaConfig.whatsapp_templates.find(
+                        (t: any) => t.name === auto.template_name
+                      );
+                      if (tmpl?.language) langCode = tmpl.language;
+                    } else if (auto.language_code) {
+                      langCode = auto.language_code;
+                    }
+
+                    const templatePayload: any = {
+                      name: auto.template_name,
+                      language: { code: langCode },
+                    };
+
+                    if (auto.template_name !== "hello_world") {
+                      templatePayload.components = [
+                        {
+                          type: "body",
+                          parameters: [{ type: "text", text: leadName || "there" }],
+                        },
+                      ];
+                    }
+
+                    const waRes = await fetch(
+                      `https://graph.facebook.com/v21.0/${waPhoneId}/messages`,
+                      {
+                        method: "POST",
+                        headers: {
+                          Authorization: `Bearer ${waToken}`,
+                          "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                          messaging_product: "whatsapp",
+                          to: cleanPhone,
+                          type: "template",
+                          template: templatePayload,
+                        }),
+                      }
+                    );
+
+                    const waJson = await waRes.json().catch(() => ({}));
+                    if (waRes.ok) {
+                      await adminClient.from("lead_activities").insert({
+                        company_id: companyId,
+                        lead_id: insertedLead.id,
+                        lead_name: leadName,
+                        type: "whatsapp_sent",
+                        to_stage: entryStage,
+                        details: `Automated WhatsApp "${auto.template_name}" sent to ${cleanPhone} on entering stage "${stageName}"`,
+                        user_name: "Automation",
+                      });
+                    } else {
+                      const errMsg =
+                        waJson?.error?.message || `WhatsApp API error (${waRes.status})`;
+                      await adminClient.from("lead_activities").insert({
+                        company_id: companyId,
+                        lead_id: insertedLead.id,
+                        lead_name: leadName,
+                        type: "whatsapp_failed",
+                        to_stage: entryStage,
+                        details: `Automated WhatsApp "${auto.template_name}" failed: ${errMsg}`,
+                        user_name: "Automation",
+                      });
+                    }
+                  }
+                } catch (waErr: any) {
+                  console.error(
+                    "[Meta Webhook] Automated WhatsApp error:",
+                    waErr?.message || waErr
+                  );
+                }
+              }
+            } catch (autoErr: any) {
+              console.error(
+                "[Meta Webhook] Stage automations error:",
+                autoErr?.message || autoErr
+              );
             }
           }
         }
+      }
 
-        return new Response(JSON.stringify({ status: "EVENT_RECEIVED" }), {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+      if (
+        processedCount === 0 &&
+        skippedReasons.length > 0 &&
+        skippedReasons.every((r) => r === "unmapped_page_or_form")
+      ) {
+        return jsonResponse({
+          status: "EVENT_RECEIVED",
+          skipped: "unmapped_page_or_form",
+          processed: 0,
         });
       }
 
-      return new Response("Not a page object", { status: 400 });
+      return jsonResponse({
+        status: "EVENT_RECEIVED",
+        processed: processedCount,
+        ...(skippedReasons.length > 0 ? { skipped_reasons: skippedReasons } : {}),
+      });
     } catch (err: any) {
       console.error("[Meta Webhook] Processing error:", err);
-      return new Response(JSON.stringify({ error: err.message }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: err?.message || "Internal server error" }, 500);
     }
   }
 
-  return new Response("Method not allowed", { status: 405 });
+  return jsonResponse({ error: "Method not allowed" }, 405);
 });

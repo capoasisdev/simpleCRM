@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { getActiveCompanyId, readTenantCache, writeTenantCache } from './tenant';
 
 /**
  * Normalizes phone number to international digits format (e.g., 919876543210)
@@ -17,10 +18,13 @@ export function formatWhatsAppNumber(phone) {
  * Fetches the active WhatsApp configuration dynamically from Supabase meta_config
  */
 export async function getWhatsAppConfig() {
+  const companyId = getActiveCompanyId();
+  if (!companyId) return null;
   try {
     const { data, error } = await supabase
       .from('meta_config')
       .select('whatsapp_phone_number_id, whatsapp_business_account_id, whatsapp_access_token, whatsapp_template, whatsapp_auto_welcome, whatsapp_templates')
+      .eq('company_id', companyId)
       .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle();
@@ -109,7 +113,7 @@ export async function fetchWhatsAppTemplates({ wabaId, token }) {
  * @param {Object} params
  * @param {string} params.to - Recipient phone number
  * @param {string} [params.leadName] - Contact name to inject into {{1}}
- * @param {string} [params.templateName] - Template name (defaults to configured or 'salado_lead_welcome')
+ * @param {string} [params.templateName] - Template name (defaults to configured or 'welcome_lead_intro')
  * @param {Object} [params.overrideConfig] - Optional config override
  */
 const MESSAGES_STORAGE_KEY = 'crm_whatsapp_messages';
@@ -118,15 +122,8 @@ const MESSAGES_STORAGE_KEY = 'crm_whatsapp_messages';
  * Get locally stored WhatsApp messages
  */
 export function getStoredWhatsAppMessages() {
-  try {
-    const raw = localStorage.getItem(MESSAGES_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    console.warn('Error reading stored whatsapp messages:', err);
-    return [];
-  }
+  const parsed = readTenantCache(MESSAGES_STORAGE_KEY, []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 /**
@@ -143,8 +140,12 @@ export async function recordWhatsAppMessage({
   isAutomated = true,
   status = 'sent'
 }) {
+  const clientUuid =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : null;
   const newMsg = {
-    id: `wamsg-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    id: clientUuid || `wamsg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     lead_id: leadId || null,
     lead_name: leadName || 'Contact',
     phone: formatWhatsAppNumber(phone),
@@ -162,7 +163,7 @@ export async function recordWhatsAppMessage({
   try {
     const current = getStoredWhatsAppMessages();
     const updated = [newMsg, ...current.filter(m => m.id !== newMsg.id)].slice(0, 500);
-    localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(updated));
+    writeTenantCache(MESSAGES_STORAGE_KEY, updated);
   } catch (err) {
     console.warn('Error caching whatsapp message:', err);
   }
@@ -176,20 +177,38 @@ export async function recordWhatsAppMessage({
 
   // 3. Persist to Supabase whatsapp_messages table
   try {
-    const isUuid = leadId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(leadId);
-    const payload = {
-      lead_id: isUuid ? leadId : null,
-      lead_name: newMsg.lead_name,
-      phone: newMsg.phone,
-      pipeline_id: newMsg.pipeline_id,
-      stage_id: newMsg.stage_id,
-      template_name: newMsg.template_name,
-      message_body: newMsg.message_body,
-      direction: 'outbound',
-      status: newMsg.status,
-      is_automated: newMsg.is_automated
-    };
-    await supabase.from('whatsapp_messages').insert([payload]);
+    const companyId = getActiveCompanyId();
+    if (companyId) {
+      const isUuid = leadId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(leadId);
+      const payload = {
+        ...(clientUuid ? { id: clientUuid } : {}),
+        company_id: companyId,
+        lead_id: isUuid ? leadId : null,
+        lead_name: newMsg.lead_name,
+        phone: newMsg.phone,
+        pipeline_id: newMsg.pipeline_id,
+        stage_id: newMsg.stage_id,
+        template_name: newMsg.template_name,
+        message_body: newMsg.message_body,
+        direction: 'outbound',
+        status: newMsg.status,
+        is_automated: newMsg.is_automated
+      };
+      const { data, error } = await supabase
+        .from('whatsapp_messages')
+        .insert([payload])
+        .select('id, created_at')
+        .maybeSingle();
+
+      if (!error && data?.id && data.id !== newMsg.id) {
+        const previousId = newMsg.id;
+        newMsg.id = data.id;
+        newMsg.created_at = data.created_at || newMsg.created_at;
+        const current = getStoredWhatsAppMessages();
+        const synced = current.map((m) => (m.id === previousId ? { ...m, id: data.id, created_at: newMsg.created_at } : m));
+        writeTenantCache(MESSAGES_STORAGE_KEY, synced);
+      }
+    }
   } catch (err) {
     // Non-blocking: table might not exist in Supabase yet
   }
@@ -202,10 +221,13 @@ export async function recordWhatsAppMessage({
  */
 export async function fetchWhatsAppMessages() {
   const local = getStoredWhatsAppMessages();
+  const companyId = getActiveCompanyId();
+  if (!companyId) return local;
   try {
     const { data, error } = await supabase
       .from('whatsapp_messages')
       .select('*')
+      .eq('company_id', companyId)
       .order('created_at', { ascending: false })
       .limit(200);
 
@@ -221,7 +243,7 @@ export async function fetchWhatsAppMessages() {
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
       try {
-        localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(merged.slice(0, 500)));
+        writeTenantCache(MESSAGES_STORAGE_KEY, merged.slice(0, 500));
       } catch (e) { }
       return merged;
     }
@@ -252,7 +274,7 @@ export async function sendWhatsAppMessage({
 
   const phoneId = config.whatsapp_phone_number_id?.trim();
   const token = config.whatsapp_access_token?.trim();
-  const template = templateName || config.whatsapp_template?.trim() || 'salado_lead_welcome';
+  const template = templateName || config.whatsapp_template?.trim() || 'welcome_lead_intro';
 
   if (!phoneId) {
     throw new Error('WhatsApp Phone Number ID is missing. Please configure it in Settings → Integrations.');
@@ -275,7 +297,7 @@ export async function sendWhatsAppMessage({
     }
   }
   if (!renderedBody) {
-    renderedBody = `Hello ${leadName || 'there'}, thank you for your interest in SaladO! 🥗 We're excited to have you connect with us.`;
+    renderedBody = `Hello ${leadName || 'there'}, thank you for connecting with us! We have received your inquiry and our team will get in touch shortly.`;
   }
 
   // Construct template payload
@@ -292,7 +314,7 @@ export async function sendWhatsAppMessage({
     }
   };
 
-  // If template has variables (like salado_lead_welcome has {{1}} for contact name)
+  // If template has variables (like {{1}} for contact name)
   if (template !== 'hello_world') {
     payload.template.components = [
       {

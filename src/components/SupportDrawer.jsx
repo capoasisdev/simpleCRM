@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Send, CheckCircle2, Loader2, MessageSquare, Paperclip, Phone } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getActiveCompanyId } from '../lib/tenant';
 import '../styles/support.css';
 
 const MAX_ATTACHMENTS = 4;
@@ -192,7 +193,9 @@ export default function SupportDrawer({
     setErrorMsg('');
 
     try {
+      const companyId = getActiveCompanyId();
       const ticketPayload = {
+        ...(companyId ? { company_id: companyId } : {}),
         user_id: currentUser?.id ? String(currentUser.id) : null,
         user_name: userName,
         user_email: userEmail,

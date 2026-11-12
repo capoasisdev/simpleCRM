@@ -2,24 +2,16 @@
  * notifications.js - In-app notification center & event bus
  */
 
+import { readTenantCache, writeTenantCache } from './tenant';
+
 const STORAGE_KEY = 'simplecrm_notifications';
 
 export function getStoredNotifications() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    console.warn('Failed to parse notifications from storage', e);
-    return [];
-  }
+  return readTenantCache(STORAGE_KEY, []);
 }
 
 export function saveNotifications(notifications) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(notifications.slice(0, 50)));
-  } catch (e) {
-    console.warn('Failed to save notifications to storage', e);
-  }
+  writeTenantCache(STORAGE_KEY, notifications.slice(0, 50));
 }
 
 /**

@@ -4,12 +4,14 @@
  * production-ready pipelines and targeting configurations from a single natural language prompt.
  */
 
+import { readTenantString } from './tenant';
+
 const OPENROUTER_STORAGE_KEY = 'crm_openrouter_api_key';
 
 function getOpenRouterApiKey() {
   try {
     return (
-      localStorage.getItem(OPENROUTER_STORAGE_KEY) ||
+      readTenantString(OPENROUTER_STORAGE_KEY) ||
       import.meta.env.VITE_OPENROUTER_API_KEY ||
       ''
     );
@@ -458,7 +460,7 @@ Return ONLY valid JSON matching this exact structure, with no markdown code bloc
         'Authorization': `Bearer ${apiKey.trim()}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
-        'X-Title': 'SimpleCRM'
+        'X-Title': 'simplecrm'
       },
       body: JSON.stringify({
         model: OPENROUTER_MODELS[0] || 'google/gemini-2.0-flash-exp:free',

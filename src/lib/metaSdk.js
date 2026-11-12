@@ -3,6 +3,7 @@
  */
 
 import { supabase } from './supabase';
+import { getActiveCompanyId, readTenantString } from './tenant';
 
 const DEFAULT_APP_ID = import.meta.env.VITE_META_APP_ID || '977193864751819';
 const DEFAULT_APP_SECRET = import.meta.env.VITE_META_APP_SECRET || '';
@@ -134,7 +135,7 @@ export const fetchUserAdAccounts = async (primaryToken, fallbackTokens = []) => 
       [
         primaryToken,
         ...(Array.isArray(fallbackTokens) ? fallbackTokens : [fallbackTokens]),
-        typeof localStorage !== 'undefined' ? localStorage.getItem('crm_meta_user_token') : null
+        typeof localStorage !== 'undefined' ? readTenantString('crm_meta_user_token') : null
       ].filter((t) => t && typeof t === 'string' && t.trim().length > 15)
     )
   );
@@ -352,7 +353,7 @@ export const fetchAdAccountBudget = async (adAccountId, primaryToken, fallbackTo
       [
         primaryToken,
         ...fallbackTokens,
-        typeof localStorage !== 'undefined' ? localStorage.getItem('crm_meta_user_token') : null
+        typeof localStorage !== 'undefined' ? readTenantString('crm_meta_user_token') : null
       ].filter((t) => t && typeof t === 'string' && t.trim().length > 15)
     )
   );
@@ -382,11 +383,15 @@ export const fetchAdAccountBudget = async (adAccountId, primaryToken, fallbackTo
   // If candidate tokens were page tokens or failed, try fetching whatsapp_access_token from Supabase
   if (!accountData) {
     try {
-      const { data: dbConf } = await supabase
-        .from('meta_config')
-        .select('whatsapp_access_token')
-        .limit(1)
-        .maybeSingle();
+      const companyId = getActiveCompanyId();
+      const { data: dbConf } = companyId
+        ? await supabase
+            .from('meta_config')
+            .select('whatsapp_access_token')
+            .eq('company_id', companyId)
+            .limit(1)
+            .maybeSingle()
+        : { data: null };
 
       const dbToken = dbConf?.whatsapp_access_token;
       if (dbToken && !candidateTokens.includes(dbToken.trim())) {

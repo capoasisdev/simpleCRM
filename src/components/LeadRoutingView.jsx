@@ -11,6 +11,7 @@ import {
   X
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getActiveCompanyId, readTenantCache, writeTenantCache } from '../lib/tenant';
 import Skeleton from './common/Skeleton';
 import '../styles/leadRouting.css';
 
@@ -30,29 +31,17 @@ const getMemberShade = (member, index) => {
 
 export default function LeadRoutingView() {
   const [userRules, setUserRules] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_lead_routing_rules');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {}
-    return [];
+    const parsed = readTenantCache('crm_cached_lead_routing_rules', []);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : [];
   });
   const [isLoading, setIsLoading] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_lead_routing_rules');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return false;
-      }
-    } catch (e) {}
-    return true;
+    const parsed = readTenantCache('crm_cached_lead_routing_rules', []);
+    return !(Array.isArray(parsed) && parsed.length > 0);
   });
   const [isSaving, setIsSaving] = useState(false);
   const [configId, setConfigId] = useState(null);
   const [mode, setMode] = useState('round_robin'); // 'round_robin' | 'weighted' | 'single' | 'unassigned'
-  const [defaultAssignee, setDefaultAssignee] = useState('pranav');
+  const [defaultAssignee, setDefaultAssignee] = useState('unassigned');
   const [roundRobinIndex, setRoundRobinIndex] = useState(0);
   const [toast, setToast] = useState(null);
   const [simulation, setSimulation] = useState(null);
@@ -68,6 +57,11 @@ export default function LeadRoutingView() {
     let isMounted = true;
 
     async function loadData() {
+      const companyId = getActiveCompanyId();
+      if (!companyId) {
+        if (isMounted) setIsLoading(false);
+        return;
+      }
       if (userRules.length === 0) {
         setIsLoading(true);
       }
@@ -75,6 +69,7 @@ export default function LeadRoutingView() {
         const { data: usersData, error: usersErr } = await supabase
           .from('crm_users')
           .select('id, name, email, role')
+          .eq('company_id', companyId)
           .order('name', { ascending: true });
 
         if (usersErr) throw usersErr;
@@ -82,6 +77,7 @@ export default function LeadRoutingView() {
         const { data: configData, error: configErr } = await supabase
           .from('lead_routing_config')
           .select('*')
+          .eq('company_id', companyId)
           .limit(1)
           .maybeSingle();
 
@@ -110,12 +106,12 @@ export default function LeadRoutingView() {
 
           setUserRules(mergedRules);
           try {
-            localStorage.setItem('crm_cached_lead_routing_rules', JSON.stringify(mergedRules));
+            writeTenantCache('crm_cached_lead_routing_rules', mergedRules, companyId);
           } catch (e) {}
           if (configData) {
             setConfigId(configData.id);
             setMode(configData.mode || 'round_robin');
-            setDefaultAssignee(configData.default_assignee || (mergedRules[0]?.name || 'pranav'));
+            setDefaultAssignee(configData.default_assignee || (mergedRules[0]?.name || 'unassigned'));
             setRoundRobinIndex(configData.round_robin_index || 0);
           } else if (mergedRules.length > 0) {
             setDefaultAssignee(mergedRules[0].name);
@@ -231,6 +227,8 @@ export default function LeadRoutingView() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      const companyId = getActiveCompanyId();
+      if (!companyId) throw new Error('No active workspace selected.');
       const payload = {
         mode,
         default_assignee: defaultAssignee,
@@ -248,12 +246,13 @@ export default function LeadRoutingView() {
         const { error } = await supabase
           .from('lead_routing_config')
           .update(payload)
-          .eq('id', configId);
+          .eq('id', configId)
+          .eq('company_id', companyId);
         if (error) throw error;
       } else {
         const { data, error } = await supabase
           .from('lead_routing_config')
-          .insert(payload)
+          .upsert({ ...payload, company_id: companyId }, { onConflict: 'company_id' })
           .select()
           .single();
         if (error) throw error;

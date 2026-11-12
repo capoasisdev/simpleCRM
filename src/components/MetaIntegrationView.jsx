@@ -36,6 +36,7 @@ import EmailIntegrationView from './EmailIntegrationView';
 import WebsiteFormsView from './WebsiteFormsView';
 import { fetchEmailConfig } from '../lib/email';
 import { supabase } from '../lib/supabase';
+import { getActiveCompanyId, readTenantCache, writeTenantCache, removeTenantCache, readTenantString, writeTenantString } from '../lib/tenant';
 import { fetchAdAccountDatasets, sendMetaCapiTestEvent, fetchMetaCapiLogs } from '../lib/metaCapi';
 import {
   loginWithMeta,
@@ -199,14 +200,10 @@ const INTEGRATION_CHANNELS = [
 ];
 
 export default function MetaIntegrationView({ currentUser }) {
+  const activeCompanyId = getActiveCompanyId() || currentUser?.company_id || null;
   const [config, setConfig] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_meta_config');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed && typeof parsed === 'object') return parsed;
-      }
-    } catch (e) { }
+    const parsed = readTenantCache('crm_cached_meta_config', null, activeCompanyId);
+    if (parsed && typeof parsed === 'object') return parsed;
     return {
       app_id: import.meta.env.VITE_META_APP_ID || '',
       app_secret: import.meta.env.VITE_META_APP_SECRET || '',
@@ -214,6 +211,7 @@ export default function MetaIntegrationView({ currentUser }) {
       verify_token: import.meta.env.VITE_META_VERIFY_TOKEN || '',
       ad_account_id: '',
       lead_form_ids: '',
+      page_id: '',
       is_connected: false,
       connected_page_name: '',
       connected_account_name: '',
@@ -231,18 +229,12 @@ export default function MetaIntegrationView({ currentUser }) {
 
   // Lead Forms State
   const [forms, setForms] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_connected_forms');
-      if (cached) return JSON.parse(cached);
-    } catch (e) { }
-    return [];
+    const parsed = readTenantCache('crm_cached_connected_forms', [], activeCompanyId);
+    return Array.isArray(parsed) ? parsed : [];
   });
   const [pipelines, setPipelines] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_pipelines');
-      if (cached) return JSON.parse(cached);
-    } catch (e) { }
-    return [];
+    const parsed = readTenantCache('crm_cached_pipelines', [], activeCompanyId);
+    return Array.isArray(parsed) ? parsed : [];
   });
   const [crmUsers, setCrmUsers] = useState([]);
 
@@ -288,12 +280,8 @@ export default function MetaIntegrationView({ currentUser }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [discoveredPages, setDiscoveredPages] = useState([]);
   const [discoveredAdAccounts, setDiscoveredAdAccounts] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_discovered_ad_accounts');
-      return cached ? JSON.parse(cached) : [];
-    } catch {
-      return [];
-    }
+    const parsed = readTenantCache('crm_cached_discovered_ad_accounts', [], activeCompanyId);
+    return Array.isArray(parsed) ? parsed : [];
   });
   const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
   const [selectedPageId, setSelectedPageId] = useState('');
@@ -311,12 +299,7 @@ export default function MetaIntegrationView({ currentUser }) {
 
   // Ad Account Budget & Health State
   const [adBudget, setAdBudget] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_ad_budget');
-      return cached ? JSON.parse(cached) : null;
-    } catch {
-      return null;
-    }
+    return readTenantCache('crm_cached_ad_budget', null, activeCompanyId);
   });
   const [isLoadingAdBudget, setIsLoadingAdBudget] = useState(false);
 
@@ -354,7 +337,7 @@ export default function MetaIntegrationView({ currentUser }) {
     if (!config.ad_account_id) return;
     setIsLoadingAdBudget(true);
     try {
-      const userTok = fbUserToken || localStorage.getItem('crm_meta_user_token');
+      const userTok = fbUserToken || readTenantString('crm_meta_user_token', null, activeCompanyId);
       const waAccess = config.whatsapp_access_token;
       const b = await fetchAdAccountBudget(
         config.ad_account_id,
@@ -363,9 +346,7 @@ export default function MetaIntegrationView({ currentUser }) {
       );
       if (b) {
         setAdBudget(b);
-        try {
-          localStorage.setItem('crm_cached_ad_budget', JSON.stringify(b));
-        } catch {}
+        writeTenantCache('crm_cached_ad_budget', b, activeCompanyId);
       }
     } catch (err) {
       console.warn('Could not fetch ad budget in MetaIntegrationView:', err);
@@ -383,16 +364,14 @@ export default function MetaIntegrationView({ currentUser }) {
   // Auto-fetch accessible Ad Accounts when connected so switcher is always populated
   useEffect(() => {
     const fetchAccounts = async () => {
-      const userTok = fbUserToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('crm_meta_user_token') : null);
+      const userTok = fbUserToken || readTenantString('crm_meta_user_token', null, activeCompanyId);
       const waAccess = config.whatsapp_access_token;
       const pageTok = config.access_token;
       try {
         const accounts = await fetchUserAdAccounts(userTok, [waAccess, pageTok]);
         if (accounts && accounts.length > 0) {
           setDiscoveredAdAccounts(accounts);
-          try {
-            localStorage.setItem('crm_cached_discovered_ad_accounts', JSON.stringify(accounts));
-          } catch (e) {}
+          writeTenantCache('crm_cached_discovered_ad_accounts', accounts, activeCompanyId);
         }
       } catch (e) {
         console.warn('Could not auto-fetch ad accounts:', e);
@@ -420,11 +399,9 @@ export default function MetaIntegrationView({ currentUser }) {
       connected_account_name: newAccountName
     };
     setConfig(updatedConfig);
-    try {
-      localStorage.setItem('crm_cached_meta_config', JSON.stringify(updatedConfig));
-    } catch (e) {}
+    writeTenantCache('crm_cached_meta_config', updatedConfig, activeCompanyId);
 
-    if (rowId) {
+    if (rowId && activeCompanyId) {
       try {
         await supabase
           .from('meta_config')
@@ -433,7 +410,8 @@ export default function MetaIntegrationView({ currentUser }) {
             connected_account_name: newAccountName,
             updated_at: new Date().toISOString()
           })
-          .eq('id', rowId);
+          .eq('id', rowId)
+          .eq('company_id', activeCompanyId);
       } catch (err) {
         console.error('Error switching ad account in DB:', err);
       }
@@ -445,7 +423,7 @@ export default function MetaIntegrationView({ currentUser }) {
     // Refresh budget for this newly selected ad account
     setIsLoadingAdBudget(true);
     try {
-      const userTok = fbUserToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('crm_meta_user_token') : null);
+      const userTok = fbUserToken || readTenantString('crm_meta_user_token', null, activeCompanyId);
       const waAccess = config.whatsapp_access_token;
       const b = await fetchAdAccountBudget(
         cleanId,
@@ -454,9 +432,7 @@ export default function MetaIntegrationView({ currentUser }) {
       );
       if (b) {
         setAdBudget(b);
-        try {
-          localStorage.setItem('crm_cached_ad_budget', JSON.stringify(b));
-        } catch {}
+        writeTenantCache('crm_cached_ad_budget', b, activeCompanyId);
       }
     } catch (err) {
       console.warn('Could not fetch budget after switching ad account:', err);
@@ -595,10 +571,11 @@ export default function MetaIntegrationView({ currentUser }) {
         ...overridePayload
       };
 
+      if (!activeCompanyId) throw new Error('No active workspace selected.');
       if (rowId) {
-        await supabase.from('meta_config').update(payload).eq('id', rowId);
+        await supabase.from('meta_config').update(payload).eq('id', rowId).eq('company_id', activeCompanyId);
       } else {
-        const { data: newRow } = await supabase.from('meta_config').insert([payload]).select().single();
+        const { data: newRow } = await supabase.from('meta_config').insert([{ ...payload, company_id: activeCompanyId }]).select().single();
         if (newRow?.id) setRowId(newRow.id);
       }
 
@@ -702,12 +679,18 @@ export default function MetaIntegrationView({ currentUser }) {
 
   useEffect(() => {
     let isMounted = true;
+    const companyId = activeCompanyId;
+    if (!companyId) {
+      setIsLoading(false);
+      return;
+    }
 
     const fetchConfig = async () => {
       try {
         const { data, error } = await supabase
           .from('meta_config')
           .select('*')
+          .eq('company_id', companyId)
           .order('created_at', { ascending: true })
           .limit(1)
           .maybeSingle();
@@ -721,6 +704,7 @@ export default function MetaIntegrationView({ currentUser }) {
             verify_token: data.verify_token || import.meta.env.VITE_META_VERIFY_TOKEN || '',
             ad_account_id: data.ad_account_id || '',
             lead_form_ids: (data.lead_form_ids || []).join(', '),
+            page_id: data.page_id || '',
             is_connected: data.is_connected || false,
             connected_page_name: data.connected_page_name || '',
             connected_account_name: data.connected_account_name || '',
@@ -730,9 +714,7 @@ export default function MetaIntegrationView({ currentUser }) {
             test_event_code: data.test_event_code || ''
           };
           setConfig(newConf);
-          try {
-            localStorage.setItem('crm_cached_meta_config', JSON.stringify(newConf));
-          } catch (e) { }
+          writeTenantCache('crm_cached_meta_config', newConf, companyId);
 
           // Populate CAPI State
           setDatasetId(data.dataset_id || '');
@@ -772,12 +754,12 @@ export default function MetaIntegrationView({ currentUser }) {
         const { data, error } = await supabase
           .from('connected_forms')
           .select('*')
+          .eq('company_id', companyId)
+          .neq('source', 'website')
           .order('created_at', { ascending: false });
         if (!error && data && isMounted) {
           setForms(data);
-          try {
-            localStorage.setItem('crm_cached_connected_forms', JSON.stringify(data));
-          } catch (e) { }
+          writeTenantCache('crm_cached_connected_forms', data, companyId);
         }
       } catch (err) {
         console.warn('Error fetching connected_forms:', err);
@@ -789,12 +771,11 @@ export default function MetaIntegrationView({ currentUser }) {
         const { data, error } = await supabase
           .from('pipelines')
           .select('*')
+          .eq('company_id', companyId)
           .order('is_default', { ascending: false });
         if (!error && data && isMounted) {
           setPipelines(data);
-          try {
-            localStorage.setItem('crm_cached_pipelines', JSON.stringify(data));
-          } catch (e) { }
+          writeTenantCache('crm_cached_pipelines', data, companyId);
         }
       } catch (err) {
         console.warn('Error fetching pipelines:', err);
@@ -806,6 +787,7 @@ export default function MetaIntegrationView({ currentUser }) {
         const { data, error } = await supabase
           .from('crm_users')
           .select('id, name, email, role')
+          .eq('company_id', companyId)
           .order('name', { ascending: true });
         if (!error && data && isMounted) {
           setCrmUsers(data);
@@ -828,7 +810,7 @@ export default function MetaIntegrationView({ currentUser }) {
       .channel('connected-forms-realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'connected_forms' },
+        { event: '*', schema: 'public', table: 'connected_forms', filter: `company_id=eq.${companyId}` },
         () => {
           fetchConnectedForms();
         }
@@ -840,7 +822,7 @@ export default function MetaIntegrationView({ currentUser }) {
       .channel('meta-capi-logs-realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'meta_capi_logs' },
+        { event: '*', schema: 'public', table: 'meta_capi_logs', filter: `company_id=eq.${companyId}` },
         () => {
           loadCapiLogs();
         }
@@ -864,6 +846,8 @@ export default function MetaIntegrationView({ currentUser }) {
     const formIdsList = validForms.map(f => f.form_id.trim());
 
     try {
+      const companyId = activeCompanyId;
+      if (!companyId) throw new Error('No active workspace selected.');
       if (rowId) {
         await supabase
           .from('meta_config')
@@ -871,13 +855,16 @@ export default function MetaIntegrationView({ currentUser }) {
             lead_form_ids: formIdsList,
             updated_at: new Date().toISOString()
           })
-          .eq('id', rowId);
+          .eq('id', rowId)
+          .eq('company_id', companyId);
       }
 
       // Persist connected_forms
       for (const form of validForms) {
         const defaultPipe = pipelines.find(p => p.is_default) || pipelines[0];
         const formPayload = {
+          company_id: companyId,
+          source: 'meta',
           form_id: form.form_id.trim(),
           form_name: (form.form_name || '').trim() || `Form ${form.form_id.trim()}`,
           pipeline_id: form.pipeline_id || defaultPipe?.id || null,
@@ -888,7 +875,7 @@ export default function MetaIntegrationView({ currentUser }) {
         };
 
         if (form.id) {
-          await supabase.from('connected_forms').update(formPayload).eq('id', form.id);
+          await supabase.from('connected_forms').update(formPayload).eq('id', form.id).eq('company_id', companyId);
         } else {
           const { data: newRow } = await supabase.from('connected_forms').insert([formPayload]).select().single();
           if (newRow) form.id = newRow.id;
@@ -907,6 +894,8 @@ export default function MetaIntegrationView({ currentUser }) {
   };
 
   const handleDisconnect = async () => {
+    const companyId = getActiveCompanyId();
+    if (!companyId) return;
     if (!rowId) return;
     setIsSaving(true);
     try {
@@ -914,19 +903,22 @@ export default function MetaIntegrationView({ currentUser }) {
         .from('meta_config')
         .update({
           is_connected: false,
+          page_id: null,
           connected_page_name: null,
           connected_account_name: null,
           access_token: '',
           ad_account_id: '',
           lead_form_ids: []
         })
-        .eq('id', rowId);
+        .eq('id', rowId)
+        .eq('company_id', companyId);
 
-      await supabase.from('connected_forms').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('connected_forms').delete().eq('company_id', companyId).eq('source', 'meta');
 
       setConfig(prev => ({
         ...prev,
         is_connected: false,
+        page_id: '',
         connected_page_name: '',
         connected_account_name: '',
         access_token: '',
@@ -937,10 +929,8 @@ export default function MetaIntegrationView({ currentUser }) {
       setTokenHealth({ status: 'missing', message: 'No access token configured.', code: null, name: '' });
       setIsHealthBannerDismissed(false);
       setFbConnectError('');
-      try {
-        localStorage.removeItem('crm_cached_connected_forms');
-        localStorage.removeItem('crm_cached_meta_config');
-      } catch (e) { }
+      removeTenantCache('crm_cached_connected_forms', companyId);
+      removeTenantCache('crm_cached_meta_config', companyId);
     } catch (err) {
       console.warn('Error disconnecting:', err);
     } finally {
@@ -960,7 +950,10 @@ export default function MetaIntegrationView({ currentUser }) {
     const adAccountId = config.ad_account_id?.trim() || '';
 
     try {
+      const companyId = activeCompanyId;
+      if (!companyId) throw new Error('No active workspace selected.');
       const dbPayload = {
+        company_id: companyId,
         app_id: appId,
         app_secret: appSecret,
         access_token: token,
@@ -971,7 +964,7 @@ export default function MetaIntegrationView({ currentUser }) {
       };
 
       if (rowId) {
-        await supabase.from('meta_config').update(dbPayload).eq('id', rowId);
+        await supabase.from('meta_config').update(dbPayload).eq('id', rowId).eq('company_id', companyId);
       } else {
         const { data: newRow } = await supabase.from('meta_config').insert([dbPayload]).select().single();
         if (newRow) setRowId(newRow.id);
@@ -1000,9 +993,7 @@ export default function MetaIntegrationView({ currentUser }) {
       // Exchange short-lived login token for long-lived token if app secret available
       const effectiveUserToken = await exchangeForLongLivedUserToken(userToken, targetAppId, config.app_secret);
       setFbUserToken(effectiveUserToken);
-      try {
-        localStorage.setItem('crm_meta_user_token', effectiveUserToken);
-      } catch (e) {}
+      writeTenantString('crm_meta_user_token', effectiveUserToken, activeCompanyId);
 
       // Fetch managed Facebook Pages & Ad Accounts
       const [pages, adAccounts] = await Promise.all([
@@ -1101,16 +1092,28 @@ export default function MetaIntegrationView({ currentUser }) {
       // 2. Filter chosen forms
       const chosenForms = discoveredForms.filter(f => selectedFormIds.includes(f.id));
 
+      const companyId = activeCompanyId;
+      if (!companyId) throw new Error('No active workspace selected.');
+
       // 3. Smart Merge forms: preserve existing routing for already configured forms
       const defaultPipe = pipelines.find(p => p.is_default) || pipelines[0];
       const newConnectedForms = [];
 
-      // Delete forms that were unchecked
-      const existingInDb = await supabase.from('connected_forms').select('*');
+      // Delete forms that were unchecked (only Meta forms for this company, never website forms)
+      const existingInDb = await supabase
+        .from('connected_forms')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('source', 'meta');
       if (existingInDb.data) {
         for (const ef of existingInDb.data) {
           if (!selectedFormIds.includes(String(ef.form_id))) {
-            await supabase.from('connected_forms').delete().eq('id', ef.id);
+            await supabase
+              .from('connected_forms')
+              .delete()
+              .eq('id', ef.id)
+              .eq('company_id', companyId)
+              .eq('source', 'meta');
           }
         }
       }
@@ -1118,6 +1121,8 @@ export default function MetaIntegrationView({ currentUser }) {
       for (const rf of chosenForms) {
         const existing = forms.find(f => String(f.form_id) === String(rf.id));
         const payload = {
+          company_id: companyId,
+          source: 'meta',
           form_id: rf.id,
           form_name: rf.name || existing?.form_name || `Form ${rf.id}`,
           pipeline_id: existing?.pipeline_id || defaultPipe?.id || null,
@@ -1127,7 +1132,7 @@ export default function MetaIntegrationView({ currentUser }) {
           updated_at: new Date().toISOString()
         };
         if (existing?.id) {
-          await supabase.from('connected_forms').update(payload).eq('id', existing.id);
+          await supabase.from('connected_forms').update(payload).eq('id', existing.id).eq('company_id', companyId);
           newConnectedForms.push({ ...existing, ...payload });
         } else {
           const { data: ins } = await supabase.from('connected_forms').insert([payload]).select().single();
@@ -1136,9 +1141,7 @@ export default function MetaIntegrationView({ currentUser }) {
       }
 
       setForms(newConnectedForms);
-      try {
-        localStorage.setItem('crm_cached_connected_forms', JSON.stringify(newConnectedForms));
-      } catch (e) { }
+      writeTenantCache('crm_cached_connected_forms', newConnectedForms, companyId);
 
       // 4. Update meta_config with selected Page & Ad Account
       const chosenAdAccount = discoveredAdAccounts.find(
@@ -1151,6 +1154,7 @@ export default function MetaIntegrationView({ currentUser }) {
         app_id: targetAppId,
         access_token: pageToken,
         is_connected: true,
+        page_id: String(selectedPage.id),
         connected_page_name: selectedPage.name,
         connected_account_name: chosenAdAccount?.name || 'Meta Ads',
         ad_account_id: selectedAdAccountId ? `act_${selectedAdAccountId.replace(/^act_/, '')}` : '',
@@ -1159,9 +1163,11 @@ export default function MetaIntegrationView({ currentUser }) {
       setConfig(updatedConfig);
 
       const dbConfigPayload = {
+        company_id: companyId,
         app_id: targetAppId,
         access_token: pageToken,
         is_connected: true,
+        page_id: String(selectedPage.id),
         connected_page_name: selectedPage.name,
         connected_account_name: chosenAdAccount?.name || 'Meta Ads',
         ad_account_id: selectedAdAccountId ? `act_${selectedAdAccountId.replace(/^act_/, '')}` : '',
@@ -1170,15 +1176,13 @@ export default function MetaIntegrationView({ currentUser }) {
       };
 
       if (rowId) {
-        await supabase.from('meta_config').update(dbConfigPayload).eq('id', rowId);
+        await supabase.from('meta_config').update(dbConfigPayload).eq('id', rowId).eq('company_id', companyId);
       } else {
         const { data: newRow } = await supabase.from('meta_config').insert(dbConfigPayload).select().single();
         if (newRow) setRowId(newRow.id);
       }
 
-      try {
-        localStorage.setItem('crm_cached_meta_config', JSON.stringify(updatedConfig));
-      } catch (e) { }
+      writeTenantCache('crm_cached_meta_config', updatedConfig, companyId);
 
       setIsModalOpen(false);
       setFbConnectError('');
@@ -1248,25 +1252,23 @@ export default function MetaIntegrationView({ currentUser }) {
     const updated = forms.filter((_, i) => i !== index);
     setForms(updated);
 
-    try {
-      localStorage.setItem('crm_cached_connected_forms', JSON.stringify(updated));
-    } catch (e) { }
+    writeTenantCache('crm_cached_connected_forms', updated, activeCompanyId);
 
-    if (target?.id) {
+    if (target?.id && activeCompanyId) {
       try {
-        await supabase.from('connected_forms').delete().eq('id', target.id);
+        await supabase.from('connected_forms').delete().eq('id', target.id).eq('company_id', activeCompanyId);
       } catch (err) {
         console.error('Error deleting form:', err);
       }
     }
 
-    if (rowId) {
+    if (rowId && activeCompanyId) {
       const remainingIds = updated.map(f => f.form_id).filter(Boolean);
       try {
         await supabase.from('meta_config').update({
           lead_form_ids: remainingIds,
           updated_at: new Date().toISOString()
-        }).eq('id', rowId);
+        }).eq('id', rowId).eq('company_id', activeCompanyId);
       } catch (err) {
         console.error('Error updating meta_config:', err);
       }
@@ -1345,6 +1347,8 @@ export default function MetaIntegrationView({ currentUser }) {
 
   const finalizeWhatsAppConnection = async (account, token) => {
     try {
+      const companyId = activeCompanyId;
+      if (!companyId) throw new Error('No active workspace selected.');
       const name = account.verifiedName || account.wabaName || 'WhatsApp Business';
       setWaIsConnected(true);
       setWaAccountName(name);
@@ -1361,19 +1365,23 @@ export default function MetaIntegrationView({ currentUser }) {
         updated_at: new Date().toISOString()
       };
 
-      if (rowId) {
-        await supabase.from('meta_config').update(dbPayload).eq('id', rowId);
+      let targetRowId = rowId;
+      if (targetRowId) {
+        await supabase.from('meta_config').update(dbPayload).eq('id', targetRowId).eq('company_id', companyId);
       } else {
-        const { data: newRow } = await supabase.from('meta_config').insert([dbPayload]).select().single();
-        if (newRow) setRowId(newRow.id);
+        const { data: newRow } = await supabase.from('meta_config').insert([{ ...dbPayload, company_id: companyId }]).select().single();
+        if (newRow) {
+          targetRowId = newRow.id;
+          setRowId(newRow.id);
+        }
       }
 
       // Auto-sync templates immediately
       try {
         const templates = await fetchWhatsAppTemplates({ wabaId: account.wabaId, token });
         setWaTemplates(templates);
-        if (rowId) {
-          await supabase.from('meta_config').update({ whatsapp_templates: templates }).eq('id', rowId);
+        if (targetRowId) {
+          await supabase.from('meta_config').update({ whatsapp_templates: templates }).eq('id', targetRowId).eq('company_id', companyId);
         }
       } catch (syncErr) {
         console.warn('Initial template sync error:', syncErr);
@@ -1404,7 +1412,7 @@ export default function MetaIntegrationView({ currentUser }) {
     setWaVerifiedInfo(null);
 
     try {
-      if (rowId) {
+      if (rowId && activeCompanyId) {
         await supabase.from('meta_config').update({
           whatsapp_is_connected: false,
           whatsapp_account_name: '',
@@ -1413,7 +1421,7 @@ export default function MetaIntegrationView({ currentUser }) {
           whatsapp_access_token: '',
           whatsapp_templates: [],
           updated_at: new Date().toISOString()
-        }).eq('id', rowId);
+        }).eq('id', rowId).eq('company_id', activeCompanyId);
       }
       setWaFeedback({ type: 'success', text: 'WhatsApp disconnected successfully.' });
       setTimeout(() => setWaFeedback(null), 4000);
@@ -1427,6 +1435,8 @@ export default function MetaIntegrationView({ currentUser }) {
     setWaFeedback(null);
 
     try {
+      const companyId = activeCompanyId;
+      if (!companyId) throw new Error('No active workspace selected.');
       const isConnected = Boolean(waPhoneId.trim() && waToken.trim());
       const accountName = waVerifiedInfo?.displayName || waAccountName || 'WhatsApp Business';
       const dbPayload = {
@@ -1438,13 +1448,17 @@ export default function MetaIntegrationView({ currentUser }) {
         updated_at: new Date().toISOString()
       };
 
-      if (rowId) {
-        const { error } = await supabase.from('meta_config').update(dbPayload).eq('id', rowId);
+      let targetRowId = rowId;
+      if (targetRowId) {
+        const { error } = await supabase.from('meta_config').update(dbPayload).eq('id', targetRowId).eq('company_id', companyId);
         if (error) throw error;
       } else {
-        const { data: newRow, error } = await supabase.from('meta_config').insert([dbPayload]).select().single();
+        const { data: newRow, error } = await supabase.from('meta_config').insert([{ ...dbPayload, company_id: companyId }]).select().single();
         if (error) throw error;
-        if (newRow) setRowId(newRow.id);
+        if (newRow) {
+          targetRowId = newRow.id;
+          setRowId(newRow.id);
+        }
       }
 
       setWaIsConnected(isConnected);
@@ -1455,8 +1469,8 @@ export default function MetaIntegrationView({ currentUser }) {
         try {
           const templates = await fetchWhatsAppTemplates({ wabaId: waWabaId.trim(), token: waToken.trim() });
           setWaTemplates(templates);
-          if (rowId) {
-            await supabase.from('meta_config').update({ whatsapp_templates: templates }).eq('id', rowId);
+          if (targetRowId) {
+            await supabase.from('meta_config').update({ whatsapp_templates: templates }).eq('id', targetRowId).eq('company_id', companyId);
           }
         } catch (syncErr) {
           console.warn('Auto template sync error:', syncErr);
@@ -1503,13 +1517,14 @@ export default function MetaIntegrationView({ currentUser }) {
       setWaTemplates(templates);
 
       // Persist templates to database
-      if (rowId) {
+      if (rowId && activeCompanyId) {
         await supabase.from('meta_config').update({
           whatsapp_templates: templates,
           updated_at: new Date().toISOString()
-        }).eq('id', rowId);
-      } else {
+        }).eq('id', rowId).eq('company_id', activeCompanyId);
+      } else if (activeCompanyId) {
         const { data: newRow } = await supabase.from('meta_config').insert([{
+          company_id: activeCompanyId,
           whatsapp_phone_number_id: waPhoneId.trim(),
           whatsapp_business_account_id: waWabaId.trim(),
           whatsapp_access_token: waToken.trim(),
@@ -1541,7 +1556,7 @@ export default function MetaIntegrationView({ currentUser }) {
     if (waTemplates.length > 0) {
       setTestTemplateName(waTemplates[0].name);
     } else {
-      setTestTemplateName('salado_lead_welcome');
+      setTestTemplateName('welcome_lead_intro');
     }
     setIsTestModalOpen(true);
   };
@@ -2984,7 +2999,7 @@ export default function MetaIntegrationView({ currentUser }) {
                         value: t.name,
                         label: t.name
                       }))
-                      : [{ value: 'salado_lead_welcome', label: 'salado_lead_welcome' }]
+                      : [{ value: 'welcome_lead_intro', label: 'welcome_lead_intro' }]
                   }
                 />
               </div>

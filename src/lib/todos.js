@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { getActiveCompanyId, readTenantCache, writeTenantCache } from './tenant';
 
 const STORAGE_KEY = 'crm_sticky_notes_v2';
 
@@ -14,26 +15,15 @@ export const DEFAULT_COLOR = 'yellow';
  * Synchronous local cache reader for instant UI render
  */
 export function getCachedNotes() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    console.warn('Error reading cached sticky notes:', err);
-    return [];
-  }
+  const parsed = readTenantCache(STORAGE_KEY, []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 /**
  * Synchronous local cache writer
  */
 export function setCachedNotes(notes) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
-  } catch (err) {
-    console.warn('Error writing sticky notes cache:', err);
-  }
+  writeTenantCache(STORAGE_KEY, notes);
 }
 
 /**
@@ -75,10 +65,13 @@ function normalizeNote(row) {
  * Fetch all sticky notes from Supabase with local cache sync
  */
 export async function fetchStickyNotes() {
+  const companyId = getActiveCompanyId();
+  if (!companyId) return getCachedNotes();
   try {
     const { data, error } = await supabase
       .from('crm_todos')
       .select('*')
+      .eq('company_id', companyId)
       .order('is_completed', { ascending: false }) // pinned first
       .order('created_at', { ascending: true });
 
@@ -134,7 +127,10 @@ export function createStickyNoteSync({
   // 2. Persist to Supabase asynchronously in background (0ms UI latency)
   (async () => {
     try {
+      const companyId = getActiveCompanyId();
+      if (!companyId) return;
       const payload = {
+        company_id: companyId,
         id: newId,
         title: title || '',
         description: descriptionPayload,
@@ -195,10 +191,14 @@ export async function updateStickyNote(id, changes) {
       }
     }
 
-    await supabase
-      .from('crm_todos')
-      .update(payload)
-      .eq('id', id);
+    const companyId = getActiveCompanyId();
+    if (companyId) {
+      await supabase
+        .from('crm_todos')
+        .update(payload)
+        .eq('id', id)
+        .eq('company_id', companyId);
+    }
   } catch (err) {
     console.warn('Failed to update sticky note in Supabase:', err);
   }
@@ -218,10 +218,13 @@ export function deleteStickyNote(id) {
   // 2. Remove from Supabase in background
   (async () => {
     try {
+      const companyId = getActiveCompanyId();
+      if (!companyId) return;
       await supabase
         .from('crm_todos')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('company_id', companyId);
     } catch (err) {
       console.warn('Failed to delete sticky note in Supabase:', err);
     }

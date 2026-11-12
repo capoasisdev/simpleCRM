@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Search, Plus, X, Phone, Mail, Trash2, AlertCircle, MessageSquare, MapPin, Calendar, ChevronDown, Check, User, Copy, Clock, UploadCloud, Ghost, Activity, ArrowRight, ArrowUpRight, UserCheck, CalendarClock, RotateCcw, Download, GitFork, FolderInput, Menu, Compass, Loader2, Share2, Send, Sparkles } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getActiveCompanyId, readTenantCache, writeTenantCache, readTenantString, writeTenantString } from '../lib/tenant';
 import { hasPermission, getLeadScope, getFollowUpScope, canDeleteFollowUp, isLeadAssignedToUser, isUserAssignedToPipeline } from '../lib/permissions';
 import { recordActivity, fetchLeadActivities } from '../lib/activities';
 import { fetchFollowUps, getStoredFollowUps, getFollowUpUrgency, formatFollowUpTime, completeFollowUp, reopenFollowUp, deleteFollowUp } from '../lib/followups';
@@ -124,6 +125,7 @@ const formatPhoneNumber = (phone) => {
 };
 
 export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, pipelineType = 'sales' }) {
+  const activeCompanyId = getActiveCompanyId() || currentUser?.company_id || null;
   const activePipelineIdKey = pipelineType === 'cold' ? 'crm_active_cold_pipeline_id' : 'crm_active_pipeline_id';
   const cachedPipelinesKey = pipelineType === 'cold' ? 'crm_cached_pipelines_cold' : 'crm_cached_pipelines';
   const pipelineColumnsKey = pipelineType === 'cold' ? 'crm_cold_pipeline_columns' : 'crm_pipeline_columns';
@@ -133,24 +135,12 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
   const entityPlural = pipelineType === 'cold' ? 'Prospects' : 'Leads';
 
   const [leads, setLeads] = useState(() => {
-    try {
-      const cached = localStorage.getItem(cachedLeadsKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) { }
-    return [];
+    const parsed = readTenantCache(cachedLeadsKey, [], activeCompanyId);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : [];
   });
   const [columns, setColumns] = useState(() => {
-    try {
-      const cached = localStorage.getItem(pipelineColumnsKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) { }
-    return [];
+    const parsed = readTenantCache(pipelineColumnsKey, [], activeCompanyId);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : [];
   });
   const leadScope = getLeadScope(currentUser);
   const canViewAllLeads = currentUser?.role === 'admin' || leadScope === 'all';
@@ -403,28 +393,31 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
     window.addEventListener('crm-followups-updated', handleFollowUpsUpdated);
 
     // Supabase Realtime channel for multi-window / multi-device sync
-    const fuChannel = supabase
-      .channel('followups-realtime-channel')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'follow_ups' },
-        (payload) => {
-          if (payload.eventType === 'DELETE' && payload.old?.id) {
-            setFollowUps((prev) => prev.filter((f) => f.id !== payload.old.id));
-          }
-          fetchFollowUps().then((data) => {
-            if (isMounted) setFollowUps(data);
-          });
-        }
-      )
-      .subscribe();
+    const companyId = activeCompanyId;
+    const fuChannel = companyId
+      ? supabase
+          .channel('followups-realtime-channel')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'follow_ups', filter: `company_id=eq.${companyId}` },
+            (payload) => {
+              if (payload.eventType === 'DELETE' && payload.old?.id) {
+                setFollowUps((prev) => prev.filter((f) => f.id !== payload.old.id));
+              }
+              fetchFollowUps().then((data) => {
+                if (isMounted) setFollowUps(data);
+              });
+            }
+          )
+          .subscribe()
+      : null;
 
     return () => {
       isMounted = false;
       window.removeEventListener('crm-followups-updated', handleFollowUpsUpdated);
-      supabase.removeChannel(fuChannel);
+      if (fuChannel) supabase.removeChannel(fuChannel);
     };
-  }, []);
+  }, [activeCompanyId]);
 
   // Helper to get active follow-up for a lead
   const getLeadFollowUp = (leadId, leadName, includeCompleted = false) => {
@@ -863,15 +856,18 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
 
     // Persist stage update in Supabase
     try {
-      const { error } = await supabase
-        .from('leads')
-        .update({ stage: targetColumnId })
-        .eq('id', leadId);
+      if (activeCompanyId) {
+        const { error } = await supabase
+          .from('leads')
+          .update({ stage: targetColumnId })
+          .eq('id', leadId)
+          .eq('company_id', activeCompanyId);
 
-      if (error) {
-        console.error('Error updating lead stage on drop:', error);
-        // Revert on error
-        setLeads((prev) => [leadToMove, ...prev.filter((l) => l.id !== leadId)]);
+        if (error) {
+          console.error('Error updating lead stage on drop:', error);
+          // Revert on error
+          setLeads((prev) => [leadToMove, ...prev.filter((l) => l.id !== leadId)]);
+        }
       }
     } catch (err) {
       console.error('Network error on lead drop:', err);
@@ -880,23 +876,13 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
 
   // Multi-Pipeline States
   const [pipelinesList, setPipelinesList] = useState(() => {
-    try {
-      const cached = localStorage.getItem(cachedPipelinesKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return Array.isArray(parsed)
-          ? parsed.filter((p) => (pipelineType === 'cold' ? p.pipeline_type === 'cold' : (!p.pipeline_type || p.pipeline_type === 'sales')))
-          : [];
-      }
-    } catch (e) { }
+    const parsed = readTenantCache(cachedPipelinesKey, [], activeCompanyId);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.filter((p) => (pipelineType === 'cold' ? p.pipeline_type === 'cold' : (!p.pipeline_type || p.pipeline_type === 'sales')));
+    }
     return [];
   });
-  const [activePipelineId, setActivePipelineId] = useState(() => {
-    try {
-      return localStorage.getItem(activePipelineIdKey) || null;
-    } catch (e) { }
-    return null;
-  });
+  const [activePipelineId, setActivePipelineId] = useState(() => readTenantString(activePipelineIdKey, null, activeCompanyId));
   const [isPipelineDropdownOpen, setIsPipelineDropdownOpen] = useState(false);
   const [pipelineForms, setPipelineForms] = useState([]);
   const pipelineDropdownRef = useRef(null);
@@ -933,6 +919,8 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
   // Fetch dynamic pipelines from Supabase & subscribe to realtime
   useEffect(() => {
     let isMounted = true;
+    const companyId = activeCompanyId;
+    if (!companyId) return;
 
     const fetchPipelines = async () => {
       try {
@@ -940,10 +928,12 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
           supabase
             .from('pipelines')
             .select('*')
+            .eq('company_id', companyId)
             .order('is_default', { ascending: false }),
           supabase
             .from('connected_forms')
             .select('form_id, form_name, pipeline_id')
+            .eq('company_id', companyId)
         ]);
 
         if (formsData && isMounted) {
@@ -961,26 +951,20 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
 
         if (!error && isMounted) {
           setPipelinesList(targetPipelines);
-          try {
-            localStorage.setItem(cachedPipelinesKey, JSON.stringify(targetPipelines));
-          } catch (e) { }
+          writeTenantCache(cachedPipelinesKey, targetPipelines, companyId);
 
           if (targetPipelines.length > 0) {
-            const savedId = localStorage.getItem(activePipelineIdKey);
+            const savedId = readTenantString(activePipelineIdKey, null, companyId);
             const targetPipe = targetPipelines.find((p) => p.id === (activePipelineId || savedId)) || targetPipelines.find((p) => p.is_default) || targetPipelines[0];
 
             if (targetPipe) {
               setActivePipelineId(targetPipe.id);
-              try {
-                localStorage.setItem(activePipelineIdKey, targetPipe.id);
-              } catch (e) { }
+              writeTenantString(activePipelineIdKey, targetPipe.id, companyId);
 
               if (targetPipe.stages && Array.isArray(targetPipe.stages) && targetPipe.stages.length > 0) {
                 const sorted = [...targetPipe.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
                 setColumns(sorted);
-                try {
-                  localStorage.setItem(pipelineColumnsKey, JSON.stringify(sorted));
-                } catch (e) { }
+                writeTenantCache(pipelineColumnsKey, sorted, companyId);
                 const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
                 if (entryCol?.id) {
                   setNewLeadStage((prev) => (sorted.some((c) => c.id === prev) ? prev : entryCol.id));
@@ -1003,7 +987,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
       .channel(`pipeline-stages-realtime-${pipelineType}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'pipelines' },
+        { event: '*', schema: 'public', table: 'pipelines', filter: `company_id=eq.${companyId}` },
         () => {
           if (!isMounted) return;
           fetchPipelines();
@@ -1015,22 +999,18 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
       isMounted = false;
       supabase.removeChannel(pipeChannel);
     };
-  }, [pipelineType, cachedPipelinesKey, activePipelineIdKey, pipelineColumnsKey]);
+  }, [pipelineType, cachedPipelinesKey, activePipelineIdKey, pipelineColumnsKey, activeCompanyId]);
 
   const handleSelectPipeline = (pipeId) => {
     setActivePipelineId(pipeId);
     setIsPipelineDropdownOpen(false);
-    try {
-      localStorage.setItem(activePipelineIdKey, pipeId);
-    } catch (e) { }
+    writeTenantString(activePipelineIdKey, pipeId, activeCompanyId);
 
     const pipe = pipelinesList.find((p) => p.id === pipeId);
     if (pipe?.stages && Array.isArray(pipe.stages) && pipe.stages.length > 0) {
       const sorted = [...pipe.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       setColumns(sorted);
-      try {
-        localStorage.setItem(pipelineColumnsKey, JSON.stringify(sorted));
-      } catch (e) { }
+      writeTenantCache(pipelineColumnsKey, sorted, activeCompanyId);
       const entryCol = sorted.find((s) => s.is_entry) || sorted.find((s) => s.id === 'new') || sorted[0];
       if (entryCol?.id) {
         setNewLeadStage(entryCol.id);
@@ -1090,10 +1070,8 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
     try {
       let pipes = pipelinesList;
       if (!Array.isArray(pipes) || pipes.length === 0) {
-        try {
-          const cached = localStorage.getItem('crm_cached_pipelines');
-          if (cached) pipes = JSON.parse(cached);
-        } catch (_) {}
+        const cached = readTenantCache('crm_cached_pipelines', [], activeCompanyId);
+        if (Array.isArray(cached) && cached.length > 0) pipes = cached;
       }
 
       const targetPipe = (pipes || []).find(p => (p.stages || []).some(s => s.id === targetStageId))
@@ -1442,11 +1420,14 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
   // Fetch team members from crm_users
   useEffect(() => {
     let isMounted = true;
+    const companyId = activeCompanyId;
+    if (!companyId) return;
     const fetchTeam = async () => {
       try {
         const { data, error } = await supabase
           .from('crm_users')
           .select('id, name, email, role')
+          .eq('company_id', companyId)
           .order('name', { ascending: true });
         if (!error && isMounted && data) {
           setTeamMembers(data);
@@ -1459,7 +1440,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [activeCompanyId]);
 
   // Outside click listener to auto-close dropdowns
   useEffect(() => {
@@ -1511,19 +1492,19 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
   const [newLeadPhone, setNewLeadPhone] = useState('');
   const [newLeadEmail, setNewLeadEmail] = useState('');
   const [newLeadStage, setNewLeadStage] = useState(() => {
-    try {
-      const cached = localStorage.getItem(pipelineColumnsKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed[0]?.id) return parsed[0].id;
-      }
-    } catch (e) { }
+    const parsed = readTenantCache(pipelineColumnsKey, [], activeCompanyId);
+    if (Array.isArray(parsed) && parsed[0]?.id) return parsed[0].id;
     return 'new';
   });
 
   // Fetch leads from Supabase on mount & setup Realtime subscription
   useEffect(() => {
     let isMounted = true;
+    const companyId = activeCompanyId;
+    if (!companyId) {
+      setIsLoading(false);
+      return;
+    }
 
     const fetchLeads = async () => {
       try {
@@ -1531,6 +1512,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
         const { data, error } = await supabase
           .from('leads')
           .select('*')
+          .eq('company_id', companyId)
           .order('created_at', { ascending: false });
 
         if (error) {
@@ -1542,9 +1524,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
         } else if (isMounted && data) {
           setTableMissing(false);
           setLeads(data);
-          try {
-            localStorage.setItem(cachedLeadsKey, JSON.stringify(data));
-          } catch (e) { }
+          writeTenantCache(cachedLeadsKey, data, companyId);
         }
       } catch (err) {
         console.warn('Network error fetching leads from Supabase:', err);
@@ -1560,7 +1540,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
       .channel(`leads-realtime-${pipelineType}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'leads' },
+        { event: '*', schema: 'public', table: 'leads', filter: `company_id=eq.${companyId}` },
         (payload) => {
           if (!isMounted) return;
           if (payload.eventType === 'INSERT') {
@@ -1591,16 +1571,14 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
       isMounted = false;
       supabase.removeChannel(channel);
     };
-  }, [pipelineType, cachedLeadsKey]);
+  }, [pipelineType, cachedLeadsKey, activeCompanyId]);
 
   // Persist leads to localStorage cache for instant zero-flicker mounts
   useEffect(() => {
-    if (leads && leads.length > 0) {
-      try {
-        localStorage.setItem(cachedLeadsKey, JSON.stringify(leads));
-      } catch (e) { }
+    if (leads && leads.length > 0 && activeCompanyId) {
+      writeTenantCache(cachedLeadsKey, leads, activeCompanyId);
     }
-  }, [leads, cachedLeadsKey]);
+  }, [leads, cachedLeadsKey, activeCompanyId]);
 
   const isAdmin = currentUser?.role === 'admin';
 
@@ -1711,8 +1689,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
       (u) =>
         u.id === assignedTo ||
         u.name?.toLowerCase() === lower ||
-        u.email?.toLowerCase() === lower ||
-        (lower === 'pranav' && u.name?.toLowerCase().includes('pranav'))
+        u.email?.toLowerCase() === lower
     );
     if (matched) return matched;
     return { name: assignedTo, email: '' };
@@ -1743,10 +1720,12 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
     }
 
     try {
+      if (!activeCompanyId) throw new Error('No active workspace selected.');
       const { error } = await supabase
         .from('leads')
         .update({ assigned_to: targetVal })
-        .eq('id', leadId);
+        .eq('id', leadId)
+        .eq('company_id', activeCompanyId);
       if (error) console.error('Failed to update assignee in Supabase:', error);
     } catch (err) {
       console.error('Network error updating assignee:', err);
@@ -1825,11 +1804,14 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
       }
     }
 
+    const companyId = activeCompanyId;
+    if (!companyId) return;
+
     setIsSubmitting(true);
     const now = new Date();
     const todayStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
 
-    let defaultAssignee = 'pranav';
+    let defaultAssignee = 'unassigned';
     if (activePipeline?.lead_distribution?.default_assignee) {
       defaultAssignee = activePipeline.lead_distribution.default_assignee;
     } else if (currentUser?.name) {
@@ -1837,6 +1819,7 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
     }
 
     const leadPayload = {
+      company_id: companyId,
       name: newLeadName.trim(),
       phone: newLeadPhone.trim() || '+91 98201 00000',
       email: newLeadEmail.trim() || `${newLeadName.toLowerCase().replace(/\s+/g, '.')}@client.in`,
@@ -1890,7 +1873,8 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
     setLeads((prev) => prev.filter((l) => l.id !== leadId));
 
     try {
-      const { error } = await supabase.from('leads').delete().eq('id', leadId);
+      if (!activeCompanyId) return;
+      const { error } = await supabase.from('leads').delete().eq('id', leadId).eq('company_id', activeCompanyId);
       if (error) {
         console.warn('Error deleting lead from Supabase:', error.message);
       }
@@ -1975,7 +1959,9 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
       triggerStageAutomation(targetLead, newStage);
     }
     try {
-      await supabase.from('leads').update({ stage: newStage }).eq('id', leadId);
+      if (activeCompanyId) {
+        await supabase.from('leads').update({ stage: newStage }).eq('id', leadId).eq('company_id', activeCompanyId);
+      }
     } catch (err) {
       console.warn('Error updating lead stage in Supabase:', err);
     }
@@ -2022,10 +2008,12 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
       // Background sync with Supabase
       (async () => {
         try {
+          if (!activeCompanyId) return;
           const { error } = await supabase
             .from('leads')
             .update({ stage: targetStage })
-            .eq('id', lead.id);
+            .eq('id', lead.id)
+            .eq('company_id', activeCompanyId);
           if (error) {
             console.error('Failed to update stage in Supabase:', error.message);
           }
@@ -2051,7 +2039,9 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
       setSelectedLead((prev) => ({ ...prev, notes }));
     }
     try {
-      await supabase.from('leads').update({ notes }).eq('id', leadId);
+      if (activeCompanyId) {
+        await supabase.from('leads').update({ notes }).eq('id', leadId).eq('company_id', activeCompanyId);
+      }
     } catch (err) {
       console.warn('Error updating lead notes in Supabase:', err);
     }
@@ -2077,7 +2067,9 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
     }
 
     try {
-      await supabase.from('leads').update(payload).eq('id', leadId);
+      if (activeCompanyId) {
+        await supabase.from('leads').update(payload).eq('id', leadId).eq('company_id', activeCompanyId);
+      }
     } catch (err) {
       console.error('Error updating field in Supabase:', err);
     }
@@ -2201,10 +2193,12 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
     setLastSelectedLeadId(null);
 
     try {
+      if (!activeCompanyId) return;
       const { error } = await supabase
         .from('leads')
         .update({ stage: targetStageId })
-        .in('id', idsToMove);
+        .in('id', idsToMove)
+        .eq('company_id', activeCompanyId);
       if (error) {
         console.error('Error updating bulk stages in Supabase:', error.message);
       }
@@ -2247,10 +2241,12 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
     setLastSelectedLeadId(null);
 
     try {
+      if (!activeCompanyId) return;
       const { error } = await supabase
         .from('leads')
         .update({ assigned_to: targetVal })
-        .in('id', idsToAssign);
+        .in('id', idsToAssign)
+        .eq('company_id', activeCompanyId);
       if (error) {
         console.error('Error updating bulk assignment in Supabase:', error.message);
       }
@@ -2281,7 +2277,8 @@ export default function LeadsView({ currentUser, onNavigate, onScheduleLaterOn, 
       const { error } = await supabase
         .from('leads')
         .delete()
-        .in('id', idsToDelete);
+        .in('id', idsToDelete)
+        .eq('company_id', activeCompanyId);
       if (error) {
         console.error('Error bulk deleting leads in Supabase:', error.message);
       }

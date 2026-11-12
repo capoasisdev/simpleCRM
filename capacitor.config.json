@@ -1,6 +1,6 @@
 {
   "appId": "com.capoasis.crm",
-  "appName": "SimpleCRM",
+  "appName": "simplecrm",
   "webDir": "dist",
   "server": {
     "androidScheme": "https",

@@ -1,0 +1,215 @@
+/* ==========================================================================
+   simplecrm — Shared Kinetic Motion Primitives
+   GPU-compositor animations, scroll-driven reveals, sibling staggers,
+   and interactive CSS custom-property pointer spotlights.
+   ========================================================================== */
+
+/* Top-level registered custom properties enable smooth mask-gradient interpolation */
+@property --spot-inner {
+  syntax: "<length-percentage>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --spot-outer {
+  syntax: "<length-percentage>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+/* ==========================================================================
+   Shared Keyframes (Compositor-only: transform, opacity, clip-path, filter)
+   ========================================================================== */
+@keyframes kineticFrameShutter {
+  from {
+    opacity: 0.35;
+    clip-path: inset(16px 22px round 28px);
+    transform: scale(0.982);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0px 0px round 20px);
+    transform: scale(1);
+  }
+}
+
+@keyframes kineticNavDrop {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes kineticTypoCurtain {
+  from {
+    opacity: 0;
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(38%) skewY(1.8deg);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(-10% -4% -16% -4%);
+    transform: translateY(0) skewY(0deg);
+  }
+}
+
+@keyframes kineticBlurClarify {
+  from {
+    opacity: 0;
+    filter: blur(7px);
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0px);
+    transform: translateY(0);
+  }
+}
+
+@keyframes kineticDiagonalWipe {
+  from {
+    opacity: 0;
+    clip-path: polygon(0 0, 0 0, -12% 100%, 0 100%);
+    transform: translateX(-14px);
+  }
+  to {
+    opacity: 1;
+    clip-path: polygon(0 0, 114% 0, 104% 100%, 0 100%);
+    transform: translateX(0);
+  }
+}
+
+@keyframes kineticCardShutter {
+  from {
+    opacity: 0;
+    clip-path: inset(12% 4% 12% 4% round 24px);
+    transform: scale(0.955);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0% 0% 0% 0% round 16px);
+    transform: scale(1);
+  }
+}
+
+@keyframes kineticDarkCtaShutter {
+  from {
+    opacity: 0;
+    clip-path: inset(10% 3% 10% 3% round 28px);
+    transform: scale(0.955);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0% 0% 0% 0% round 20px);
+    transform: scale(1);
+  }
+}
+
+@keyframes kineticSiblingRise {
+  from {
+    opacity: 0;
+    transform: perspective(800px) translateY(16px) rotateX(6deg) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(800px) translateY(0) rotateX(0deg) scale(1);
+  }
+}
+
+@keyframes kineticDividerLaser {
+  from {
+    opacity: 0.15;
+    transform: scaleX(0.06);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes kineticOrbitalPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.84) translateY(12px);
+  }
+  68% {
+    opacity: 1;
+    transform: scale(1.035) translateY(-2px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ==========================================================================
+   Dark CTA Architectural Spotlight Layer
+   Note: Keep pointer-events: none and default dark card content 100% visible
+   at all times so keyboard & non-hover users keep full readability.
+   ========================================================================== */
+.spotlight-surface {
+  position: relative;
+  overflow: hidden;
+  --mouse-x: 50%;
+  --mouse-y: 35%;
+}
+
+.spotlight-grid-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(rgba(16, 185, 129, 0.38) 1px, transparent 1px),
+    linear-gradient(to right, rgba(16, 185, 129, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(16, 185, 129, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 35%), rgba(16, 185, 129, 0.22), transparent 65%);
+  background-size: 24px 24px, 48px 48px, 48px 48px, 100% 100%;
+  transition: --spot-inner 0.28s ease-out, --spot-outer 0.28s ease-out;
+  -webkit-mask-image: radial-gradient(
+    circle at var(--mouse-x, 50%) var(--mouse-y, 35%),
+    black var(--spot-inner, 0px),
+    transparent var(--spot-outer, 0px)
+  );
+  mask-image: radial-gradient(
+    circle at var(--mouse-x, 50%) var(--mouse-y, 35%),
+    black var(--spot-inner, 0px),
+    transparent var(--spot-outer, 0px)
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.spotlight-surface:hover {
+  --spot-inner: 55px;
+  --spot-outer: 290px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-grid-overlay {
+    transition: none !important;
+  }
+}
+
+/* ==========================================================================
+   Scroll Reveal Engine (Native ViewTimeline + IntersectionObserver Fallback)
+   Note: Only hide fallback elements explicitly tagged data-reveal-fallback="pending"
+   inside prefers-reduced-motion: no-preference so content never gets trapped invisible.
+   ========================================================================== */
+@media (prefers-reduced-motion: no-preference) {
+  [data-reveal-fallback="pending"] {
+    opacity: 0;
+  }
+
+  [data-reveal-fallback="pending"] .editorial-stat-item,
+  [data-reveal-fallback="pending"] .pricing-input-group,
+  [data-reveal-fallback="pending"].pricing-trust-bar .pricing-trust-item,
+  [data-reveal-fallback="pending"].pricing-faq-list .pricing-faq-item {
+    opacity: 0;
+  }
+}
+

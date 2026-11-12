@@ -315,9 +315,7 @@ export function isLeadAssignedToUser(lead, user) {
     assigned === userName ||
     assigned === userFirst ||
     (userEmail && assigned === userEmail) ||
-    (userId && assigned === userId) ||
-    (userName.includes('pranav') && assigned === 'pranav') ||
-    (userName.includes('dipak') && (assigned.includes('dipak') || assigned === 'bd01@salado.in'))
+    (userId && assigned === userId)
   );
 }
 
@@ -374,9 +372,7 @@ export function isUserAssignedToPipeline(pipe, user, leads = [], pipelineForms =
       str === userName ||
       str === userFirst ||
       (userEmail && str === userEmail) ||
-      (userId && str === userId) ||
-      (userName.includes('pranav') && str === 'pranav') ||
-      (userName.includes('dipak') && (str.includes('dipak') || str === 'bd01@salado.in'))
+      (userId && str === userId)
     );
   };
 

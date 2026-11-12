@@ -6,6 +6,7 @@
  */
 
 import { supabase } from './supabase.js';
+import { getActiveCompanyId, requireActiveCompanyId } from './tenant.js';
 import {
   buildLeadsDedupeIndex,
   evaluateCandidateDeduplication,
@@ -291,13 +292,15 @@ export async function runColdDiscoveryBatch({
     throw new Error('No target criteria or drip buffer configured. Please specify targeting criteria or upload prospects to the Lead Drip Buffer.');
   }
 
+  const companyId = pipeline?.company_id || getActiveCompanyId() || requireActiveCompanyId();
   const dedupeRules = config.dedupe || DEFAULT_DEDUPE_RULES;
   const batchSize = customBatchSize || config.batch_size || 15;
 
   // 1. Fetch all existing leads to build in-memory deduplication index
   const { data: existingLeads, error: fetchErr } = await supabase
     .from('leads')
-    .select('id, name, phone, email, stage, pipeline_id, custom_fields');
+    .select('id, name, phone, email, stage, pipeline_id, custom_fields')
+    .eq('company_id', companyId);
 
   if (fetchErr) {
     console.warn('Failed to fetch existing leads for deduplication, proceeding with local check:', fetchErr);
@@ -384,6 +387,7 @@ export async function runColdDiscoveryBatch({
     const cityVal = candidate.city || candidate.custom_fields?.city || candidate.custom_fields?.location?.split(',')[0]?.trim() || '';
 
     const newLeadPayload = {
+      company_id: companyId,
       name: candidate.name,
       phone: candidate.phone || '',
       email: candidate.email || '',
@@ -494,6 +498,7 @@ export async function runColdDiscoveryBatch({
     // Log activities for inserted leads
     try {
       const activityRecords = finalInserted.map(lead => ({
+        company_id: companyId,
         lead_id: lead.id,
         lead_name: lead.name,
         type: 'lead_created',
@@ -513,7 +518,8 @@ export async function runColdDiscoveryBatch({
       await supabase
         .from('leads')
         .update(item.patch)
-        .eq('id', item.leadId);
+        .eq('id', item.leadId)
+        .eq('company_id', companyId);
     } catch (enrichErr) {
       console.warn('Failed to enrich lead', item.leadId, enrichErr);
     }
@@ -548,7 +554,8 @@ export async function runColdDiscoveryBatch({
   await supabase
     .from('pipelines')
     .update(updatedPipelinePayload)
-    .eq('id', pipeline.id);
+    .eq('id', pipeline.id)
+    .eq('company_id', companyId);
 
   return {
     success: true,
@@ -680,18 +687,24 @@ export async function checkAndRunDiscoveryAutopilot({ pipelines = [], usersList 
 
   isDiscoveryAutopilotRunning = true;
   const executedRuns = [];
+  const sessionCompanyId = getActiveCompanyId();
 
   try {
     for (const pipe of duePipelines) {
       try {
         // Fetch fresh pipeline state from database to ensure no stale in-memory race condition
-        const { data: freshPipe } = await supabase
+        let pipeQuery = supabase
           .from('pipelines')
-          .select('id, name, discovery_config, stages, lead_distribution')
-          .eq('id', pipe.id)
-          .maybeSingle();
+          .select('id, company_id, name, discovery_config, stages, lead_distribution')
+          .eq('id', pipe.id);
+        const scopedCompanyId = pipe.company_id || sessionCompanyId;
+        if (scopedCompanyId) {
+          pipeQuery = pipeQuery.eq('company_id', scopedCompanyId);
+        }
+        const { data: freshPipe } = await pipeQuery.maybeSingle();
 
         const activePipe = freshPipe || pipe;
+        const pipeCompanyId = activePipe.company_id || scopedCompanyId || requireActiveCompanyId();
         const config = activePipe.discovery_config || {};
         const freshNextRun = config.next_run_at ? new Date(config.next_run_at) : null;
         if (freshNextRun && now < freshNextRun) {
@@ -702,41 +715,30 @@ export async function checkAndRunDiscoveryAutopilot({ pipelines = [], usersList 
         console.log(`[Discovery Autopilot] Executing automated discovery sweep for "${activePipe.name}"...`);
 
         let cloudHandled = false;
-        const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL;
-        const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY;
 
         // 1. Attempt serverless cloud execution via Edge Function first
-        if (supabaseUrl && supabaseAnonKey) {
-          try {
-            const edgeRes = await fetch(`${supabaseUrl}/functions/v1/discovery-autopilot`, {
-              method: 'POST',
-              headers: {
-                'apikey': supabaseAnonKey,
-                'Authorization': `Bearer ${supabaseAnonKey}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({ pipeline_id: activePipe.id })
-            });
+        try {
+          const { data: edgeData, error: edgeError } = await supabase.functions.invoke('discovery-autopilot', {
+            body: { pipeline_id: activePipe.id }
+          });
 
-            if (edgeRes.ok) {
-              const edgeData = await edgeRes.json();
-              cloudHandled = true; // Cloud successfully processed the scheduled sweep check
-              if (Array.isArray(edgeData.executed_runs) && edgeData.executed_runs.length > 0) {
-                const run = edgeData.executed_runs[0];
-                executedRuns.push({
-                  pipelineId: activePipe.id,
-                  pipelineName: activePipe.name,
-                  insertedCount: run.inserted || 0,
-                  duplicatesCount: run.duplicates_skipped || 0,
-                  nextRun: run.next_run_at,
-                  cloudExecuted: true
-                });
-                console.log(`[Discovery Autopilot] Cloud edge execution completed for "${activePipe.name}": +${run.inserted} leads.`);
-              }
+          if (!edgeError && edgeData) {
+            cloudHandled = true; // Cloud successfully processed the scheduled sweep check
+            if (Array.isArray(edgeData.executed_runs) && edgeData.executed_runs.length > 0) {
+              const run = edgeData.executed_runs[0];
+              executedRuns.push({
+                pipelineId: activePipe.id,
+                pipelineName: activePipe.name,
+                insertedCount: run.inserted || 0,
+                duplicatesCount: run.duplicates_skipped || 0,
+                nextRun: run.next_run_at,
+                cloudExecuted: true
+              });
+              console.log(`[Discovery Autopilot] Cloud edge execution completed for "${activePipe.name}": +${run.inserted} leads.`);
             }
-          } catch (edgeErr) {
-            console.warn('[Discovery Autopilot] Cloud edge execution unreachable, checking offline fallback:', edgeErr);
           }
+        } catch (edgeErr) {
+          console.warn('[Discovery Autopilot] Cloud edge execution unreachable, checking offline fallback:', edgeErr);
         }
 
         // 2. Only fall back to local client execution if the cloud endpoint was completely unreachable (e.g. offline)
@@ -773,7 +775,8 @@ export async function checkAndRunDiscoveryAutopilot({ pipelines = [], usersList 
               discovery_config: updatedConfig,
               updated_at: new Date().toISOString()
             })
-            .eq('id', activePipe.id);
+            .eq('id', activePipe.id)
+            .eq('company_id', pipeCompanyId);
 
           executedRuns.push({
             pipelineId: activePipe.id,

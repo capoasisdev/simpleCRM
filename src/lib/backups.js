@@ -2,26 +2,18 @@
  * backups.js - Full 7-Day Rolling CRM Backups & Recovery Engine
  */
 import { supabase } from './supabase';
+import { getActiveCompanyId, requireActiveCompanyId, readTenantCache, writeTenantCache, withCompanyId } from './tenant';
 
 const BACKUP_STORAGE_KEY = 'crm_rolling_backups';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function getLocalBackups() {
-  try {
-    const raw = localStorage.getItem(BACKUP_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    console.warn('Error reading local backups:', e);
-    return [];
-  }
+  const parsed = readTenantCache(BACKUP_STORAGE_KEY, []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 export function saveLocalBackups(backups) {
-  try {
-    localStorage.setItem(BACKUP_STORAGE_KEY, JSON.stringify(backups));
-  } catch (e) {
-    console.warn('Error saving local backups:', e);
-  }
+  writeTenantCache(BACKUP_STORAGE_KEY, backups);
 }
 
 /**
@@ -36,8 +28,10 @@ export async function pruneOldBackups() {
   saveLocalBackups(freshLocal);
 
   // 2. Prune Supabase table
+  const companyId = getActiveCompanyId();
+  if (!companyId) return;
   try {
-    await supabase.from('crm_backups').delete().lt('created_at', cutoffIso);
+    await supabase.from('crm_backups').delete().eq('company_id', companyId).lt('created_at', cutoffIso);
   } catch (e) {
     console.warn('Note on Supabase backup pruning:', e.message);
   }
@@ -49,18 +43,22 @@ export async function pruneOldBackups() {
 export async function fetchBackups() {
   await pruneOldBackups();
   let supabaseBackups = [];
+  const companyId = getActiveCompanyId();
 
-  try {
-    const { data, error } = await supabase
-      .from('crm_backups')
-      .select('id, created_at, backup_name, backup_type, record_counts, file_size_bytes, created_by')
-      .order('created_at', { ascending: false });
+  if (companyId) {
+    try {
+      const { data, error } = await supabase
+        .from('crm_backups')
+        .select('id, created_at, backup_name, backup_type, record_counts, file_size_bytes, created_by')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false });
 
-    if (!error && Array.isArray(data)) {
-      supabaseBackups = data;
+      if (!error && Array.isArray(data)) {
+        supabaseBackups = data;
+      }
+    } catch (e) {
+      console.warn('Supabase crm_backups query note:', e.message);
     }
-  } catch (e) {
-    console.warn('Supabase crm_backups query note:', e.message);
   }
 
   const local = getLocalBackups();
@@ -84,6 +82,7 @@ export async function fetchBackups() {
  * Creates a full disk snapshot of all CRM tables
  */
 export async function createFullBackup({ type = 'manual', createdBy = 'Admin' } = {}) {
+  const companyId = requireActiveCompanyId();
   const now = new Date();
   const backupName = type === 'auto' ? 'Daily Auto-Backup' : 'Manual Snapshot';
 
@@ -98,14 +97,14 @@ export async function createFullBackup({ type = 'manual', createdBy = 'Admin' } 
     todoListsRes,
     todosRes
   ] = await Promise.allSettled([
-    supabase.from('leads').select('*'),
-    supabase.from('crm_users').select('id, name, email, role, permissions, created_at'),
-    supabase.from('follow_ups').select('*'),
-    supabase.from('lead_activities').select('*').limit(2000),
-    supabase.from('pipelines').select('*'),
-    supabase.from('lead_routing_config').select('*'),
-    supabase.from('crm_todo_lists').select('*'),
-    supabase.from('crm_todos').select('*')
+    supabase.from('leads').select('*').eq('company_id', companyId),
+    supabase.from('crm_users').select('id, name, email, role, permissions, created_at').eq('company_id', companyId),
+    supabase.from('follow_ups').select('*').eq('company_id', companyId),
+    supabase.from('lead_activities').select('*').eq('company_id', companyId).limit(2000),
+    supabase.from('pipelines').select('*').eq('company_id', companyId),
+    supabase.from('lead_routing_config').select('*').eq('company_id', companyId),
+    supabase.from('crm_todo_lists').select('*').eq('company_id', companyId),
+    supabase.from('crm_todos').select('*').eq('company_id', companyId)
   ]);
 
   const leads = leadsRes.status === 'fulfilled' && !leadsRes.value.error ? leadsRes.value.data : [];
@@ -115,12 +114,8 @@ export async function createFullBackup({ type = 'manual', createdBy = 'Admin' } 
   const pipelines = pipelinesRes.status === 'fulfilled' && !pipelinesRes.value.error ? pipelinesRes.value.data : [];
   const routing = routingRes.status === 'fulfilled' && !routingRes.value.error ? routingRes.value.data : [];
 
-  let cachedLists = [];
-  let cachedTodos = [];
-  try {
-    cachedLists = JSON.parse(localStorage.getItem('crm_todo_lists_cache')) || [];
-    cachedTodos = JSON.parse(localStorage.getItem('crm_todos_cache')) || [];
-  } catch {}
+  const cachedLists = readTenantCache('crm_todo_lists_cache', [], companyId) || [];
+  const cachedTodos = readTenantCache('crm_todos_cache', [], companyId) || [];
 
   const todoLists = todoListsRes.status === 'fulfilled' && !todoListsRes.value.error && todoListsRes.value.data?.length > 0
     ? todoListsRes.value.data
@@ -131,14 +126,11 @@ export async function createFullBackup({ type = 'manual', createdBy = 'Admin' } 
     : cachedTodos;
 
   // Local settings fallback
-  let localPipeline = null;
-  try {
-    localPipeline = JSON.parse(localStorage.getItem('crm_pipeline_columns'));
-  } catch {}
+  const localPipeline = readTenantCache('crm_pipeline_columns', null, companyId);
 
   const fullPayload = {
     version: '1.0',
-    crm: 'SimpleCRM',
+    crm: 'simplecrm',
     backup_name: backupName,
     created_at: now.toISOString(),
     created_by: createdBy,
@@ -182,6 +174,7 @@ export async function createFullBackup({ type = 'manual', createdBy = 'Admin' } 
   try {
     const { data, error } = await supabase.from('crm_backups').insert([
       {
+        company_id: companyId,
         backup_name: backupName,
         backup_type: type,
         record_counts: fullPayload.record_counts,
@@ -208,38 +201,46 @@ export async function createFullBackup({ type = 'manual', createdBy = 'Admin' } 
 }
 
 /**
- * Downloads a backup snapshot as a physical .json file to the user's disk
+ * Loads the full JSON payload for a backup snapshot (in-memory -> Supabase -> localStorage fallback)
  */
-export async function downloadBackupToDisk(backup) {
-  let payload = backup.payload;
+export async function loadBackupPayload(backup) {
+  if (!backup) {
+    throw new Error('Backup data payload could not be loaded.');
+  }
+  if (backup.payload) {
+    return backup.payload;
+  }
 
-  // If payload wasn't pre-loaded, fetch it from Supabase
-  if (!payload && backup.id && !backup.id.startsWith('backup_')) {
+  const activeCompanyId = getActiveCompanyId();
+  if (activeCompanyId && backup.id && !String(backup.id).startsWith('backup_')) {
     try {
       const { data, error } = await supabase
         .from('crm_backups')
         .select('payload')
         .eq('id', backup.id)
+        .eq('company_id', activeCompanyId)
         .single();
       if (!error && data?.payload) {
-        payload = data.payload;
+        return data.payload;
       }
     } catch (e) {
       console.warn('Error fetching backup payload:', e);
     }
   }
 
-  if (!payload) {
-    // Check local storage fallback
-    const local = getLocalBackups().find((b) => b.id === backup.id);
-    if (local?.payload) {
-      payload = local.payload;
-    }
+  const local = getLocalBackups().find((b) => b.id === backup.id);
+  if (local?.payload) {
+    return local.payload;
   }
 
-  if (!payload) {
-    throw new Error('Backup data payload could not be loaded.');
-  }
+  throw new Error('Backup data payload could not be loaded.');
+}
+
+/**
+ * Downloads a backup snapshot as a physical .json file to the user's disk
+ */
+export async function downloadBackupToDisk(backup) {
+  const payload = await loadBackupPayload(backup);
 
   const jsonString = JSON.stringify(payload, null, 2);
   const blob = new Blob([jsonString], { type: 'application/json' });
@@ -265,6 +266,8 @@ export async function restoreBackupData(payload) {
     throw new Error('Invalid backup file format. Missing data section.');
   }
 
+  const companyId = requireActiveCompanyId();
+
   const results = {
     leadsRestored: 0,
     followUpsRestored: 0,
@@ -276,11 +279,12 @@ export async function restoreBackupData(payload) {
   // 1. Restore Leads
   if (Array.isArray(leads) && leads.length > 0) {
     try {
+      const scopedLeads = leads.map((row) => ({ ...row, company_id: companyId }));
       const { error } = await supabase
         .from('leads')
-        .upsert(leads, { onConflict: 'id' });
+        .upsert(scopedLeads, { onConflict: 'id' });
       if (!error) {
-        results.leadsRestored = leads.length;
+        results.leadsRestored = scopedLeads.length;
       }
     } catch (e) {
       console.warn('Error restoring leads to Supabase:', e);
@@ -290,11 +294,12 @@ export async function restoreBackupData(payload) {
   // 2. Restore Follow-ups
   if (Array.isArray(follow_ups) && follow_ups.length > 0) {
     try {
+      const scopedFollowUps = follow_ups.map((row) => ({ ...row, company_id: companyId }));
       const { error } = await supabase
         .from('follow_ups')
-        .upsert(follow_ups, { onConflict: 'id' });
+        .upsert(scopedFollowUps, { onConflict: 'id' });
       if (!error) {
-        results.followUpsRestored = follow_ups.length;
+        results.followUpsRestored = scopedFollowUps.length;
       }
     } catch (e) {
       console.warn('Error restoring follow-ups to Supabase:', e);
@@ -303,30 +308,32 @@ export async function restoreBackupData(payload) {
 
   // 3. Restore Pipeline Columns in localStorage
   if (local_pipeline_columns) {
-    localStorage.setItem('crm_pipeline_columns', JSON.stringify(local_pipeline_columns));
+    writeTenantCache('crm_pipeline_columns', local_pipeline_columns, companyId);
     results.pipelinesRestored = true;
   }
 
   // 4. Restore To-Do Lists and Tasks
   const { crm_todo_lists, crm_todos } = payload.data;
   if (Array.isArray(crm_todo_lists) && crm_todo_lists.length > 0) {
+    const scopedLists = withCompanyId(crm_todo_lists, companyId);
     try {
-      await supabase.from('crm_todo_lists').upsert(crm_todo_lists, { onConflict: 'id' });
+      await supabase.from('crm_todo_lists').upsert(scopedLists, { onConflict: 'id' });
     } catch (e) {
       console.warn('Note restoring crm_todo_lists to Supabase:', e);
     }
-    localStorage.setItem('crm_todo_lists_cache', JSON.stringify(crm_todo_lists));
-    results.todoListsRestored = crm_todo_lists.length;
+    writeTenantCache('crm_todo_lists_cache', scopedLists, companyId);
+    results.todoListsRestored = scopedLists.length;
   }
 
   if (Array.isArray(crm_todos) && crm_todos.length > 0) {
+    const scopedTodos = withCompanyId(crm_todos, companyId);
     try {
-      await supabase.from('crm_todos').upsert(crm_todos, { onConflict: 'id' });
+      await supabase.from('crm_todos').upsert(scopedTodos, { onConflict: 'id' });
     } catch (e) {
       console.warn('Note restoring crm_todos to Supabase:', e);
     }
-    localStorage.setItem('crm_todos_cache', JSON.stringify(crm_todos));
-    results.todosRestored = crm_todos.length;
+    writeTenantCache('crm_todos_cache', scopedTodos, companyId);
+    results.todosRestored = scopedTodos.length;
   }
 
   return results;

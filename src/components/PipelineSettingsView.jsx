@@ -58,6 +58,7 @@ import {
   Inbox
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getActiveCompanyId, readTenantCache, writeTenantCache, removeTenantCache } from '../lib/tenant';
 import { hasPermission } from '../lib/permissions';
 import { fetchEmailTemplates } from '../lib/email';
 import { getPipelineFields, DEFAULT_PIPELINE_FIELDS, DEFAULT_COLD_PIPELINE_FIELDS, STANDARD_DISCOVERY_ATTRIBUTES, labelToKey, extractPipelineFormQuestions } from '../lib/pipelineFields';
@@ -315,6 +316,7 @@ function PillArrayInput({ value = [], onChange, placeholder = "+ add...", disabl
 }
 
 export default function PipelineSettingsView({ currentUser, onConfigureStateChange, pipelineType = 'sales' }) {
+  const activeCompanyId = getActiveCompanyId() || currentUser?.company_id || null;
   const canView = hasPermission(currentUser, 'pipeline', 'view');
   const canEdit = hasPermission(currentUser, 'pipeline', 'edit');
   const canDelete = hasPermission(currentUser, 'pipeline', 'delete');
@@ -322,14 +324,8 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   const cacheKey = pipelineType === 'cold' ? 'crm_cached_pipelines_cold' : 'crm_cached_pipelines';
 
   const [pipelines, setPipelines] = useState(() => {
-    try {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) { }
-    return [];
+    const parsed = readTenantCache(cacheKey, [], activeCompanyId);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : [];
   });
 
   // State A: null = viewing Master Pipelines List; string id = viewing Detail Stage Editor
@@ -498,17 +494,22 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   // Fetch initial pipelines, leads, forms, users, routing config, and whatsapp templates
   useEffect(() => {
     let isMounted = true;
+    const companyId = activeCompanyId;
 
     async function loadData() {
+      if (!companyId) {
+        if (isMounted) setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
       try {
         const [pipeRes, leadsRes, formsRes, usersRes, routeRes, metaRes] = await Promise.all([
-          supabase.from('pipelines').select('*').order('is_default', { ascending: false }),
-          supabase.from('leads').select('id, stage, pipeline_id, form_id, form_name, custom_fields'),
-          supabase.from('connected_forms').select('*'),
-          supabase.from('crm_users').select('id, name, email, role').order('name', { ascending: true }),
-          supabase.from('lead_routing_config').select('*').limit(1).maybeSingle(),
-          supabase.from('meta_config').select('whatsapp_templates').limit(1).maybeSingle()
+          supabase.from('pipelines').select('*').eq('company_id', companyId).order('is_default', { ascending: false }),
+          supabase.from('leads').select('id, stage, pipeline_id, form_id, form_name, custom_fields').eq('company_id', companyId),
+          supabase.from('connected_forms').select('*').eq('company_id', companyId),
+          supabase.from('crm_users').select('id, name, email, role').eq('company_id', companyId).order('name', { ascending: true }),
+          supabase.from('lead_routing_config').select('*').eq('company_id', companyId).limit(1).maybeSingle(),
+          supabase.from('meta_config').select('whatsapp_templates').eq('company_id', companyId).limit(1).maybeSingle()
         ]);
 
         if (pipeRes.error) throw pipeRes.error;
@@ -523,9 +524,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         if (isMounted) {
           const filtered = Array.isArray(pipeRes.data) ? pipeRes.data.filter(matchesType) : [];
           setPipelines(filtered);
-          try {
-            localStorage.setItem(cacheKey, JSON.stringify(filtered));
-          } catch (e) { }
+          writeTenantCache(cacheKey, filtered, companyId);
         }
 
         if (isMounted && leadsRes.data) {
@@ -572,7 +571,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
     loadData();
     return () => { isMounted = false; };
-  }, [pipelineType, cacheKey]);
+  }, [pipelineType, cacheKey, activeCompanyId]);
 
   // Listen for pipeline creation from AI Assistant (FAB Chatbot)
   useEffect(() => {
@@ -584,9 +583,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         setPipelines(prev => {
           if (prev.some(p => p.id === newPipe.id)) return prev;
           const updated = [newPipe, ...prev];
-          try {
-            localStorage.setItem(cacheKey, JSON.stringify(updated));
-          } catch (e) {}
+          writeTenantCache(cacheKey, updated, activeCompanyId);
           return updated;
         });
         handleOpenConfigure(newPipe, 'general');
@@ -596,7 +593,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
     window.addEventListener('crm:pipeline_created', handlePipelineCreated);
     return () => window.removeEventListener('crm:pipeline_created', handlePipelineCreated);
-  }, [pipelineType, cacheKey]);
+  }, [pipelineType, cacheKey, activeCompanyId]);
 
   const isDirty = JSON.stringify(stages) !== JSON.stringify(initialStages);
 
@@ -745,10 +742,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     // Initialize pipeline-scoped distribution
     // All users in the company are strictly OPT-IN per pipeline.
     // A user is ONLY active if explicitly saved with enabled: true in user_rules.
-    const allUsersRoster = (usersList.length > 0 ? usersList : [
-      { id: '1', name: 'Pranav Patil', email: 'pranav.p@capoasis.com', role: 'admin' },
-      { id: '2', name: 'Nikita Sonawane', email: 'nikita.s@salado.in', role: 'member' }
-    ]).map(u => ({
+    const allUsersRoster = (usersList.length > 0 ? usersList : (currentUser ? [currentUser] : [])).map(u => ({
       id: u.id,
       name: u.name,
       email: u.email,
@@ -952,13 +946,17 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         round_robin_index: activePipeline?.lead_distribution?.round_robin_index || 0
       };
 
+      const companyId = activeCompanyId;
+      if (!companyId) return;
+
       const { error } = await supabase
         .from('pipelines')
         .update({
           lead_distribution: payload,
           updated_at: new Date().toISOString()
         })
-        .eq('id', editingPipelineId);
+        .eq('id', editingPipelineId)
+        .eq('company_id', companyId);
 
       if (error) {
         console.error('Error saving distribution:', error);
@@ -966,9 +964,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       } else {
         const updated = pipelines.map(p => p.id === editingPipelineId ? { ...p, lead_distribution: payload } : p);
         setPipelines(updated);
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify(updated));
-        } catch (e) { }
+        writeTenantCache(cacheKey, updated, companyId);
         setInitialDist(payload);
         triggerSavedFeedback();
       }
@@ -993,6 +989,8 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   // Discovery & Scraping Engine save & runner handlers
   const saveDiscoveryPayload = async (overrides = {}) => {
     if (!editingPipelineId) return;
+    const companyId = activeCompanyId;
+    if (!companyId) return;
     setIsSavingDiscovery(true);
     try {
       const payload = {
@@ -1012,7 +1010,8 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
           discovery_config: payload,
           updated_at: new Date().toISOString()
         })
-        .eq('id', editingPipelineId);
+        .eq('id', editingPipelineId)
+        .eq('company_id', companyId);
 
       if (error) {
         console.error('Error saving discovery config:', error);
@@ -1020,9 +1019,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       } else {
         const updated = pipelines.map(p => p.id === editingPipelineId ? { ...p, discovery_config: payload } : p);
         setPipelines(updated);
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify(updated));
-        } catch (e) { }
+        writeTenantCache(cacheKey, updated, companyId);
         setInitialDiscoveryConfig(payload);
         triggerSavedFeedback();
       }
@@ -1383,11 +1380,14 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       if (generated.name && (!renameValue || renameValue === 'New Pipeline' || renameValue.toLowerCase().includes('cold') || renameValue.toLowerCase().includes('discovery'))) {
         setRenameValue(generated.name);
         try {
-          await supabase
-            .from('pipelines')
-            .update({ name: generated.name, updated_at: new Date().toISOString() })
-            .eq('id', editingPipelineId);
-          setPipelines(prev => prev.map(p => p.id === editingPipelineId ? { ...p, name: generated.name } : p));
+          if (activeCompanyId) {
+            await supabase
+              .from('pipelines')
+              .update({ name: generated.name, updated_at: new Date().toISOString() })
+              .eq('id', editingPipelineId)
+              .eq('company_id', activeCompanyId);
+            setPipelines(prev => prev.map(p => p.id === editingPipelineId ? { ...p, name: generated.name } : p));
+          }
         } catch (err) {
           console.warn('Could not auto-update pipeline name:', err);
         }
@@ -1480,10 +1480,13 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         }));
         if (res.insertedCount > 0) {
           showToast(`Ingested ${res.insertedCount} new prospect(s) into pipeline!`);
-          const { data: updatedLeads } = await supabase
-            .from('leads')
-            .select('id, stage, pipeline_id, form_id, form_name, custom_fields');
-          if (updatedLeads) setAllLeads(updatedLeads);
+          if (activeCompanyId) {
+            const { data: updatedLeads } = await supabase
+              .from('leads')
+              .select('id, stage, pipeline_id, form_id, form_name, custom_fields')
+              .eq('company_id', activeCompanyId);
+            if (updatedLeads) setAllLeads(updatedLeads);
+          }
         }
       }
     } catch (err) {
@@ -1501,6 +1504,8 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   // Stage Automations save & toggle handlers
   const saveStageAutomations = async (updatedAutomations) => {
     if (!editingPipelineId) return;
+    const companyId = activeCompanyId;
+    if (!companyId) return;
     setIsSaving(true);
     try {
       const { error } = await supabase
@@ -1509,7 +1514,8 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
           stage_automations: updatedAutomations,
           updated_at: new Date().toISOString()
         })
-        .eq('id', editingPipelineId);
+        .eq('id', editingPipelineId)
+        .eq('company_id', companyId);
 
       if (error) {
         console.error('Error saving stage automations:', error);
@@ -1517,9 +1523,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       } else {
         const updated = pipelines.map(p => p.id === editingPipelineId ? { ...p, stage_automations: updatedAutomations } : p);
         setPipelines(updated);
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify(updated));
-        } catch (e) { }
+        writeTenantCache(cacheKey, updated, companyId);
         triggerSavedFeedback();
       }
     } catch (err) {
@@ -1535,14 +1539,14 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     let updated = stageAutomations.map(a => {
       if (a.stage_id === stageId) {
         exists = true;
-        const defaultTmpl = a.template_name || (waTemplates[0]?.name || 'salado_lead_welcome');
+        const defaultTmpl = a.template_name || (waTemplates[0]?.name || 'welcome_lead_intro');
         return { ...a, is_active: checked, template_name: defaultTmpl };
       }
       return a;
     });
 
     if (!exists) {
-      const defaultTmpl = waTemplates[0]?.name || 'salado_lead_welcome';
+      const defaultTmpl = waTemplates[0]?.name || 'welcome_lead_intro';
       updated.push({
         stage_id: stageId,
         is_active: checked,
@@ -1844,18 +1848,21 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
   const savePipelineFields = async (updated) => {
     if (!editingPipelineId) return;
+    const companyId = getActiveCompanyId();
+    if (!companyId) return;
     try {
       const { error } = await supabase
         .from('pipelines')
         .update({ pipeline_fields: updated })
-        .eq('id', editingPipelineId);
+        .eq('id', editingPipelineId)
+        .eq('company_id', companyId);
 
       if (error) throw error;
 
       setPipelines(prev => prev.map(p => p.id === editingPipelineId ? { ...p, pipeline_fields: updated } : p));
       try {
         const cached = pipelines.map(p => p.id === editingPipelineId ? { ...p, pipeline_fields: updated } : p);
-        localStorage.setItem(cacheKey, JSON.stringify(cached));
+        writeTenantCache(cacheKey, cached, companyId);
       } catch (e) {}
       triggerSavedFeedback();
     } catch (err) {
@@ -1890,9 +1897,12 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     const starterFields = pipelineType === 'cold' ? DEFAULT_COLD_PIPELINE_FIELDS : DEFAULT_PIPELINE_FIELDS;
 
     try {
+      const companyId = getActiveCompanyId();
+      if (!companyId) throw new Error('No active workspace selected.');
       const { data: newPipe, error } = await supabase
         .from('pipelines')
         .insert([{
+          company_id: companyId,
           name: name.trim(),
           pipeline_type: pipelineType,
           is_default: pipelines.length === 0,
@@ -1906,9 +1916,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
       const updated = [...pipelines, newPipe];
       setPipelines(updated);
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify(updated));
-      } catch (e) { }
+      writeTenantCache(cacheKey, updated, companyId);
 
       handleOpenConfigure(newPipe, 'stages');
       showToast(`Created pipeline "${name.trim()}"`);
@@ -1927,19 +1935,21 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
       return;
     }
 
+    const companyId = activeCompanyId;
+    if (!companyId) return;
+
     try {
       const { error } = await supabase
         .from('pipelines')
         .update({ name: trimmed, updated_at: new Date().toISOString() })
-        .eq('id', editingPipelineId);
+        .eq('id', editingPipelineId)
+        .eq('company_id', companyId);
 
       if (error) throw error;
 
       setPipelines(prev => {
         const updated = prev.map(p => p.id === editingPipelineId ? { ...p, name: trimmed } : p);
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify(updated));
-        } catch (e) {}
+        writeTenantCache(cacheKey, updated, companyId);
         return updated;
       });
       showToast('Pipeline renamed.');
@@ -1952,6 +1962,9 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   // Delete pipeline
   const handleDeletePipeline = async (pipeToDelete, e) => {
     if (e) e.stopPropagation();
+
+    const companyId = activeCompanyId;
+    if (!companyId) return;
 
     if (pipelineType === 'sales' && pipelines.length <= 1) {
       alert('You must have at least one sales pipeline in your CRM.');
@@ -1966,12 +1979,10 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
     if (!targetFallbackPipe) {
       if (!window.confirm(`Delete pipeline "${pipeToDelete.name}"?`)) return;
       try {
-        const { error } = await supabase.from('pipelines').delete().eq('id', pipeToDelete.id);
+        const { error } = await supabase.from('pipelines').delete().eq('id', pipeToDelete.id).eq('company_id', companyId);
         if (error) throw error;
         setPipelines([]);
-        try {
-          localStorage.removeItem(cacheKey);
-        } catch (e) { }
+        removeTenantCache(cacheKey, companyId);
         if (editingPipelineId === pipeToDelete.id) {
           setEditingPipelineId(null);
           setStages([]);
@@ -1998,22 +2009,25 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         await supabase
           .from('pipelines')
           .update({ is_default: true })
-          .eq('id', targetFallbackPipe.id);
+          .eq('id', targetFallbackPipe.id)
+          .eq('company_id', companyId);
       }
 
       if (pLeads.length > 0 && targetFallbackPipe) {
         await supabase
           .from('leads')
           .update({ pipeline_id: targetFallbackPipe.id })
-          .eq('pipeline_id', pipeToDelete.id);
+          .eq('pipeline_id', pipeToDelete.id)
+          .eq('company_id', companyId);
       }
 
       await supabase
         .from('connected_forms')
         .update({ pipeline_id: targetFallbackPipe?.id || null })
-        .eq('pipeline_id', pipeToDelete.id);
+        .eq('pipeline_id', pipeToDelete.id)
+        .eq('company_id', companyId);
 
-      const { error } = await supabase.from('pipelines').delete().eq('id', pipeToDelete.id);
+      const { error } = await supabase.from('pipelines').delete().eq('id', pipeToDelete.id).eq('company_id', companyId);
       if (error) throw error;
 
       const remaining = pipelines
@@ -2021,9 +2035,7 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
         .map(p => pipeToDelete.is_default && p.id === targetFallbackPipe.id ? { ...p, is_default: true } : p);
 
       setPipelines(remaining);
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify(remaining));
-      } catch (e) { }
+      writeTenantCache(cacheKey, remaining, companyId);
 
       if (editingPipelineId === pipeToDelete.id) {
         setEditingPipelineId(null);
@@ -2041,22 +2053,29 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
   // Form association
   const handleFormChange = async (formId) => {
+    const companyId = activeCompanyId;
+    if (!companyId) return;
     try {
       if (attachedForm) {
         await supabase
           .from('connected_forms')
           .update({ pipeline_id: null })
-          .eq('form_id', attachedForm.form_id);
+          .eq('form_id', attachedForm.form_id)
+          .eq('company_id', companyId);
       }
 
       if (formId) {
         await supabase
           .from('connected_forms')
           .update({ pipeline_id: editingPipelineId })
-          .eq('form_id', formId);
+          .eq('form_id', formId)
+          .eq('company_id', companyId);
       }
 
-      const { data: updatedForms } = await supabase.from('connected_forms').select('*');
+      const { data: updatedForms } = await supabase
+        .from('connected_forms')
+        .select('*')
+        .eq('company_id', companyId);
       if (updatedForms) {
         setConnectedForms(updatedForms);
       }
@@ -2071,6 +2090,8 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
   // Stage Manipulation & Auto-Save
   const saveStagesList = async (stagesList) => {
     if (!editingPipelineId) return;
+    const companyId = activeCompanyId;
+    if (!companyId) return;
     setIsSaving(true);
 
     try {
@@ -2089,23 +2110,20 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
           stages: normalizedStages,
           updated_at: new Date().toISOString()
         })
-        .eq('id', editingPipelineId);
+        .eq('id', editingPipelineId)
+        .eq('company_id', companyId);
 
       if (error) throw error;
 
       setInitialStages(normalizedStages);
       setPipelines(prev => {
         const updated = prev.map(p => p.id === editingPipelineId ? { ...p, stages: normalizedStages } : p);
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify(updated));
-        } catch (e) { }
+        writeTenantCache(cacheKey, updated, companyId);
         return updated;
       });
 
       if (activePipeline?.is_default && pipelineType === 'sales') {
-        try {
-          localStorage.setItem('crm_pipeline_columns', JSON.stringify(normalizedStages));
-        } catch (e) { }
+        writeTenantCache('crm_pipeline_columns', normalizedStages, companyId);
       }
 
       triggerSavedFeedback();
@@ -2255,10 +2273,13 @@ export default function PipelineSettingsView({ currentUser, onConfigureStateChan
 
     if (count > 0 && entryStage) {
       try {
-        await supabase
-          .from('leads')
-          .update({ stage: entryStage.id })
-          .eq('stage', stageToDelete.id);
+        if (activeCompanyId) {
+          await supabase
+            .from('leads')
+            .update({ stage: entryStage.id })
+            .eq('stage', stageToDelete.id)
+            .eq('company_id', activeCompanyId);
+        }
 
         setAllLeads(prev => prev.map(l => l.stage === stageToDelete.id ? { ...l, stage: entryStage.id } : l));
       } catch (err) {

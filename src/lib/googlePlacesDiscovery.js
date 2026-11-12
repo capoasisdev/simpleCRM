@@ -64,7 +64,7 @@ async function fetchNominatimPlaces({ query = '', location = 'Bengaluru', countr
         method: 'GET',
         headers: {
           'Accept': 'application/json',
-          'User-Agent': 'SimpleCRM-Places/1.0'
+          'User-Agent': 'simplecrm-Places/1.0'
         },
         signal: AbortSignal.timeout(6000)
       });

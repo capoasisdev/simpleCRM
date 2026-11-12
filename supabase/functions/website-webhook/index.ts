@@ -1,10 +1,6 @@
-import { createClient } from "jsr:@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-};
+import { corsHeaders, createServiceClients, jsonResponse } from "../_shared/authBridge.ts";
+import { isCompanySubscriptionActive } from "../_shared/billing.ts";
+import { resolveCompanyLeadAssignee } from "../_shared/leadDistribution.ts";
 
 Deno.serve(async (req) => {
   // 1. Handle CORS preflight
@@ -14,17 +10,11 @@ Deno.serve(async (req) => {
 
   // 2. Health check endpoint (GET)
   if (req.method === "GET") {
-    return new Response(
-      JSON.stringify({
-        status: "active",
-        service: "SimpleCRM Website Form Webhook",
-        timestamp: new Date().toISOString(),
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    return jsonResponse({
+      status: "active",
+      service: "simplecrm Website Form Webhook",
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // 3. Handle Form Submission (POST)
@@ -33,7 +23,6 @@ Deno.serve(async (req) => {
       const url = new URL(req.url);
       let formId = url.searchParams.get("form_id") || url.searchParams.get("id");
 
-      // Parse payload from JSON, form-data, or urlencoded
       let payload: Record<string, any> = {};
       const contentType = req.headers.get("content-type") || "";
 
@@ -69,39 +58,37 @@ Deno.serve(async (req) => {
       }
 
       if (!formId) {
-        return new Response(
-          JSON.stringify({ error: "Missing required 'form_id' parameter." }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
-        );
+        return jsonResponse({ error: "Missing required 'form_id' parameter." }, 400);
       }
 
-      // Initialize Supabase client
-      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-      const supabaseServiceKey =
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-        Deno.env.get("SUPABASE_ANON_KEY") ??
-        "";
-      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+      const { adminClient } = createServiceClients();
 
-      // Fetch connected form config
-      const { data: connectedForm, error: formError } = await supabase
+      // Lookup connected form config and derive tenant company_id authoritatively
+      const { data: connectedForm, error: formError } = await adminClient
         .from("connected_forms")
         .select("*")
-        .eq("form_id", formId)
+        .eq("form_id", String(formId))
         .maybeSingle();
 
       if (formError || !connectedForm) {
         console.warn(`[Website Webhook] Form not found for form_id: ${formId}`);
-        return new Response(
-          JSON.stringify({ error: `Website form '${formId}' is not registered in CRM.` }),
-          {
-            status: 404,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
+        return jsonResponse(
+          { error: `Website form '${formId}' is not registered in simplecrm.` },
+          404
         );
+      }
+
+      if (connectedForm.is_active === false) {
+        return jsonResponse(
+          { error: `Website form '${formId}' is currently disabled.` },
+          403
+        );
+      }
+
+      const companyId = connectedForm.company_id ? String(connectedForm.company_id) : null;
+      if (!companyId) {
+        console.error(`[Website Webhook] Form ${formId} has null company_id; rejecting ingest.`);
+        return jsonResponse({ error: "Website form is missing workspace assignment." }, 400);
       }
 
       // Extract domain from payload, origin, or referer
@@ -117,140 +104,106 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Track connected domain in connected_forms (connected_sites with tags fallback)
+      // Track connected domain scoped strictly to connectedForm.id + company_id
       if (siteDomain) {
-        const existingList = Array.isArray(connectedForm.connected_sites) && connectedForm.connected_sites.length > 0
-          ? connectedForm.connected_sites
-          : (Array.isArray(connectedForm.tags) ? connectedForm.tags : []);
+        const existingList =
+          Array.isArray(connectedForm.connected_sites) && connectedForm.connected_sites.length > 0
+            ? connectedForm.connected_sites
+            : Array.isArray(connectedForm.tags)
+              ? connectedForm.tags
+              : [];
 
         if (!existingList.includes(siteDomain)) {
           const updatedSites = [...existingList, siteDomain];
           try {
-            const { error: updErr } = await supabase
+            const { error: updErr } = await adminClient
               .from("connected_forms")
               .update({ connected_sites: updatedSites, tags: updatedSites })
-              .eq("id", connectedForm.id);
+              .eq("id", connectedForm.id)
+              .eq("company_id", companyId);
 
             if (updErr) {
-              await supabase
+              await adminClient
                 .from("connected_forms")
                 .update({ tags: updatedSites })
-                .eq("id", connectedForm.id);
+                .eq("id", connectedForm.id)
+                .eq("company_id", companyId);
             }
           } catch {
-            await supabase
+            await adminClient
               .from("connected_forms")
               .update({ tags: updatedSites })
-              .eq("id", connectedForm.id);
+              .eq("id", connectedForm.id)
+              .eq("company_id", companyId);
           }
         }
       }
 
-
       // Handle presence verification ping
-      const isPing = url.searchParams.get("ping") === "true" || payload.ping === true || payload.action === "ping";
+      const isPing =
+        url.searchParams.get("ping") === "true" ||
+        payload.ping === true ||
+        payload.action === "ping";
       if (isPing) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            status: "connected",
-            domain: siteDomain || "verified",
-            form_name: connectedForm.form_name,
-          }),
-          {
-            status: 200,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
-        );
+        return jsonResponse({
+          success: true,
+          status: "connected",
+          domain: siteDomain || "verified",
+          form_name: connectedForm.form_name,
+        });
       }
 
-      // Check if Form is linked to a Pipeline
+      // Verify company subscription is eligible for lead ingestion
+      const { data: company } = await adminClient
+        .from("companies")
+        .select("id, subscription_status, trial_ends_at, is_billing_exempt")
+        .eq("id", companyId)
+        .maybeSingle();
+
+      if (!isCompanySubscriptionActive(company, { allowPastDue: true })) {
+        console.warn(`[Website Webhook] Rejected submission for inactive company ${companyId}`);
+        return jsonResponse({ error: "Workspace subscription is inactive." }, 403);
+      }
+
+      // Check if Form is linked to a Pipeline belonging to the same company
       if (!connectedForm.pipeline_id) {
-        console.warn(`[Website Webhook] Form "${connectedForm.form_name}" (ID: ${formId}) is not linked to any pipeline.`);
-        return new Response(
-          JSON.stringify({
-            error: `Form '${connectedForm.form_name}' is not attached to any pipeline. Please connect it in Pipeline Settings.`,
-          }),
+        console.warn(
+          `[Website Webhook] Form "${connectedForm.form_name}" (ID: ${formId}) is not linked to any pipeline.`
+        );
+        return jsonResponse(
           {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
+            error: `Form '${connectedForm.form_name}' is not attached to any pipeline. Please connect it in Pipeline Settings.`,
+          },
+          400
         );
       }
 
       const targetPipelineId = connectedForm.pipeline_id;
-      const entryStage = connectedForm.entry_stage_id || "new";
+      const { data: scopedPipeline } = await adminClient
+        .from("pipelines")
+        .select("id")
+        .eq("id", targetPipelineId)
+        .eq("company_id", companyId)
+        .maybeSingle();
 
-      // Resolve Assignee via Pipeline lead distribution or Global lead routing
-      let assignedTo = "pranav";
-
-      try {
-        const { data: pipeData } = await supabase
-          .from("pipelines")
-          .select("lead_distribution")
-          .eq("id", targetPipelineId)
-          .maybeSingle();
-
-        if (pipeData?.lead_distribution && typeof pipeData.lead_distribution === "object") {
-          const pDist = pipeData.lead_distribution as any;
-          const mode = pDist.mode || "round_robin";
-          const defaultAssignee = pDist.default_assignee || "pranav";
-          const rules = (pDist.user_rules || []) as Array<{
-            id: string;
-            name: string;
-            email: string;
-            enabled: boolean;
-            weight: number;
-          }>;
-          const activeRules = rules.filter((r) => r.enabled !== false);
-
-          if (mode === "unassigned") {
-            assignedTo = "unassigned";
-          } else if (mode === "single") {
-            assignedTo = defaultAssignee;
-          } else if (mode === "round_robin") {
-            if (activeRules.length > 0) {
-              const currentIndex = (pDist.round_robin_index || 0) % activeRules.length;
-              const selected = activeRules[currentIndex];
-              assignedTo = selected.name || selected.email || defaultAssignee;
-
-              const nextIndex = (pDist.round_robin_index || 0) + 1;
-              await supabase
-                .from("pipelines")
-                .update({
-                  lead_distribution: { ...pDist, round_robin_index: nextIndex },
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", targetPipelineId);
-            } else {
-              assignedTo = defaultAssignee;
-            }
-          } else if (mode === "weighted") {
-            const weightedEligible = activeRules.filter((r) => Number(r.weight) > 0);
-            const sumWeight = weightedEligible.reduce((acc, r) => acc + Number(r.weight), 0);
-
-            if (weightedEligible.length > 0 && sumWeight > 0) {
-              const rand = Math.random() * sumWeight;
-              let running = 0;
-              let chosen = weightedEligible[0];
-              for (const r of weightedEligible) {
-                running += Number(r.weight);
-                if (rand <= running) {
-                  chosen = r;
-                  break;
-                }
-              }
-              assignedTo = chosen.name || chosen.email || defaultAssignee;
-            } else {
-              assignedTo = defaultAssignee;
-            }
-          }
-        }
-      } catch (distErr) {
-        console.warn("[Website Webhook] Error resolving pipeline distribution:", distErr);
+      if (!scopedPipeline) {
+        return jsonResponse(
+          { error: "Form is linked to a pipeline outside its workspace." },
+          400
+        );
       }
 
-      // Extract Standard Lead Attributes
+      const entryStage = connectedForm.entry_stage_id || "new";
+
+      // Resolve Assignee scoped to companyId (pipeline distribution -> company routing -> 'unassigned')
+      const assignedTo = await resolveCompanyLeadAssignee({
+        adminClient,
+        companyId,
+        connectedForm,
+        pipelineId: targetPipelineId,
+        logPrefix: "[Website Webhook]",
+      });
+
       const leadName =
         payload.name ||
         payload.full_name ||
@@ -291,14 +244,13 @@ Deno.serve(async (req) => {
         payload.requirement ||
         "";
 
-      // Collect Remaining Fields as Custom Fields
       const standardKeys = new Set([
         "name", "full_name", "fullname", "first_name", "firstname", "last_name", "lastname",
         "phone", "tel", "mobile", "contact", "phone_number", "phonenumber",
         "email", "mail", "email_address", "emailaddress",
         "city", "location", "state", "address",
         "notes", "message", "comment", "comments", "inquiry", "requirement",
-        "form_id", "formid", "pipeline_id"
+        "form_id", "formid", "pipeline_id", "site_domain", "ping", "action",
       ]);
 
       const customFields: Record<string, any> = {};
@@ -308,9 +260,16 @@ Deno.serve(async (req) => {
           customFields[normalizedKey] = v;
         }
       }
+      customFields.source = "website";
+      if (siteDomain) {
+        customFields.site_domain = siteDomain;
+      }
 
-      // Insert Lead into database
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const dateStr = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
       const leadPayload = {
+        company_id: companyId,
         name: String(leadName).trim(),
         phone: String(leadPhone).trim(),
         email: String(leadEmail).trim(),
@@ -318,15 +277,15 @@ Deno.serve(async (req) => {
         stage: entryStage,
         pipeline_id: targetPipelineId,
         assigned_to: assignedTo,
-        source: "website",
+        form_id: connectedForm.form_id || String(formId),
         form_name: connectedForm.form_name || "Website Form",
         notes: String(leadNotes).trim(),
         custom_fields: customFields,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        date: dateStr,
+        created_at: nowIso,
       };
 
-      const { data: insertedLead, error: insertError } = await supabase
+      const { data: insertedLead, error: insertError } = await adminClient
         .from("leads")
         .insert([leadPayload])
         .select()
@@ -334,39 +293,26 @@ Deno.serve(async (req) => {
 
       if (insertError) {
         console.error("[Website Webhook] Failed to insert lead:", insertError);
-        return new Response(
-          JSON.stringify({ error: "Failed to store lead: " + insertError.message }),
-          {
-            status: 500,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
-        );
+        return jsonResponse({ error: "Failed to store lead: " + insertError.message }, 500);
       }
 
-      console.log(`[Website Webhook] Created lead ${insertedLead.id} for "${leadName}" -> Pipeline ${targetPipelineId}`);
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: "Lead received and saved successfully.",
-          lead_id: insertedLead.id,
-        }),
-        {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+      console.log(
+        `[Website Webhook] Created lead ${insertedLead.id} for company=${companyId} ("${leadName}") -> Pipeline ${targetPipelineId}`
       );
+
+      return jsonResponse({
+        success: true,
+        message: "Lead received and saved successfully.",
+        lead_id: insertedLead.id,
+      });
     } catch (err: any) {
       console.error("[Website Webhook] Uncaught error:", err);
-      return new Response(
-        JSON.stringify({ error: "Internal server error: " + (err.message || String(err)) }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+      return jsonResponse(
+        { error: "Internal server error: " + (err?.message || String(err)) },
+        500
       );
     }
   }
 
-  return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  return jsonResponse({ error: "Method not allowed" }, 405);
 });

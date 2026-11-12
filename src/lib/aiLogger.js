@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { getActiveCompanyId, readTenantCache, writeTenantCache } from './tenant';
 
 const LOCAL_STORAGE_LOGS_KEY = 'crm_ai_chat_logs_cache';
 
@@ -15,7 +16,9 @@ export async function logAiInteraction({
 }) {
   if (!userQuery || !assistantResponse) return null;
 
+  const companyId = getActiveCompanyId();
   const logPayload = {
+    ...(companyId ? { company_id: companyId } : {}),
     session_id: sessionId || null,
     user_id: currentUser?.id || currentUser?.uid || null,
     user_name: currentUser?.name || currentUser?.email || 'Anonymous',
@@ -26,6 +29,12 @@ export async function logAiInteraction({
     feedback: null,
     metadata: metadata || {}
   };
+
+  if (!companyId) {
+    const localId = `local-${Date.now()}`;
+    saveLogLocally({ ...logPayload, id: localId });
+    return localId;
+  }
 
   try {
     const { data, error } = await supabase
@@ -62,10 +71,14 @@ export async function updateAiFeedback(logId, feedback) {
       return;
     }
 
+    const companyId = getActiveCompanyId();
+    if (!companyId) return;
+
     await supabase
       .from('ai_chat_logs')
       .update({ feedback })
-      .eq('id', logId);
+      .eq('id', logId)
+      .eq('company_id', companyId);
   } catch (err) {
     console.warn('Silent feedback update error:', err);
   }
@@ -73,20 +86,19 @@ export async function updateAiFeedback(logId, feedback) {
 
 function saveLogLocally(entry) {
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_LOGS_KEY);
-    const existing = raw ? JSON.parse(raw) : [];
-    existing.push(entry);
-    if (existing.length > 100) existing.shift();
-    localStorage.setItem(LOCAL_STORAGE_LOGS_KEY, JSON.stringify(existing));
+    const existing = readTenantCache(LOCAL_STORAGE_LOGS_KEY, []);
+    const list = Array.isArray(existing) ? existing : [];
+    list.push(entry);
+    if (list.length > 100) list.shift();
+    writeTenantCache(LOCAL_STORAGE_LOGS_KEY, list);
   } catch {}
 }
 
 function updateLocalFeedback(localId, feedback) {
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_LOGS_KEY);
-    if (!raw) return;
-    const existing = JSON.parse(raw);
+    const existing = readTenantCache(LOCAL_STORAGE_LOGS_KEY, []);
+    if (!Array.isArray(existing) || existing.length === 0) return;
     const updated = existing.map((e) => (e.id === localId ? { ...e, feedback } : e));
-    localStorage.setItem(LOCAL_STORAGE_LOGS_KEY, JSON.stringify(updated));
+    writeTenantCache(LOCAL_STORAGE_LOGS_KEY, updated);
   } catch {}
 }

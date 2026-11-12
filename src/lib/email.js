@@ -1,5 +1,6 @@
 import { supabase } from './supabase.js';
 import { Capacitor } from '@capacitor/core';
+import { getActiveCompanyId, readTenantCache, writeTenantCache } from './tenant';
 
 const EMAIL_SETTINGS_STORAGE_KEY = 'crm_email_settings';
 const EMAIL_TEMPLATES_STORAGE_KEY = 'crm_email_templates';
@@ -23,7 +24,7 @@ export const DEFAULT_EMAIL_TEMPLATES = [
 export const DEFAULT_EMAIL_SETTINGS = {
   provider: 'resend',
   api_key: '',
-  from_name: 'SimpleCRM',
+  from_name: 'simplecrm',
   from_email: 'onboarding@resend.dev',
   reply_to: '',
   is_connected: false
@@ -71,14 +72,8 @@ export function plainTextToHtml(text = '') {
  * Get locally stored email config
  */
 export function getStoredEmailConfig() {
-  try {
-    const raw = localStorage.getItem(EMAIL_SETTINGS_STORAGE_KEY);
-    if (!raw) return DEFAULT_EMAIL_SETTINGS;
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_EMAIL_SETTINGS, ...parsed };
-  } catch (err) {
-    return DEFAULT_EMAIL_SETTINGS;
-  }
+  const parsed = readTenantCache(EMAIL_SETTINGS_STORAGE_KEY, null);
+  return parsed && typeof parsed === 'object' ? { ...DEFAULT_EMAIL_SETTINGS, ...parsed } : DEFAULT_EMAIL_SETTINGS;
 }
 
 /**
@@ -86,10 +81,13 @@ export function getStoredEmailConfig() {
  */
 export async function fetchEmailConfig() {
   const cached = getStoredEmailConfig();
+  const companyId = getActiveCompanyId();
+  if (!companyId) return cached;
   try {
     const { data, error } = await supabase
       .from('email_settings')
       .select('*')
+      .eq('company_id', companyId)
       .limit(1)
       .maybeSingle();
 
@@ -99,7 +97,7 @@ export async function fetchEmailConfig() {
         ...data,
         is_connected: Boolean(data.api_key && data.is_connected)
       };
-      localStorage.setItem(EMAIL_SETTINGS_STORAGE_KEY, JSON.stringify(merged));
+      writeTenantCache(EMAIL_SETTINGS_STORAGE_KEY, merged);
       return merged;
     }
   } catch (err) {
@@ -115,30 +113,22 @@ export async function saveEmailConfig(config) {
   const updated = {
     provider: 'resend',
     api_key: (config.api_key || '').trim(),
-    from_name: (config.from_name || 'SimpleCRM').trim(),
+    from_name: (config.from_name || 'simplecrm').trim(),
     from_email: (config.from_email || 'onboarding@resend.dev').trim(),
     reply_to: (config.reply_to || '').trim(),
     is_connected: Boolean(config.is_connected),
     updated_at: new Date().toISOString()
   };
 
-  localStorage.setItem(EMAIL_SETTINGS_STORAGE_KEY, JSON.stringify(updated));
+  writeTenantCache(EMAIL_SETTINGS_STORAGE_KEY, updated);
+
+  const companyId = getActiveCompanyId();
+  if (!companyId) return updated;
 
   try {
-    const { data: existing } = await supabase
+    await supabase
       .from('email_settings')
-      .select('id')
-      .limit(1)
-      .maybeSingle();
-
-    if (existing?.id) {
-      await supabase
-        .from('email_settings')
-        .update(updated)
-        .eq('id', existing.id);
-    } else {
-      await supabase.from('email_settings').insert([updated]);
-    }
+      .upsert([{ ...updated, company_id: companyId }], { onConflict: 'company_id' });
   } catch (err) {
     console.warn('Note persisting email_settings to Supabase:', err);
   }
@@ -150,27 +140,26 @@ export async function saveEmailConfig(config) {
  * Fetch email templates from Supabase with fallback
  */
 export async function fetchEmailTemplates() {
-  try {
-    const { data, error } = await supabase
-      .from('email_templates')
-      .select('*')
-      .order('created_at', { ascending: true });
+  const companyId = getActiveCompanyId();
+  if (companyId) {
+    try {
+      const { data, error } = await supabase
+        .from('email_templates')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: true });
 
-    if (!error && Array.isArray(data) && data.length > 0) {
-      localStorage.setItem(EMAIL_TEMPLATES_STORAGE_KEY, JSON.stringify(data));
-      return data;
+      if (!error && Array.isArray(data) && data.length > 0) {
+        writeTenantCache(EMAIL_TEMPLATES_STORAGE_KEY, data);
+        return data;
+      }
+    } catch (err) {
+      console.warn('Note fetching email_templates:', err);
     }
-  } catch (err) {
-    console.warn('Note fetching email_templates:', err);
   }
 
-  try {
-    const cached = localStorage.getItem(EMAIL_TEMPLATES_STORAGE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) { }
+  const parsed = readTenantCache(EMAIL_TEMPLATES_STORAGE_KEY, null);
+  if (Array.isArray(parsed) && parsed.length > 0) return parsed;
 
   return DEFAULT_EMAIL_TEMPLATES;
 }
@@ -186,11 +175,16 @@ export async function saveEmailTemplate(template) {
     body_html: template.body_html
   };
 
+  const companyId = getActiveCompanyId();
+  if (!companyId) {
+    return { ...payload, id: template.id || `tmpl-${Date.now()}` };
+  }
+
   try {
     if (isNew) {
       const { data } = await supabase
         .from('email_templates')
-        .insert([payload])
+        .insert([{ ...payload, company_id: companyId }])
         .select()
         .single();
       return data || { ...payload, id: `tmpl-${Date.now()}` };
@@ -199,6 +193,7 @@ export async function saveEmailTemplate(template) {
         .from('email_templates')
         .update(payload)
         .eq('id', template.id)
+        .eq('company_id', companyId)
         .select()
         .single();
       return data || { ...payload, id: template.id };
@@ -213,8 +208,10 @@ export async function saveEmailTemplate(template) {
  * Delete an email template
  */
 export async function deleteEmailTemplate(id) {
+  const companyId = getActiveCompanyId();
+  if (!companyId) return;
   try {
-    await supabase.from('email_templates').delete().eq('id', id);
+    await supabase.from('email_templates').delete().eq('id', id).eq('company_id', companyId);
   } catch (err) {
     console.warn('Error deleting email template:', err);
   }
@@ -271,7 +268,7 @@ export async function fetchResendDomains(apiKey) {
  * Generate beautifully styled HTML test email
  */
 export function generateTestEmailHtml({ senderName, senderEmail, replyTo, testRecipient, dispatchedAt }) {
-  const name = senderName || 'SimpleCRM';
+  const name = senderName || 'simplecrm';
   const email = senderEmail || 'onboarding@resend.dev';
   const time = dispatchedAt || new Date().toLocaleString('en-US', {
     dateStyle: 'medium',
@@ -390,7 +387,7 @@ export async function testResendCredentials({ apiKey, fromEmail, fromName, reply
     throw new Error('Please enter a test recipient email address');
   }
 
-  const senderName = fromName || 'SimpleCRM';
+  const senderName = fromName || 'simplecrm';
   const senderEmail = fromEmail || 'onboarding@resend.dev';
   const htmlContent = generateTestEmailHtml({
     senderName,
@@ -547,7 +544,7 @@ export async function sendEmailViaResend({
 
   const finalSubject = renderEmailVariables(rawSubject, leadContext);
   const finalHtml = renderEmailVariables(rawHtml, leadContext);
-  const senderName = config.from_name || 'SimpleCRM';
+  const senderName = config.from_name || 'simplecrm';
   const senderEmail = config.from_email || 'onboarding@resend.dev';
 
   let status = 'sent';
@@ -649,28 +646,32 @@ export async function sendEmailViaResend({
 
   // Local storage cache
   try {
-    const existing = JSON.parse(localStorage.getItem(EMAIL_LOGS_STORAGE_KEY) || '[]');
-    const updated = [logEntry, ...existing].slice(0, 500);
-    localStorage.setItem(EMAIL_LOGS_STORAGE_KEY, JSON.stringify(updated));
+    const existing = readTenantCache(EMAIL_LOGS_STORAGE_KEY, []);
+    const updated = [logEntry, ...(Array.isArray(existing) ? existing : [])].slice(0, 500);
+    writeTenantCache(EMAIL_LOGS_STORAGE_KEY, updated);
   } catch (e) { }
 
   // Supabase persist (only if not already persisted by the edge function)
   if (!dispatchedViaEdge) {
     try {
-      const isUuid = leadId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(leadId);
-      await supabase.from('email_logs').insert([{
-        lead_id: isUuid ? leadId : null,
-        lead_name: logEntry.lead_name,
-        lead_email: logEntry.lead_email,
-        pipeline_id: logEntry.pipeline_id,
-        stage_id: logEntry.stage_id,
-        template_name: logEntry.template_name,
-        subject: logEntry.subject,
-        body: logEntry.body,
-        status: logEntry.status,
-        error_message: logEntry.error_message,
-        is_automated: logEntry.is_automated
-      }]);
+      const companyId = getActiveCompanyId();
+      if (companyId) {
+        const isUuid = leadId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(leadId);
+        await supabase.from('email_logs').insert([{
+          company_id: companyId,
+          lead_id: isUuid ? leadId : null,
+          lead_name: logEntry.lead_name,
+          lead_email: logEntry.lead_email,
+          pipeline_id: logEntry.pipeline_id,
+          stage_id: logEntry.stage_id,
+          template_name: logEntry.template_name,
+          subject: logEntry.subject,
+          body: logEntry.body,
+          status: logEntry.status,
+          error_message: logEntry.error_message,
+          is_automated: logEntry.is_automated
+        }]);
+      }
     } catch (e) { }
   }
 
@@ -690,28 +691,28 @@ export async function sendEmailViaResend({
  * Fetch sent email logs from Supabase with local storage cache fallback
  */
 export async function fetchEmailLogs() {
-  try {
-    const { data, error } = await supabase
-      .from('email_logs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(500);
+  const companyId = getActiveCompanyId();
+  if (companyId) {
+    try {
+      const { data, error } = await supabase
+        .from('email_logs')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(500);
 
-    if (!error && Array.isArray(data)) {
-      try {
-        localStorage.setItem(EMAIL_LOGS_STORAGE_KEY, JSON.stringify(data));
-      } catch (e) {}
-      return data;
+      if (!error && Array.isArray(data)) {
+        try {
+          writeTenantCache(EMAIL_LOGS_STORAGE_KEY, data);
+        } catch (e) {}
+        return data;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch email logs from Supabase, falling back to local cache:', err);
     }
-  } catch (err) {
-    console.warn('Failed to fetch email logs from Supabase, falling back to local cache:', err);
   }
 
-  try {
-    const cached = localStorage.getItem(EMAIL_LOGS_STORAGE_KEY);
-    return cached ? JSON.parse(cached) : [];
-  } catch (e) {
-    return [];
-  }
+  const cached = readTenantCache(EMAIL_LOGS_STORAGE_KEY, []);
+  return Array.isArray(cached) ? cached : [];
 }
 

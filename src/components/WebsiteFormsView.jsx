@@ -14,6 +14,7 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getActiveCompanyId } from '../lib/tenant';
 import Skeleton from './common/Skeleton';
 import '../styles/meta.css';
 import '../styles/pipeline.css';
@@ -33,17 +34,24 @@ export default function WebsiteFormsView({ currentUser }) {
 
   // Fetch website forms and pipelines
   const fetchData = async () => {
+    const companyId = getActiveCompanyId();
+    if (!companyId) {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     try {
       const [formsRes, pipesRes] = await Promise.all([
         supabase
           .from('connected_forms')
           .select('*')
+          .eq('company_id', companyId)
           .eq('source', 'website')
           .order('created_at', { ascending: false }),
         supabase
           .from('pipelines')
           .select('id, name')
+          .eq('company_id', companyId)
       ]);
 
       if (formsRes.data) setForms(formsRes.data);
@@ -66,8 +74,13 @@ export default function WebsiteFormsView({ currentUser }) {
 
     setIsCreating(true);
     try {
+      const companyId = getActiveCompanyId();
+      if (!companyId) {
+        throw new Error('No active workspace selected.');
+      }
       const uniqueId = `wf_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36)}`;
       const payload = {
+        company_id: companyId,
         form_id: uniqueId,
         form_name: name,
         source: 'website',
@@ -103,10 +116,13 @@ export default function WebsiteFormsView({ currentUser }) {
     if (!window.confirm(`Delete "${form.form_name}"? Existing leads will remain unchanged.`)) return;
 
     try {
+      const companyId = getActiveCompanyId();
+      if (!companyId) throw new Error('No active workspace selected.');
       await supabase
         .from('connected_forms')
         .delete()
-        .eq('id', form.id);
+        .eq('id', form.id)
+        .eq('company_id', companyId);
 
       setForms((prev) => prev.filter((f) => f.id !== form.id));
       if (selectedScriptForm?.id === form.id) {

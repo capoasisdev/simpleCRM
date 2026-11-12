@@ -9,6 +9,8 @@
  * 4. Dual-engine architecture: OpenRouter LLMs with instant offline heuristic fallback
  */
 
+import { readTenantString } from './tenant';
+
 const OPENROUTER_STORAGE_KEY = 'crm_openrouter_api_key';
 
 export const OPENROUTER_MODELS = [
@@ -20,10 +22,8 @@ export const OPENROUTER_MODELS = [
 
 export function getOpenRouterApiKey() {
   try {
-    if (typeof localStorage !== 'undefined') {
-      const stored = localStorage.getItem(OPENROUTER_STORAGE_KEY);
-      if (stored) return stored;
-    }
+    const stored = readTenantString(OPENROUTER_STORAGE_KEY);
+    if (stored) return stored;
   } catch {}
   try {
     if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) {
@@ -207,7 +207,7 @@ ${JSON.stringify(candidateSummary, null, 2)}`;
         'Authorization': `Bearer ${apiKey.trim()}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
-        'X-Title': 'SimpleCRM'
+        'X-Title': 'simplecrm'
       },
       body: JSON.stringify({
         model,

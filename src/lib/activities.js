@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { getActiveCompanyId, readTenantCache, writeTenantCache } from './tenant';
 
 const ACTIVITIES_STORAGE_KEY = 'crm_lead_activities';
 
@@ -6,15 +7,8 @@ const ACTIVITIES_STORAGE_KEY = 'crm_lead_activities';
  * Fetch recorded activities from localStorage and optionally Supabase
  */
 export const getStoredActivities = () => {
-  try {
-    const raw = localStorage.getItem(ACTIVITIES_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    console.warn('Error reading stored activities:', err);
-    return [];
-  }
+  const parsed = readTenantCache(ACTIVITIES_STORAGE_KEY, []);
+  return Array.isArray(parsed) ? parsed : [];
 };
 
 export const recordActivity = async ({
@@ -44,7 +38,7 @@ export const recordActivity = async ({
   try {
     const current = getStoredActivities();
     const updated = [newActivity, ...current.filter((a) => a.id !== newActivity.id)].slice(0, 100);
-    localStorage.setItem(ACTIVITIES_STORAGE_KEY, JSON.stringify(updated));
+    writeTenantCache(ACTIVITIES_STORAGE_KEY, updated);
   } catch (err) {
     console.warn('Error saving activity to localStorage:', err);
   }
@@ -60,19 +54,23 @@ export const recordActivity = async ({
 
   // 3. Attempt to save to Supabase lead_activities table in the background
   try {
-    const payload = {
-      lead_name: newActivity.lead_name,
-      type: newActivity.type,
-      from_stage: newActivity.from_stage,
-      to_stage: newActivity.to_stage,
-      assigned_to: newActivity.assigned_to,
-      user_name: newActivity.user_name,
-      details: newActivity.details || null
-    };
-    if (leadId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(leadId)) {
-      payload.lead_id = leadId;
+    const companyId = getActiveCompanyId();
+    if (companyId) {
+      const payload = {
+        company_id: companyId,
+        lead_name: newActivity.lead_name,
+        type: newActivity.type,
+        from_stage: newActivity.from_stage,
+        to_stage: newActivity.to_stage,
+        assigned_to: newActivity.assigned_to,
+        user_name: newActivity.user_name,
+        details: newActivity.details || null
+      };
+      if (leadId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(leadId)) {
+        payload.lead_id = leadId;
+      }
+      await supabase.from('lead_activities').insert([payload]);
     }
-    await supabase.from('lead_activities').insert([payload]);
   } catch (err) {
     // Non-blocking: table might not exist in Supabase yet
   }
@@ -98,17 +96,20 @@ export const fetchLeadActivities = async (lead) => {
   let remoteForLead = [];
   try {
     const isUuid = lead.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(lead.id);
-    let query = supabase.from('lead_activities').select('*');
-    if (isUuid && lead.name) {
-      query = query.or(`lead_id.eq.${lead.id},lead_name.eq.${lead.name}`);
-    } else if (isUuid) {
-      query = query.eq('lead_id', lead.id);
-    } else if (lead.name) {
-      query = query.eq('lead_name', lead.name);
-    }
-    const { data, error } = await query.order('created_at', { ascending: false });
-    if (!error && Array.isArray(data)) {
-      remoteForLead = data;
+    const companyId = getActiveCompanyId();
+    if (companyId) {
+      let query = supabase.from('lead_activities').select('*').eq('company_id', companyId);
+      if (isUuid && lead.name) {
+        query = query.or(`lead_id.eq.${lead.id},lead_name.eq.${lead.name}`);
+      } else if (isUuid) {
+        query = query.eq('lead_id', lead.id);
+      } else if (lead.name) {
+        query = query.eq('lead_name', lead.name);
+      }
+      const { data, error } = await query.order('created_at', { ascending: false });
+      if (!error && Array.isArray(data)) {
+        remoteForLead = data;
+      }
     }
   } catch (err) {
     // Non-blocking fallback

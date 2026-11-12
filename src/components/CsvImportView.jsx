@@ -18,6 +18,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getActiveCompanyId } from '../lib/tenant';
 import CustomSelect from './common/CustomSelect';
 import Skeleton from './common/Skeleton';
 import '../styles/csvImport.css';
@@ -61,7 +62,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
 
   // Routing and Assignee options
   const [applyRouting, setApplyRouting] = useState(true);
-  const [defaultAssignee, setDefaultAssignee] = useState('pranav');
+  const [defaultAssignee, setDefaultAssignee] = useState('unassigned');
   const [usersList, setUsersList] = useState([]);
   const [routingConfig, setRoutingConfig] = useState(null);
   const [pipelinesList, setPipelinesList] = useState([]);
@@ -85,12 +86,18 @@ export default function CsvImportView({ currentUser, onNavigate }) {
     let isMounted = true;
 
     async function loadMetadata() {
+      const companyId = getActiveCompanyId() || currentUser?.company_id;
+      if (!companyId) {
+        if (isMounted) setIsLoading(false);
+        return;
+      }
       try {
         setIsLoading(true);
         // 1. Fetch CRM users
         const { data: usersData } = await supabase
           .from('crm_users')
           .select('id, name, email')
+          .eq('company_id', companyId)
           .order('name', { ascending: true });
         if (usersData && isMounted) {
           setUsersList(usersData);
@@ -105,6 +112,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
         const { data: rData } = await supabase
           .from('lead_routing_config')
           .select('*')
+          .eq('company_id', companyId)
           .limit(1)
           .maybeSingle();
         if (rData && isMounted) {
@@ -115,6 +123,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
         const { data: allPipelines } = await supabase
           .from('pipelines')
           .select('id, name, is_default, stages')
+          .eq('company_id', companyId)
           .order('is_default', { ascending: false });
 
         if (allPipelines && allPipelines.length > 0 && isMounted) {
@@ -331,10 +340,13 @@ export default function CsvImportView({ currentUser, onNavigate }) {
     setStep('preview');
 
     try {
+      const companyId = getActiveCompanyId() || currentUser?.company_id;
+      if (!companyId) throw new Error('No active workspace selected.');
       // Fetch all existing leads (phones & emails) for strict deduplication
       const { data: existingLeads, error: dbErr } = await supabase
         .from('leads')
-        .select('name, phone, email');
+        .select('name, phone, email')
+        .eq('company_id', companyId);
 
       if (dbErr) throw dbErr;
 
@@ -475,6 +487,12 @@ export default function CsvImportView({ currentUser, onNavigate }) {
       // Prepare Routing parameters
       let activeRules = [];
       let chosenPipeDist = null;
+      let routingMode = routingConfig?.mode || 'round_robin';
+      let rIndex = routingConfig?.round_robin_index || 0;
+      let rConfigId = routingConfig?.id || null;
+      const companyId = getActiveCompanyId() || currentUser?.company_id;
+      if (!companyId) throw new Error('No active workspace selected.');
+
       if (applyRouting) {
         const chosenPipe = pipelinesList.find(p => p.id === selectedPipelineId);
         if (chosenPipe?.lead_distribution && typeof chosenPipe.lead_distribution === 'object') {
@@ -486,6 +504,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
           const { data: latestConf } = await supabase
             .from('lead_routing_config')
             .select('*')
+            .eq('company_id', companyId)
             .limit(1)
             .maybeSingle();
 
@@ -537,6 +556,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
         const payload = batch.map(lead => {
           const assignedTo = getAssignee();
           return {
+            company_id: companyId,
             name: lead.name,
             phone: lead.phone || null,
             email: lead.email || null,
@@ -571,7 +591,8 @@ export default function CsvImportView({ currentUser, onNavigate }) {
                 },
                 updated_at: new Date().toISOString()
               })
-              .eq('id', selectedPipelineId);
+              .eq('id', selectedPipelineId)
+              .eq('company_id', companyId);
           } catch (e) {
             console.warn('Could not update pipeline round robin index:', e);
           }
@@ -582,7 +603,8 @@ export default function CsvImportView({ currentUser, onNavigate }) {
               round_robin_index: rIndex,
               updated_at: new Date().toISOString()
             })
-            .eq('id', rConfigId);
+            .eq('id', rConfigId)
+            .eq('company_id', companyId);
         }
       }
 
@@ -806,7 +828,7 @@ export default function CsvImportView({ currentUser, onNavigate }) {
             <div className="csv-section-header">
               <h2 className="csv-section-title">Column Mapping</h2>
               <p className="csv-section-desc">
-                Match your CSV headers to SimpleCRM lead fields. Auto-matched fields are pre-selected.
+                Match your CSV headers to simplecrm lead fields. Auto-matched fields are pre-selected.
               </p>
             </div>
 

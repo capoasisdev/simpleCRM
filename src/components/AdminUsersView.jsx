@@ -1,22 +1,26 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Users,
   Plus,
   Search,
   Key,
-  Shield,
   Trash2,
   X,
   Check,
   Eye,
   EyeOff,
-  UserCheck,
-  Edit2,
   Sliders,
-  ChevronRight
+  ChevronRight,
+  Lock,
+  Sparkles,
+  Mail,
+  Copy,
+  CheckCircle2,
+  CreditCard
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getActiveCompany, getActiveCompanyId, readTenantCache, writeTenantCache } from '../lib/tenant';
+import { fetchCompanyBillingSnapshot } from '../lib/billing';
 import PermissionsEditor from './PermissionsEditor';
 import {
   normalizePermissions,
@@ -24,28 +28,34 @@ import {
   DEFAULT_ADMIN_PERMISSIONS,
   isUserInSalesLeaderboard
 } from '../lib/permissions';
+import {
+  hashPassword,
+  verifyUserCredentials,
+  setUserPassword,
+  generateRandomPassword,
+  generateHumanPassword,
+  sendUserInviteEmail,
+  validatePasswordStrength
+} from '../lib/auth.js';
 import Skeleton from './common/Skeleton';
 import CustomSelect from './common/CustomSelect';
 import { haptic } from '../lib/haptics';
 import { registerBackHandler } from '../lib/backButton';
 import '../styles/admin.css';
 import '../styles/pipeline.css';
+import '../styles/securityModal.css';
+import '../styles/billing.css';
 
 const ROLE_OPTIONS = [
   { value: 'member', label: 'Team Member' },
   { value: 'admin', label: 'Administrator' }
 ];
 
-export default function AdminUsersView({ currentUser, onLogout }) {
+export default function AdminUsersView({ currentUser, onLogout, onNavigateToBilling }) {
+  const [companyMeta, setCompanyMeta] = useState(() => getActiveCompany());
   const [users, setUsers] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_users');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {}
-    return [];
+    const parsed = readTenantCache('crm_cached_users', []);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : [];
   });
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -63,18 +73,20 @@ export default function AdminUsersView({ currentUser, onLogout }) {
   // Add User Form state
   const [addName, setAddName] = useState('');
   const [addEmail, setAddEmail] = useState('');
-  const [addPin, setAddPin] = useState('');
   const [addRole, setAddRole] = useState('member');
   const [addPerms, setAddPerms] = useState(DEFAULT_MEMBER_PERMISSIONS);
+  const [createdInviteInfo, setCreatedInviteInfo] = useState(null);
+  const [copiedTempPwd, setCopiedTempPwd] = useState(false);
 
-  // Change PIN state
-  const [newPin, setNewPin] = useState('');
+  // Set / Reset Password state (replaces legacy Change PIN)
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Delete User Confirmation state
-  const [deletePin, setDeletePin] = useState('');
-  const [deletePinError, setDeletePinError] = useState('');
+  const [deleteSecret, setDeleteSecret] = useState('');
+  const [deleteSecretError, setDeleteSecretError] = useState('');
 
   // Native back button handling for modals & mobile sheet
   useEffect(() => {
@@ -123,8 +135,15 @@ export default function AdminUsersView({ currentUser, onLogout }) {
   }, [isDeleteModalOpen]);
 
   // Fetch users & setup realtime
+  const activeCompanyId = getActiveCompanyId() || currentUser?.company_id || null;
+
   useEffect(() => {
     let isMounted = true;
+    const companyId = activeCompanyId;
+    if (!companyId) {
+      setIsLoading(false);
+      return;
+    }
 
     const fetchUsers = async () => {
       try {
@@ -132,13 +151,25 @@ export default function AdminUsersView({ currentUser, onLogout }) {
         const { data, error } = await supabase
           .from('crm_users')
           .select('*')
+          .eq('company_id', companyId)
           .order('created_at', { ascending: true });
 
-        if (!error && isMounted) {
+        if (isMounted && !error) {
           setUsers(data || []);
           try {
-            localStorage.setItem('crm_cached_users', JSON.stringify(data || []));
+            // Strip raw password hashes and PINs from localStorage cache
+            const safeCache = (data || []).map(({ password_hash, pin, ...u }) => ({
+              ...u,
+              has_password: Boolean(password_hash),
+              has_legacy_pin: Boolean(pin)
+            }));
+            writeTenantCache('crm_cached_users', safeCache, companyId);
           } catch (e) {}
+        }
+
+        const snap = await fetchCompanyBillingSnapshot(companyId);
+        if (isMounted && snap?.company) {
+          setCompanyMeta(snap.company);
         }
       } catch (err) {
         console.warn('Could not fetch crm_users from Supabase:', err);
@@ -155,7 +186,7 @@ export default function AdminUsersView({ currentUser, onLogout }) {
       .channel('crm_users-realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'crm_users' },
+        { event: '*', schema: 'public', table: 'crm_users', filter: `company_id=eq.${companyId}` },
         (payload) => {
           if (!isMounted) return;
           if (payload.eventType === 'INSERT') {
@@ -185,16 +216,21 @@ export default function AdminUsersView({ currentUser, onLogout }) {
       isMounted = false;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [activeCompanyId]);
 
-  // Sync users to localStorage cache
+  // Sync users to localStorage cache (sanitized)
   useEffect(() => {
-    if (users && users.length > 0) {
+    if (users && users.length > 0 && activeCompanyId) {
       try {
-        localStorage.setItem('crm_cached_users', JSON.stringify(users));
+        const safeCache = users.map(({ password_hash, pin, ...u }) => ({
+          ...u,
+          has_password: Boolean(password_hash),
+          has_legacy_pin: Boolean(pin)
+        }));
+        writeTenantCache('crm_cached_users', safeCache, activeCompanyId);
       } catch (e) {}
     }
-  }, [users]);
+  }, [users, activeCompanyId]);
 
   const filteredUsers = useMemo(() => {
     if (!searchQuery.trim()) return users;
@@ -211,65 +247,121 @@ export default function AdminUsersView({ currentUser, onLogout }) {
     setShowPins((prev) => ({ ...prev, [userId]: !prev[userId] }));
   };
 
-  // Handle Add User
+  // Handle Add User (automated human temporary password + invitation dispatch)
   const handleAddUser = async (e) => {
     e.preventDefault();
     setFormError('');
 
-    if (!addName.trim() || !addEmail.trim()) {
-      setFormError('Please enter user name and email.');
+    const trimmedName = addName.trim();
+    const trimmedEmail = addEmail.trim().toLowerCase();
+
+    if (!trimmedName || !trimmedEmail) {
+      setFormError('Please enter user name and work email.');
       return;
     }
 
-    if (!/^\d{4}$/.test(addPin)) {
-      setFormError('PIN must be exactly 4 digits (e.g. 1234).');
+    if (!trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
+      setFormError('Please enter a valid work email address.');
+      return;
+    }
+
+    if (users.some((u) => u.email?.toLowerCase() === trimmedEmail)) {
+      setFormError('A user with this email address already exists.');
+      return;
+    }
+
+    const effectiveCompany = companyMeta || getActiveCompany();
+    const companyId = effectiveCompany?.id || activeCompanyId;
+    if (!companyId) {
+      setFormError('Workspace context missing. Please sign in again.');
+      return;
+    }
+    const activeSeatLimit = effectiveCompany?.seat_limit ? Number(effectiveCompany.seat_limit) : null;
+    if (!effectiveCompany?.is_billing_exempt && activeSeatLimit && users.length >= activeSeatLimit) {
+      setFormError(`Workspace seat limit reached (${users.length}/${activeSeatLimit}). Buy more seats in Billing & Seats to add more team members.`);
       return;
     }
 
     setIsSubmitting(true);
-    const userPayload = {
-      name: addName.trim(),
-      email: addEmail.trim().toLowerCase(),
-      pin: addPin,
-      role: addRole,
-      permissions: addPerms
-    };
-
-    const tempId = `temp-${Date.now()}`;
-    setUsers((prev) => [...prev, { id: tempId, ...userPayload }]);
-    setIsAddModalOpen(false);
-    setAddName('');
-    setAddEmail('');
-    setAddPin('');
-    setAddRole('member');
-    setAddPerms(DEFAULT_MEMBER_PERMISSIONS);
 
     try {
+      // Generate human-friendly temporary initial password based on name (e.g. "Rahul@4892")
+      const tempPassword = generateHumanPassword(trimmedName);
+      const passwordHash = await hashPassword(tempPassword);
+
+      const userPayload = {
+        company_id: companyId,
+        name: trimmedName,
+        email: trimmedEmail,
+        password_hash: passwordHash,
+        password_updated_at: new Date().toISOString(),
+        must_change_password: true, // Forces permanent password setup on first login
+        role: addRole,
+        permissions: addPerms
+      };
+
+      // Insert to Supabase BEFORE closing modal or emailing credentials (enforces Postgres seat trigger & global email uniqueness)
       const { data, error } = await supabase
         .from('crm_users')
         .insert([userPayload])
         .select()
         .single();
 
-      if (data) {
-        setUsers((prev) => prev.map((u) => (u.id === tempId ? data : u)));
-      } else if (error) {
-        console.warn('Note adding user to Supabase:', error.message);
+      if (error || !data) {
+        const msg = String(error?.message || '');
+        const code = String(error?.code || '');
+        if (/seat limit|23514|check_violation/i.test(`${code} ${msg}`)) {
+          setFormError(`Workspace seat limit reached (${users.length}/${activeSeatLimit || effectiveCompany?.seat_limit || '?'}). Buy more seats to invite another user.`);
+          fetchCompanyBillingSnapshot(companyId).then((snap) => {
+            if (snap?.company) setCompanyMeta(snap.company);
+          }).catch(() => {});
+        } else if (/23505|duplicate|unique/i.test(`${code} ${msg}`)) {
+          setFormError('This work email is already registered on simplecrm.');
+        } else {
+          setFormError(msg || 'Could not add team member. Please try again.');
+        }
+        return;
       }
+
+      setUsers((prev) => (prev.some((u) => u.id === data.id) ? prev : [...prev, data]));
+      setIsAddModalOpen(false);
+      setAddName('');
+      setAddEmail('');
+      setAddRole('member');
+      setAddPerms(DEFAULT_MEMBER_PERMISSIONS);
+
+      // Dispatch automated Welcome & Invite Email via Resend only after persisted
+      const inviteRes = await sendUserInviteEmail({
+        name: trimmedName,
+        email: trimmedEmail,
+        tempPassword,
+        role: addRole
+      });
+
+      // Display invitation confirmation dialog with copy fallback
+      setCreatedInviteInfo({
+        name: trimmedName,
+        email: trimmedEmail,
+        tempPassword,
+        emailSent: inviteRes.emailSent,
+        reason: inviteRes.reason
+      });
+      setCopiedTempPwd(false);
     } catch (err) {
-      console.warn('Error inserting user:', err);
+      setFormError(err?.message || 'Unexpected error while creating team member.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Handle Change PIN
-  const handleChangePin = async (e) => {
+  // Handle Set / Reset Password (upgrades legacy PIN or updates password)
+  const handleSetPassword = async (e) => {
     e.preventDefault();
     setFormError('');
 
-    if (!/^\d{4}$/.test(newPin)) {
-      setFormError('PIN must be exactly 4 digits (e.g. 5678).');
+    const val = validatePasswordStrength(newPassword);
+    if (!val.isValid) {
+      setFormError(val.message);
       return;
     }
 
@@ -277,25 +369,33 @@ export default function AdminUsersView({ currentUser, onLogout }) {
 
     setIsSubmitting(true);
     const updatedUserId = selectedUser.id;
-    const pinToSet = newPin;
-
-    setUsers((prev) =>
-      prev.map((u) => (u.id === updatedUserId ? { ...u, pin: pinToSet } : u))
-    );
-    setIsPinModalOpen(false);
-    setNewPin('');
 
     try {
-      const { error } = await supabase
-        .from('crm_users')
-        .update({ pin: pinToSet })
-        .eq('id', updatedUserId);
-
-      if (error) {
-        console.warn('Note updating PIN in Supabase:', error.message);
+      const res = await setUserPassword(updatedUserId, newPassword.trim());
+      if (!res.success) {
+        setFormError(res.error || 'Failed to update password.');
+        setIsSubmitting(false);
+        return;
       }
+
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === updatedUserId
+            ? {
+                ...u,
+                password_hash: res.user.password_hash ?? (res.user.is_secured ? 'secured' : null),
+                is_secured: Boolean(res.user.is_secured || res.user.password_hash),
+                password_updated_at: res.user.password_updated_at
+              }
+            : u
+        )
+      );
+      setIsPinModalOpen(false);
+      setNewPassword('');
+      setShowNewPassword(false);
     } catch (err) {
-      console.warn('Error updating PIN:', err);
+      console.warn('Error updating password:', err);
+      setFormError('Failed to update password.');
     } finally {
       setIsSubmitting(false);
     }
@@ -321,10 +421,12 @@ export default function AdminUsersView({ currentUser, onLogout }) {
     setIsEditModalOpen(false);
 
     try {
+      if (!activeCompanyId) throw new Error('No active workspace selected.');
       const { error } = await supabase
         .from('crm_users')
         .update({ permissions: updatedPerms, role: updatedRole })
-        .eq('id', updatedUserId);
+        .eq('id', updatedUserId)
+        .eq('company_id', activeCompanyId);
 
       if (error) {
         console.warn('Note updating permissions in Supabase:', error.message);
@@ -343,8 +445,8 @@ export default function AdminUsersView({ currentUser, onLogout }) {
       return;
     }
     setUserToDelete(user);
-    setDeletePin('');
-    setDeletePinError('');
+    setDeleteSecret('');
+    setDeleteSecretError('');
     setIsDeleteModalOpen(true);
   };
 
@@ -352,27 +454,33 @@ export default function AdminUsersView({ currentUser, onLogout }) {
     if (isSubmitting) return;
     setIsDeleteModalOpen(false);
     setUserToDelete(null);
-    setDeletePin('');
-    setDeletePinError('');
+    setDeleteSecret('');
+    setDeleteSecretError('');
   };
 
   // Perform Delete after user confirmation
   const handleConfirmDelete = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!userToDelete) return;
-    setDeletePinError('');
+    setDeleteSecretError('');
 
-    // Active logged-in administrator PIN check
+    // Active logged-in administrator credential check
     const activeAdmin = users.find(
       (u) =>
         (currentUser?.id && u.id === currentUser.id) ||
         (currentUser?.email && u.email?.toLowerCase() === currentUser.email?.toLowerCase())
     ) || currentUser;
 
-    const currentAdminPin = (activeAdmin?.pin || currentUser?.pin || '').trim();
+    const trimmedSecret = (deleteSecret || '').trim();
+    if (!trimmedSecret) {
+      setDeleteSecretError('Please enter your password or PIN to confirm deletion.');
+      return;
+    }
 
-    if (!deletePin || deletePin.trim() !== currentAdminPin) {
-      setDeletePinError('Incorrect PIN. Please re-enter your admin PIN.');
+    const adminEmail = currentUser?.email || activeAdmin?.email;
+    const authCheck = await verifyUserCredentials(adminEmail, trimmedSecret, { attachSession: false });
+    if (!authCheck.success) {
+      setDeleteSecretError('Incorrect credentials. Please enter your valid admin password or PIN.');
       return;
     }
 
@@ -383,11 +491,16 @@ export default function AdminUsersView({ currentUser, onLogout }) {
     setUsers((prev) => prev.filter((u) => u.id !== userId));
     setIsDeleteModalOpen(false);
     setUserToDelete(null);
-    setDeletePin('');
-    setDeletePinError('');
+    setDeleteSecret('');
+    setDeleteSecretError('');
 
     try {
-      const { error } = await supabase.from('crm_users').delete().eq('id', userId);
+      if (!activeCompanyId) throw new Error('No active workspace selected.');
+      const { error } = await supabase
+        .from('crm_users')
+        .delete()
+        .eq('id', userId)
+        .eq('company_id', activeCompanyId);
       if (error) {
         console.warn('Note deleting user in Supabase:', error.message);
       }
@@ -414,39 +527,69 @@ export default function AdminUsersView({ currentUser, onLogout }) {
     <div className="admin-view-container">
       <div className="admin-view-inner">
         {/* Master Header matching pipeline-master-header */}
-        <div className="admin-master-header">
-          <div className="admin-master-title-group">
-            <h1 className="admin-master-title">Users</h1>
-            <span className="admin-master-count" style={{ minWidth: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-              {isLoading ? <Skeleton width="18px" height="14px" borderRadius="4px" /> : users.length}
-            </span>
-          </div>
+        {(() => {
+          const effectiveCompany = companyMeta || getActiveCompany();
+          const seatLimit = effectiveCompany?.seat_limit ? Number(effectiveCompany.seat_limit) : null;
+          const isSeatEnforced = Boolean(effectiveCompany && !effectiveCompany.is_billing_exempt && seatLimit);
+          const isAtSeatLimit = Boolean(isSeatEnforced && !isLoading && users.length >= seatLimit);
 
-          <div className="admin-actions-group">
-            <div className="admin-search-wrapper">
-              <Search size={15} strokeWidth={1.75} className="admin-search-icon" />
-              <input
-                type="text"
-                className="admin-search-input"
-                placeholder="Search users..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+          return (
+            <div className="admin-master-header">
+              <div className="admin-master-title-group">
+                <h1 className="admin-master-title">Users</h1>
+                <span className="admin-master-count" style={{ minWidth: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {isLoading ? <Skeleton width="18px" height="14px" borderRadius="4px" /> : users.length}
+                </span>
+                {!isLoading && seatLimit && (
+                  <span className={`billing-seat-pill ${isAtSeatLimit ? 'at-limit' : ''}`}>
+                    {effectiveCompany?.is_billing_exempt
+                      ? `${users.length} active seats`
+                      : `${users.length} / ${seatLimit} seats`}
+                  </span>
+                )}
+              </div>
+
+              <div className="admin-actions-group">
+                <div className="admin-search-wrapper">
+                  <Search size={15} strokeWidth={1.75} className="admin-search-icon" />
+                  <input
+                    type="text"
+                    className="admin-search-input"
+                    placeholder="Search users..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+
+                {isAtSeatLimit && currentUser?.role === 'admin' && typeof onNavigateToBilling === 'function' && (
+                  <button
+                    type="button"
+                    className="billing-secondary-btn"
+                    onClick={onNavigateToBilling}
+                  >
+                    <CreditCard size={14} strokeWidth={1.8} />
+                    <span>Buy More Seats</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  className="admin-add-user-btn"
+                  disabled={isAtSeatLimit}
+                  title={isAtSeatLimit ? 'Seat limit reached — buy more seats first' : 'Invite a new team member'}
+                  style={isAtSeatLimit ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+                  onClick={() => {
+                    setFormError('');
+                    setIsAddModalOpen(true);
+                  }}
+                >
+                  <Plus size={15} strokeWidth={2} />
+                  <span>Add User</span>
+                </button>
+              </div>
             </div>
-
-            <button
-              type="button"
-              className="admin-add-user-btn"
-              onClick={() => {
-                setFormError('');
-                setIsAddModalOpen(true);
-              }}
-            >
-              <Plus size={15} strokeWidth={2} />
-              <span>Add User</span>
-            </button>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* Users Numbered List */}
         <div className="admin-users-numbered-list">
@@ -517,39 +660,39 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                     )}
                   </div>
 
-                  {/* Col 4: PIN Pill with Reveal Toggle */}
+                  {/* Col 4: Authentication Security Badge */}
                   <div className="admin-col-pin">
-                    <div className="admin-pin-pill" title="4-digit Login PIN">
-                      <span
-                        className="admin-pin-text"
+                    {user.password_hash ? (
+                      <div
+                        className="admin-auth-badge is-secured"
+                        title="Secured with password. Click to reset."
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedUser(user);
-                          setNewPin('');
+                          setNewPassword('');
                           setFormError('');
                           setIsPinModalOpen(true);
                         }}
-                        title="Click to change PIN"
                       >
-                        {isMasked ? '••••' : user.pin}
-                      </span>
-                      <button
-                        type="button"
-                        className="admin-pin-toggle-btn"
+                        <Lock size={12} strokeWidth={2.2} />
+                        <span>Secured</span>
+                      </div>
+                    ) : (
+                      <div
+                        className="admin-auth-badge is-legacy"
+                        title="Using legacy 4-digit PIN. Click to upgrade to password."
                         onClick={(e) => {
                           e.stopPropagation();
-                          toggleShowPin(user.id);
+                          setSelectedUser(user);
+                          setNewPassword('');
+                          setFormError('');
+                          setIsPinModalOpen(true);
                         }}
-                        data-tooltip={isMasked ? 'Reveal PIN' : 'Hide PIN'}
-                        aria-label={isMasked ? 'Reveal PIN' : 'Hide PIN'}
                       >
-                        {isMasked ? (
-                          <Eye size={13} strokeWidth={1.75} />
-                        ) : (
-                          <EyeOff size={13} strokeWidth={1.75} />
-                        )}
-                      </button>
-                    </div>
+                        <Key size={12} strokeWidth={2.2} />
+                        <span>PIN: {isMasked ? '••••' : user.pin}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Col 5: Permissions Badge */}
@@ -575,21 +718,21 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                     )}
                   </div>
 
-                  {/* Col 6: Actions: Change PIN, Edit Permissions, Delete User */}
+                  {/* Col 6: Actions: Set Password, Edit Permissions, Delete User */}
                   <div className="admin-col-actions">
                     <div className="admin-action-icons-cluster">
                       <button
                         type="button"
                         className="btn-admin-action"
-                        data-tooltip="Change PIN"
+                        data-tooltip={user.password_hash ? 'Reset Password' : 'Set Password'}
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedUser(user);
-                          setNewPin('');
+                          setNewPassword('');
                           setFormError('');
                           setIsPinModalOpen(true);
                         }}
-                        aria-label="Change PIN"
+                        aria-label="Set or Reset Password"
                       >
                         <Key size={15} strokeWidth={1.75} />
                       </button>
@@ -668,8 +811,21 @@ export default function AdminUsersView({ currentUser, onLogout }) {
             <form onSubmit={handleAddUser}>
               <div className="admin-modal-body">
                 {formError && (
-                  <div className="admin-modal-error-banner">
-                    {formError}
+                  <div className="admin-modal-error-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                    <span>{formError}</span>
+                    {/seat limit/i.test(formError) && typeof onNavigateToBilling === 'function' && (
+                      <button
+                        type="button"
+                        className="billing-secondary-btn"
+                        style={{ height: 28, padding: '0 10px', fontSize: 12 }}
+                        onClick={() => {
+                          setIsAddModalOpen(false);
+                          onNavigateToBilling();
+                        }}
+                      >
+                        Buy More Seats
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -700,23 +856,17 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                   </div>
                 </div>
 
-                <div className="admin-field-group" style={{ marginTop: '12px' }}>
-                  <label className="admin-field-label">4-Digit Access PIN</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={4}
-                    className="admin-field-input"
-                    placeholder="e.g. 5678"
-                    value={addPin}
-                    onChange={(e) =>
-                      setAddPin(e.target.value.replace(/\D/g, '').slice(0, 4))
-                    }
-                    style={{ maxWidth: '160px', fontFamily: 'monospace', letterSpacing: '0.15em', fontWeight: 600 }}
-                    required
-                  />
-                  <span className="admin-field-helper">
-                    Numeric 4-digit code used to sign in instantly.
+                {/* Automated Initial Password Note */}
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '14px 16px', marginTop: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '13px', fontWeight: 600, color: '#0f172a', marginBottom: '4px' }}>
+                    <Sparkles size={14} color="#2563eb" />
+                    <span>Automated Secure Onboarding</span>
+                  </div>
+                  <p style={{ fontSize: '12.5px', color: '#475569', margin: '0 0 6px', lineHeight: 1.5 }}>
+                    A human-friendly temporary password based on their name (e.g. <strong>{generateHumanPassword(addName || 'Rahul')}</strong>) will be generated and dispatched to their email address.
+                  </p>
+                  <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block' }}>
+                    🔒 <em>The user will be required to choose a new permanent password on their first sign-in.</em>
                   </span>
                 </div>
 
@@ -795,7 +945,7 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                   className="btn-minimal-save"
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? 'Adding...' : 'Add Team Member'}
+                  {isSubmitting ? 'Inviting...' : 'Invite Team Member'}
                 </button>
               </div>
             </form>
@@ -804,7 +954,99 @@ export default function AdminUsersView({ currentUser, onLogout }) {
         document.body
       )}
 
-      {/* 2. Modal: Change PIN */}
+      {/* Invitation Sent Confirmation Modal */}
+      {createdInviteInfo && createPortal(
+        <div className="admin-modal-backdrop" onClick={() => setCreatedInviteInfo(null)}>
+          <div
+            className="admin-modal-card"
+            style={{ maxWidth: '440px' }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="admin-modal-header" style={{ paddingBottom: '14px' }}>
+              <div className="admin-modal-title-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#ecfdf5', border: '1px solid #a7f3d0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669' }}>
+                  <CheckCircle2 size={20} strokeWidth={2.2} />
+                </div>
+                <div>
+                  <h2 className="admin-modal-title" style={{ fontSize: '16.5px' }}>Team Member Invited</h2>
+                  <span className="admin-modal-subtitle">Account created & credentials generated</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="admin-modal-close-btn"
+                onClick={() => setCreatedInviteInfo(null)}
+                aria-label="Close"
+              >
+                <X size={16} strokeWidth={1.8} />
+              </button>
+            </div>
+
+            <div className="admin-modal-body" style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
+                <div style={{ marginBottom: '12px' }}>
+                  <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b', fontWeight: 600, display: 'block' }}>Member</span>
+                  <strong style={{ fontSize: '14.5px', color: '#0f172a' }}>{createdInviteInfo.name}</strong>
+                  <span style={{ fontSize: '12.5px', color: '#475569', display: 'block' }}>{createdInviteInfo.email}</span>
+                </div>
+
+                <div>
+                  <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Temporary Initial Password</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <code style={{ fontSize: '16px', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #dbeafe', letterSpacing: '0.04em' }}>
+                      {createdInviteInfo.tempPassword}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          navigator.clipboard.writeText(createdInviteInfo.tempPassword);
+                          setCopiedTempPwd(true);
+                          setTimeout(() => setCopiedTempPwd(false), 2000);
+                        } catch {}
+                      }}
+                      style={{ background: '#ffffff', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: '#334155' }}
+                    >
+                      {copiedTempPwd ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
+                      <span>{copiedTempPwd ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {createdInviteInfo.emailSent ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: '#065f46', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '10px 12px', borderRadius: '6px' }}>
+                  <Mail size={15} />
+                  <span>Invitation email with sign-in instructions has been sent to <strong>{createdInviteInfo.email}</strong>.</span>
+                </div>
+              ) : (
+                <div style={{ fontSize: '12px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', padding: '10px 12px', borderRadius: '6px', lineHeight: 1.4 }}>
+                  ⚠️ {createdInviteInfo.reason || 'Email service is not connected. Please provide the temporary password to the team member directly.'}
+                </div>
+              )}
+
+              <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>
+                The user will be required to change their temporary password to their own permanent password on their first sign-in.
+              </p>
+            </div>
+
+            <div className="admin-modal-footer">
+              <button
+                type="button"
+                className="btn-minimal-save"
+                onClick={() => setCreatedInviteInfo(null)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 2. Modal: Set or Reset Password */}
       {isPinModalOpen && selectedUser && createPortal(
         <div className="admin-modal-backdrop" onClick={() => setIsPinModalOpen(false)}>
           <div
@@ -815,7 +1057,9 @@ export default function AdminUsersView({ currentUser, onLogout }) {
           >
             <div className="admin-modal-header">
               <div className="admin-modal-title-group">
-                <h2 className="admin-modal-title">Change PIN</h2>
+                <h2 className="admin-modal-title">
+                  {selectedUser.password_hash ? 'Reset Password' : 'Set Password (Upgrade)'}
+                </h2>
                 <div className="admin-modal-user-pill">
                   <span className="admin-modal-user-name">{selectedUser.name}</span>
                   <span className="admin-modal-user-dot">·</span>
@@ -832,32 +1076,75 @@ export default function AdminUsersView({ currentUser, onLogout }) {
               </button>
             </div>
 
-            <form onSubmit={handleChangePin}>
+            <form onSubmit={handleSetPassword}>
               <div className="admin-modal-body">
                 {formError && (
-                  <div className="admin-modal-error-banner">
-                    {formError}
+                  <div className="admin-modal-error-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                    <span>{formError}</span>
+                    {/seat limit/i.test(formError) && typeof onNavigateToBilling === 'function' && (
+                      <button
+                        type="button"
+                        className="billing-secondary-btn"
+                        style={{ height: 28, padding: '0 10px', fontSize: 12 }}
+                        onClick={() => {
+                          setIsAddModalOpen(false);
+                          onNavigateToBilling();
+                        }}
+                      >
+                        Buy More Seats
+                      </button>
+                    )}
                   </div>
                 )}
 
-                <div className="admin-pin-display-wrapper">
-                  <label className="admin-pin-large-label">New 4-Digit Access PIN</label>
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    maxLength={4}
-                    className="admin-pin-large-input"
-                    placeholder="••••"
-                    value={newPin}
-                    onChange={(e) =>
-                      setNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))
-                    }
-                    autoFocus
-                    required
-                  />
-                  <span className="admin-pin-large-helper">
-                    Numeric code immediately active for login
-                  </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px 0' }}>
+                  <label className="admin-field-label">New Password</label>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      className="admin-field-input"
+                      style={{ paddingRight: '40px' }}
+                      placeholder="Enter at least 6 characters"
+                      value={newPassword}
+                      onChange={(e) => {
+                        setNewPassword(e.target.value);
+                        if (formError) setFormError('');
+                      }}
+                      autoFocus
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="admin-pin-toggle-btn"
+                      style={{ position: 'absolute', right: '10px' }}
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      aria-label={showNewPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+
+                  <div className="admin-pwd-generator-row">
+                    <button
+                      type="button"
+                      className="admin-pwd-generate-btn"
+                      onClick={() => {
+                        const gen = generateRandomPassword(12);
+                        setNewPassword(gen);
+                        setShowNewPassword(true);
+                      }}
+                    >
+                      <Sparkles size={12} />
+                      <span>Generate Strong Password</span>
+                    </button>
+                    <span className="admin-field-helper">Min 6 characters</span>
+                  </div>
+
+                  {!selectedUser.password_hash && selectedUser.pin && (
+                    <span style={{ fontSize: '12px', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', padding: '8px 10px', borderRadius: '6px', marginTop: '6px', lineHeight: 1.4 }}>
+                      This member is currently using a legacy 4-digit PIN ({selectedUser.pin}). Setting a password will immediately upgrade their account to password security.
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -873,9 +1160,9 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                 <button
                   type="submit"
                   className="btn-minimal-save"
-                  disabled={isSubmitting || newPin.length !== 4}
+                  disabled={isSubmitting || !newPassword}
                 >
-                  {isSubmitting ? 'Saving...' : 'Update PIN'}
+                  {isSubmitting ? 'Saving...' : selectedUser.password_hash ? 'Update Password' : 'Save & Upgrade to Password'}
                 </button>
               </div>
             </form>
@@ -1057,33 +1344,30 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                 </div>
 
                 <div className="admin-delete-pin-group">
-                  <label htmlFor="delete-pin-input" className="admin-delete-pin-label">
-                    Re-enter your PIN to confirm
+                  <label htmlFor="delete-secret-input" className="admin-delete-pin-label">
+                    Enter your admin password or PIN to confirm
                   </label>
                   <div className="admin-delete-pin-wrapper">
                     <input
-                      id="delete-pin-input"
+                      id="delete-secret-input"
                       type="password"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      maxLength={4}
                       autoFocus
-                      placeholder="••••"
-                      value={deletePin}
+                      placeholder="Admin password or PIN"
+                      value={deleteSecret}
                       onChange={(e) => {
-                        const val = e.target.value.replace(/\D/g, '').slice(0, 4);
-                        setDeletePin(val);
-                        if (deletePinError) setDeletePinError('');
+                        setDeleteSecret(e.target.value);
+                        if (deleteSecretError) setDeleteSecretError('');
                       }}
-                      className={`admin-delete-pin-input ${deletePinError ? 'has-error' : ''}`}
+                      className={`admin-delete-pin-input ${deleteSecretError ? 'has-error' : ''}`}
+                      style={{ width: '220px', fontFamily: 'inherit', letterSpacing: '0.04em', fontSize: '14px' }}
                       disabled={isSubmitting}
-                      autoComplete="off"
+                      autoComplete="current-password"
                     />
                   </div>
-                  {deletePinError ? (
-                    <span className="admin-delete-pin-error">{deletePinError}</span>
+                  {deleteSecretError ? (
+                    <span className="admin-delete-pin-error">{deleteSecretError}</span>
                   ) : (
-                    <span className="admin-delete-pin-hint">Enter your 4-digit admin PIN to authorize permanent deletion</span>
+                    <span className="admin-delete-pin-hint">Enter your admin credentials to authorize permanent deletion</span>
                   )}
                 </div>
               </div>
@@ -1100,7 +1384,7 @@ export default function AdminUsersView({ currentUser, onLogout }) {
                 <button
                   type="submit"
                   className="btn-danger-confirm"
-                  disabled={isSubmitting || deletePin.length !== 4}
+                  disabled={isSubmitting || !deleteSecret}
                 >
                   {isSubmitting ? 'Deleting...' : 'Delete Member'}
                 </button>
@@ -1157,37 +1441,44 @@ export default function AdminUsersView({ currentUser, onLogout }) {
               </div>
 
               <div className="admin-sheet-body">
-                {/* Login PIN Card */}
+                {/* Account Security Card */}
                 <div className="admin-sheet-tile">
                   <div className="admin-sheet-tile-left">
-                    <span className="admin-sheet-tile-label">Login PIN</span>
-                    <div className="admin-sheet-pin-display">
-                      <span className="admin-sheet-pin-value">
-                        {isMasked ? '••••' : currentUserData.pin}
-                      </span>
-                      <button
-                        type="button"
-                        className="admin-pin-toggle-btn"
-                        onClick={() => toggleShowPin(currentUserData.id)}
-                        aria-label={isMasked ? 'Reveal PIN' : 'Hide PIN'}
-                      >
-                        {isMasked ? <Eye size={14} /> : <EyeOff size={14} />}
-                      </button>
-                    </div>
+                    <span className="admin-sheet-tile-label">Account Security</span>
+                    {currentUserData.password_hash ? (
+                      <div className="admin-auth-badge is-secured" style={{ width: 'fit-content', marginTop: 4 }}>
+                        <Lock size={12} strokeWidth={2.2} />
+                        <span>Password Protected</span>
+                      </div>
+                    ) : (
+                      <div className="admin-sheet-pin-display">
+                        <span className="admin-sheet-pin-value">
+                          Legacy PIN: {isMasked ? '••••' : currentUserData.pin}
+                        </span>
+                        <button
+                          type="button"
+                          className="admin-pin-toggle-btn"
+                          onClick={() => toggleShowPin(currentUserData.id)}
+                          aria-label={isMasked ? 'Reveal PIN' : 'Hide PIN'}
+                        >
+                          {isMasked ? <Eye size={14} /> : <EyeOff size={14} />}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <button
                     type="button"
                     className="admin-sheet-tile-btn"
                     onClick={() => {
                       setSelectedUser(currentUserData);
-                      setNewPin('');
+                      setNewPassword('');
                       setFormError('');
                       setIsPinModalOpen(true);
                       setActiveMobileUser(null);
                     }}
                   >
                     <Key size={14} strokeWidth={2} />
-                    <span>Change PIN</span>
+                    <span>{currentUserData.password_hash ? 'Reset Password' : 'Set Password'}</span>
                   </button>
                 </div>
 

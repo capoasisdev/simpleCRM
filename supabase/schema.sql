@@ -46,7 +46,10 @@ create table if not exists public.crm_users (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   name text not null,
   email text not null unique,
-  pin varchar(4) not null, -- 4-digit PIN
+  pin varchar(4) default null, -- legacy 4-digit PIN for backward compatibility
+  password_hash text default null, -- PBKDF2 secure password hash
+  password_updated_at timestamptz default null,
+  must_change_password boolean default false,
   role text not null default 'member', -- 'admin' | 'member'
   permissions jsonb not null default '{
     "view_dashboard": true,
@@ -62,11 +65,10 @@ create policy "Allow public access to crm_users" on public.crm_users
   for all using (true) with check (true);
 
 -- Default Admin User
-insert into public.crm_users (name, email, pin, role, permissions)
+insert into public.crm_users (name, email, role, permissions)
 values (
-  'Pranav Patil',
-  'pranav.p@capoasis.com',
-  '1234',
+  'Administrator',
+  'admin@simplecrm.com',
   'admin',
   '{"view_dashboard": true, "manage_leads": true, "manage_deals": true, "manage_users": true}'::jsonb
 )
@@ -95,7 +97,7 @@ create table if not exists public.meta_config (
   whatsapp_phone_number_id text,
   whatsapp_business_account_id text,
   whatsapp_access_token text,
-  whatsapp_template text default 'salado_lead_welcome',
+  whatsapp_template text default 'welcome_lead_intro',
   whatsapp_auto_welcome boolean default false,
   whatsapp_templates jsonb default '[]'::jsonb,
   whatsapp_is_connected boolean default false,
@@ -331,3 +333,21 @@ create policy "Allow public access to meta_capi_logs" on public.meta_capi_logs
   for all using (true) with check (true);
 
 alter publication supabase_realtime add table public.meta_capi_logs;
+
+-- 15. PASSWORD RESET CODES TABLE (15-Minute Expiration OTPs)
+create table if not exists public.password_reset_codes (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  email text not null,
+  code text not null,
+  expires_at timestamptz not null,
+  used boolean default false
+);
+
+create index if not exists idx_pwd_reset_email on public.password_reset_codes(email);
+create index if not exists idx_pwd_reset_code on public.password_reset_codes(code);
+
+alter table public.password_reset_codes enable row level security;
+drop policy if exists "Allow public access to password_reset_codes" on public.password_reset_codes;
+create policy "Allow public access to password_reset_codes" on public.password_reset_codes
+  for all using (true) with check (true);

@@ -25,6 +25,7 @@ import {
   Zap
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getActiveCompanyId } from '../lib/tenant';
 import { sendWhatsAppMessage } from '../lib/whatsapp';
 import Skeleton from './common/Skeleton';
 import '../styles/automations.css';
@@ -45,12 +46,12 @@ export default function AutomationsView({ currentUser }) {
   const [phoneId, setPhoneId] = useState('');
   const [wabaId, setWabaId] = useState('');
   const [accessToken, setAccessToken] = useState('');
-  const [templateName, setTemplateName] = useState('salado_lead_welcome');
+  const [templateName, setTemplateName] = useState('welcome_lead_intro');
   const [isWaActive, setIsWaActive] = useState(false);
   const [isSavingWa, setIsSavingWa] = useState(false);
   const [showCredentialsDrawer, setShowCredentialsDrawer] = useState(false);
   const [testPhone, setTestPhone] = useState('');
-  const [testLeadName, setTestLeadName] = useState('Pranav');
+  const [testLeadName, setTestLeadName] = useState('Alex');
   const [isTestingWa, setIsTestingWa] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
@@ -68,11 +69,17 @@ export default function AutomationsView({ currentUser }) {
   // --------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true;
+    const companyId = getActiveCompanyId();
+    if (!companyId) {
+      setIsLoading(false);
+      return;
+    }
     const fetchAllData = async () => {
       try {
         const { data: metaData } = await supabase
           .from('meta_config')
           .select('*')
+          .eq('company_id', companyId)
           .limit(1)
           .maybeSingle();
 
@@ -81,7 +88,7 @@ export default function AutomationsView({ currentUser }) {
           setPhoneId(metaData.whatsapp_phone_number_id || '');
           setWabaId(metaData.whatsapp_business_account_id || '');
           setAccessToken(metaData.whatsapp_access_token || '');
-          setTemplateName(metaData.whatsapp_template || 'salado_lead_welcome');
+          setTemplateName(metaData.whatsapp_template || 'welcome_lead_intro');
           setIsWaActive(Boolean(metaData.whatsapp_auto_welcome));
         }
       } catch (err) {
@@ -106,11 +113,13 @@ export default function AutomationsView({ currentUser }) {
     setIsWaActive(nextState);
 
     try {
+      const companyId = getActiveCompanyId();
+      if (!companyId) throw new Error('No active workspace selected.');
       const payload = {
         whatsapp_phone_number_id: phoneId.trim(),
         whatsapp_business_account_id: wabaId.trim(),
         whatsapp_access_token: accessToken.trim(),
-        whatsapp_template: templateName.trim() || 'salado_lead_welcome',
+        whatsapp_template: templateName.trim() || 'welcome_lead_intro',
         whatsapp_auto_welcome: nextState,
         updated_at: new Date().toISOString()
       };
@@ -119,12 +128,13 @@ export default function AutomationsView({ currentUser }) {
         const { error } = await supabase
           .from('meta_config')
           .update(payload)
-          .eq('id', waConfigId);
+          .eq('id', waConfigId)
+          .eq('company_id', companyId);
         if (error) throw error;
       } else {
         const { data, error } = await supabase
           .from('meta_config')
-          .insert(payload)
+          .insert({ ...payload, company_id: companyId })
           .select()
           .single();
         if (error) throw error;
@@ -144,19 +154,21 @@ export default function AutomationsView({ currentUser }) {
   const handleSaveWaCredentials = async () => {
     setIsSavingWa(true);
     try {
+      const companyId = getActiveCompanyId();
+      if (!companyId) throw new Error('No active workspace selected.');
       const payload = {
         whatsapp_phone_number_id: phoneId.trim(),
         whatsapp_business_account_id: wabaId.trim(),
         whatsapp_access_token: accessToken.trim(),
-        whatsapp_template: templateName.trim() || 'salado_lead_welcome',
+        whatsapp_template: templateName.trim() || 'welcome_lead_intro',
         whatsapp_auto_welcome: isWaActive,
         updated_at: new Date().toISOString()
       };
 
       if (waConfigId) {
-        await supabase.from('meta_config').update(payload).eq('id', waConfigId);
+        await supabase.from('meta_config').update(payload).eq('id', waConfigId).eq('company_id', companyId);
       } else {
-        const { data } = await supabase.from('meta_config').insert(payload).select().single();
+        const { data } = await supabase.from('meta_config').insert({ ...payload, company_id: companyId }).select().single();
         if (data) setWaConfigId(data.id);
       }
 
@@ -184,12 +196,12 @@ export default function AutomationsView({ currentUser }) {
     try {
       const res = await sendWhatsAppMessage({
         to: testPhone.trim(),
-        leadName: testLeadName.trim() || 'Pranav',
-        templateName: templateName.trim() || 'salado_lead_welcome',
+        leadName: testLeadName.trim() || 'Alex',
+        templateName: templateName.trim() || 'welcome_lead_intro',
         overrideConfig: {
           whatsapp_phone_number_id: phoneId.trim(),
           whatsapp_access_token: accessToken.trim(),
-          whatsapp_template: templateName.trim() || 'salado_lead_welcome'
+          whatsapp_template: templateName.trim() || 'welcome_lead_intro'
         }
       });
 
@@ -510,7 +522,7 @@ export default function AutomationsView({ currentUser }) {
                     <div>
                       <label className="flow-field-label">WhatsApp Approved Template</label>
                       <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#111827', marginTop: 3 }}>
-                        {templateName || 'salado_lead_welcome'}
+                        {templateName || 'welcome_lead_intro'}
                       </div>
                     </div>
                     <span className="template-status-badge">
@@ -610,7 +622,7 @@ export default function AutomationsView({ currentUser }) {
                         <span style={{ fontSize: 13, color: '#374151' }}>‹</span>
                         <div className="wa-avatar">S</div>
                         <div className="wa-contact-info">
-                          <span className="wa-contact-name">SimpleCRM</span>
+                          <span className="wa-contact-name">simplecrm</span>
                           <span className="wa-contact-status">online</span>
                         </div>
                       </div>
@@ -624,9 +636,9 @@ export default function AutomationsView({ currentUser }) {
                     <div className="wa-chat-canvas">
                       <div className="wa-chat-bubble-received">
                         <p className="wa-bubble-text">
-                          Hello {testLeadName || 'there'}, thank you for your interest in SaladO!
+                          Hello {testLeadName || 'there'}, thank you for connecting with us!
                           {'\n\n'}
-                          We have received your franchise inquiry. Our team will connect with you shortly to share the brand presentation and guide you through the next steps.
+                          We have received your inquiry. Our team will connect with you shortly to assist you and guide you through the next steps.
                         </p>
                         <div className="wa-bubble-meta">
                           <span>9:41 AM</span>
@@ -658,7 +670,7 @@ export default function AutomationsView({ currentUser }) {
                       <div className="email-sender-row">
                         <div className="email-avatar">S</div>
                         <div className="email-sender-info">
-                          <span className="email-sender-name">SimpleCRM</span>
+                          <span className="email-sender-name">simplecrm</span>
                           <span className="email-sender-to">To: {testLeadName || 'Lead Name'}</span>
                         </div>
                       </div>

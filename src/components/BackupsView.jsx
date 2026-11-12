@@ -24,6 +24,7 @@ import {
   fetchBackups,
   createFullBackup,
   downloadBackupToDisk,
+  loadBackupPayload,
   restoreBackupData
 } from '../lib/backups';
 import Skeleton from './common/Skeleton';
@@ -142,7 +143,7 @@ export default function BackupsView({ currentUser }) {
     setIsRestoring(true);
     setErrorMsg('');
     try {
-      const payload = selectedBackupToRestore.payload;
+      const payload = await loadBackupPayload(selectedBackupToRestore);
       const res = await restoreBackupData(payload);
       setRestoreSuccess(res);
       setSelectedBackupToRestore(null);
@@ -165,7 +166,7 @@ export default function BackupsView({ currentUser }) {
       try {
         const parsed = JSON.parse(event.target.result);
         if (!parsed.data || !parsed.version) {
-          alert('Invalid SimpleCRM backup file structure.');
+          alert('Invalid simplecrm backup file structure.');
           return;
         }
         setSelectedBackupToRestore({

@@ -43,8 +43,13 @@ import {
   Headset
 } from 'lucide-react';
 import ProspectingView from './ProspectingView';
+import { CreditCard as BillingIcon } from 'lucide-react';
 import { checkAndRunDiscoveryAutopilot } from '../lib/coldDiscoveryScraper';
 import { supabase } from '../lib/supabase';
+import { getActiveCompany, getActiveCompanyId, tenantStorageKey, readTenantCache, writeTenantCache, readTenantString } from '../lib/tenant';
+import { getTrialDaysRemaining } from '../lib/billing';
+import BillingSeatsView from './billing/BillingSeatsView';
+import '../styles/billing.css';
 import { hasPermission, getDashboardScope, getAnalyticsScope } from '../lib/permissions';
 import { getStoredActivities } from '../lib/activities';
 import LeadsView from './LeadsView';
@@ -69,10 +74,10 @@ import Skeleton from './common/Skeleton';
 import '../styles/dashboard.css';
 import '../styles/analytics.css';
 
-export default function DashboardView({ currentUser, onLogout }) {
+export default function DashboardView({ currentUser, onLogout, company: activeCompanyProp = null, onCompanyUpdated }) {
   const user = currentUser || {
-    name: 'Pranav Patil',
-    email: 'pranav.p@capoasis.com',
+    name: 'Admin',
+    email: 'admin@simplecrm.com',
     role: 'admin'
   };
 
@@ -142,15 +147,10 @@ export default function DashboardView({ currentUser, onLogout }) {
   const parseLocation = () => {
     const path = window.location.pathname.toLowerCase().replace(/\/$/, '') || '/';
     if (path === '' || path === '/' || path === '/dashboard' || path === '/index.html') {
-      try {
-        const savedRaw = localStorage.getItem('simplecrm_last_active_tab');
-        if (savedRaw) {
-          const saved = JSON.parse(savedRaw);
-          if (saved && saved.tab) {
-            return { tab: saved.tab, adminSub: saved.adminSub || 'users' };
-          }
-        }
-      } catch {}
+      const saved = readTenantCache('simplecrm_last_active_tab', null);
+      if (saved && saved.tab) {
+        return { tab: saved.tab, adminSub: saved.adminSub || 'users' };
+      }
       return { tab: 'Dashboard', adminSub: 'users' };
     }
     if (path === '/dashboard/analytics' || path === '/analytics') {
@@ -258,9 +258,7 @@ export default function DashboardView({ currentUser, onLogout }) {
     if (window.location.pathname !== path) {
       window.history.pushState({ tab: tabName, adminSub: effectiveSub }, '', path);
     }
-    try {
-      localStorage.setItem('simplecrm_last_active_tab', JSON.stringify({ tab: tabName, adminSub: effectiveSub }));
-    } catch {}
+    writeTenantCache('simplecrm_last_active_tab', { tab: tabName, adminSub: effectiveSub });
   };
 
   useEffect(() => {
@@ -268,9 +266,7 @@ export default function DashboardView({ currentUser, onLogout }) {
     if (window.location.pathname === '/' || window.location.pathname === '' || window.location.pathname === '/index.html') {
       window.history.replaceState({ tab: validInitialTab, adminSub: adminSubTab }, '', initialPath);
     }
-    try {
-      localStorage.setItem('simplecrm_last_active_tab', JSON.stringify({ tab: validInitialTab, adminSub: adminSubTab }));
-    } catch {}
+    writeTenantCache('simplecrm_last_active_tab', { tab: validInitialTab, adminSub: adminSubTab });
 
     const handlePopState = () => {
       const current = parseLocation();
@@ -279,9 +275,7 @@ export default function DashboardView({ currentUser, onLogout }) {
         setHasVisitedLaterOn(true);
       }
       setAdminSubTab(current.adminSub);
-      try {
-        localStorage.setItem('simplecrm_last_active_tab', JSON.stringify({ tab: current.tab, adminSub: current.adminSub }));
-      } catch {}
+      writeTenantCache('simplecrm_last_active_tab', { tab: current.tab, adminSub: current.adminSub });
     };
 
     const handleScheduleEvent = (e) => {
@@ -445,14 +439,8 @@ export default function DashboardView({ currentUser, onLogout }) {
   const [deals, setDeals] = useState([]);
   const [pipelinesList, setPipelinesList] = useState([]);
   const [usersList, setUsersList] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_users');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {}
-    return [];
+    const parsed = readTenantCache('crm_cached_users', []);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : [];
   });
   const [activities, setActivities] = useState(() => getStoredActivities());
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -476,16 +464,23 @@ export default function DashboardView({ currentUser, onLogout }) {
   }, []);
 
   // Fetch live leads & deals & users & pipelines from Supabase + subscribe to realtime
+  const activeCompanyId = getActiveCompanyId() || user?.company_id || null;
+
   useEffect(() => {
     let isMounted = true;
+    const companyId = activeCompanyId;
+    if (!companyId) {
+      setIsLoadingData(false);
+      return;
+    }
 
     const fetchDashboardData = async () => {
       try {
         const [leadsRes, dealsRes, usersRes, pipesRes] = await Promise.all([
-          supabase.from('leads').select('*').order('created_at', { ascending: false }),
-          supabase.from('deals').select('*').order('created_at', { ascending: false }),
-          supabase.from('crm_users').select('*').order('created_at', { ascending: true }),
-          supabase.from('pipelines').select('*').order('is_default', { ascending: false })
+          supabase.from('leads').select('*').eq('company_id', companyId).order('created_at', { ascending: false }),
+          supabase.from('deals').select('*').eq('company_id', companyId).order('created_at', { ascending: false }),
+          supabase.from('crm_users').select('id, name, email, role, permissions, created_at').eq('company_id', companyId).order('created_at', { ascending: true }),
+          supabase.from('pipelines').select('*').eq('company_id', companyId).order('is_default', { ascending: false })
         ]);
 
         if (isMounted) {
@@ -494,9 +489,7 @@ export default function DashboardView({ currentUser, onLogout }) {
           if (pipesRes.data) setPipelinesList(pipesRes.data);
           if (usersRes.data) {
             setUsersList(usersRes.data);
-            try {
-              localStorage.setItem('crm_cached_users', JSON.stringify(usersRes.data));
-            } catch (e) {}
+            writeTenantCache('crm_cached_users', usersRes.data, companyId);
           }
         }
       } catch (err) {
@@ -513,7 +506,7 @@ export default function DashboardView({ currentUser, onLogout }) {
     // Subscribe to realtime database changes
     const channel = supabase
       .channel('dashboard-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `company_id=eq.${companyId}` }, (payload) => {
         if (!isMounted) return;
         if (payload.eventType === 'INSERT') {
           setLeads((prev) => prev.some((l) => l.id === payload.new.id) ? prev : [payload.new, ...prev]);
@@ -523,7 +516,7 @@ export default function DashboardView({ currentUser, onLogout }) {
           setLeads((prev) => prev.map((l) => (l.id === payload.new.id ? payload.new : l)));
         }
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'deals' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'deals', filter: `company_id=eq.${companyId}` }, (payload) => {
         if (!isMounted) return;
         if (payload.eventType === 'INSERT') {
           setDeals((prev) => prev.some((d) => d.id === payload.new.id) ? prev : [payload.new, ...prev]);
@@ -533,7 +526,7 @@ export default function DashboardView({ currentUser, onLogout }) {
           setDeals((prev) => prev.map((d) => (d.id === payload.new.id ? payload.new : d)));
         }
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_users' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_users', filter: `company_id=eq.${companyId}` }, (payload) => {
         if (!isMounted) return;
         if (payload.eventType === 'INSERT') {
           setUsersList((prev) => prev.some((u) => u.id === payload.new.id) ? prev : [...prev, payload.new]);
@@ -543,7 +536,7 @@ export default function DashboardView({ currentUser, onLogout }) {
           setUsersList((prev) => prev.map((u) => (u.id === payload.new.id ? payload.new : u)));
         }
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pipelines' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pipelines', filter: `company_id=eq.${companyId}` }, (payload) => {
         if (!isMounted) return;
         if (payload.eventType === 'INSERT') {
           setPipelinesList((prev) => prev.some((p) => p.id === payload.new.id) ? prev : [...prev, payload.new]);
@@ -559,7 +552,7 @@ export default function DashboardView({ currentUser, onLogout }) {
       isMounted = false;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [activeCompanyId]);
 
   // Subscribe to real-time activity events & pipeline creation
   useEffect(() => {
@@ -579,7 +572,8 @@ export default function DashboardView({ currentUser, onLogout }) {
     window.addEventListener('crm-activity-logged', handleActivityLogged);
 
     const handleStorage = (e) => {
-      if (e.key === 'crm_lead_activities') {
+      const scopedActivitiesKey = tenantStorageKey('crm_lead_activities');
+      if (scopedActivitiesKey && e.key === scopedActivitiesKey) {
         setActivities(getStoredActivities());
       }
     };
@@ -588,21 +582,25 @@ export default function DashboardView({ currentUser, onLogout }) {
     // Optional: fetch recent activities from Supabase
     (async () => {
       try {
-        const { data } = await supabase
-          .from('lead_activities')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(30);
-        if (data && data.length > 0) {
-          setActivities((prev) => {
-            const map = new Map();
-            [...prev, ...data].forEach((item) => {
-              if (item.id) map.set(item.id, item);
+        const companyId = getActiveCompanyId();
+        if (companyId) {
+          const { data } = await supabase
+            .from('lead_activities')
+            .select('*')
+            .eq('company_id', companyId)
+            .order('created_at', { ascending: false })
+            .limit(30);
+          if (data && data.length > 0) {
+            setActivities((prev) => {
+              const map = new Map();
+              [...prev, ...data].forEach((item) => {
+                if (item.id) map.set(item.id, item);
+              });
+              return Array.from(map.values()).sort(
+                (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
+              );
             });
-            return Array.from(map.values()).sort(
-              (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
-            );
-          });
+          }
         }
       } catch (err) {
         // Table might not exist yet
@@ -853,10 +851,14 @@ export default function DashboardView({ currentUser, onLogout }) {
     e.preventDefault();
     if (!dealCompany.trim() || isSubmittingDeal) return;
 
+    const companyId = getActiveCompanyId() || user?.company_id;
+    if (!companyId) return;
+
     setIsSubmittingDeal(true);
     const parsedValue = parseFloat(dealValue) || 0;
 
     const newDealPayload = {
+      company_id: companyId,
       company: dealCompany.trim(),
       stage: dealStage,
       value: parsedValue,
@@ -890,19 +892,10 @@ export default function DashboardView({ currentUser, onLogout }) {
 
   // Meta Ad Account Budget & Health State
   const [adBudget, setAdBudget] = useState(() => {
-    try {
-      const cached = localStorage.getItem('crm_cached_ad_budget');
-      return cached ? JSON.parse(cached) : null;
-    } catch {
-      return null;
-    }
+    return readTenantCache('crm_cached_ad_budget', null);
   });
   const [isLoadingAdBudget, setIsLoadingAdBudget] = useState(() => {
-    try {
-      return !localStorage.getItem('crm_cached_ad_budget');
-    } catch {
-      return true;
-    }
+    return !readTenantCache('crm_cached_ad_budget', null);
   });
   const [adBudgetError, setAdBudgetError] = useState('');
   const isBudgetLoading = isLoadingAdBudget || (!adBudget && (isLoadingData || !adBudgetError));
@@ -946,24 +939,25 @@ export default function DashboardView({ currentUser, onLogout }) {
       setAdBudgetError('');
 
       // 1. Fetch meta_config from Supabase
+      const companyId = getActiveCompanyId() || user?.company_id;
       let metaConf = null;
-      try {
-        const { data } = await supabase
-          .from('meta_config')
-          .select('*')
-          .order('created_at', { ascending: true })
-          .limit(1)
-          .maybeSingle();
-        if (data) metaConf = data;
-      } catch (err) {
-        console.warn('Could not read meta_config from Supabase:', err);
+      if (companyId) {
+        try {
+          const { data } = await supabase
+            .from('meta_config')
+            .select('*')
+            .eq('company_id', companyId)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (data) metaConf = data;
+        } catch (err) {
+          console.warn('Could not read meta_config from Supabase:', err);
+        }
       }
 
       if (!metaConf) {
-        try {
-          const cached = localStorage.getItem('crm_cached_meta_config');
-          if (cached) metaConf = JSON.parse(cached);
-        } catch {}
+        metaConf = readTenantCache('crm_cached_meta_config', null, companyId);
       }
 
       const adAccountId = metaConf?.ad_account_id;
@@ -972,7 +966,7 @@ export default function DashboardView({ currentUser, onLogout }) {
         return;
       }
 
-      const cachedUserToken = localStorage.getItem('crm_meta_user_token');
+      const cachedUserToken = readTenantString('crm_meta_user_token', null, companyId);
       const waToken = metaConf?.whatsapp_access_token;
       const pageToken = metaConf?.access_token;
 
@@ -984,9 +978,7 @@ export default function DashboardView({ currentUser, onLogout }) {
 
       if (budget) {
         setAdBudget(budget);
-        try {
-          localStorage.setItem('crm_cached_ad_budget', JSON.stringify(budget));
-        } catch {}
+        writeTenantCache('crm_cached_ad_budget', budget, companyId);
 
         // If exhausted or unsettled, notify admins
         if (budget.isExhausted) {
@@ -1033,7 +1025,7 @@ export default function DashboardView({ currentUser, onLogout }) {
             onClick={() => navigateTo('Dashboard')}
             title="Go to Dashboard"
           >
-            <img src="/logo_cropped.png" alt="SimpleCRM Logo" className="header-brand-logo" />
+            <img src="/logo_cropped.png" alt="simplecrm Logo" className="header-brand-logo" />
             <span className="header-brand">simplecrm</span>
           </div>
           <nav className="header-breadcrumb" aria-label="Breadcrumb">
@@ -1054,6 +1046,8 @@ export default function DashboardView({ currentUser, onLogout }) {
                     ? 'Integrations'
                     : adminSubTab === 'users'
                     ? 'Users'
+                    : adminSubTab === 'billing'
+                    ? 'Seats & Billing'
                     : adminSubTab === 'discovery' || adminSubTab === 'cold_engine'
                     ? 'Discovery'
                     : adminSubTab.charAt(0).toUpperCase() + adminSubTab.slice(1)}
@@ -1068,6 +1062,28 @@ export default function DashboardView({ currentUser, onLogout }) {
         </div>
 
         <div className="header-right-cluster">
+          {(() => {
+            const comp = activeCompanyProp || getActiveCompany();
+            if (!comp || comp.is_billing_exempt) return null;
+            const status = String(comp.subscription_status || '').toLowerCase();
+            if (status !== 'trialing' && status !== 'pilot_extended') return null;
+            const daysLeft = getTrialDaysRemaining(comp);
+            if (daysLeft <= 0) return null;
+            return (
+              <button
+                type="button"
+                className={`header-trial-chip ${daysLeft <= 3 ? 'urgent' : ''}`}
+                onClick={() => {
+                  if (user?.role === 'admin') {
+                    navigateTo('Admin', 'billing');
+                  }
+                }}
+                title={user?.role === 'admin' ? 'Manage seats & Razorpay subscription' : `${daysLeft} day(s) remaining in workspace trial`}
+              >
+                <span>{status === 'pilot_extended' ? 'Pilot' : 'Trial'}: {daysLeft}d left</span>
+              </button>
+            );
+          })()}
           {canViewAdBudget && (
             isBudgetLoading ? (
               <Skeleton width="130px" height="28px" borderRadius="14px" />
@@ -1676,6 +1692,7 @@ export default function DashboardView({ currentUser, onLogout }) {
                     <ul className="settings-subnav-list">
                       {[
                         ...(canManageUsers || user.role === 'admin' ? [{ id: 'users', label: 'Users', icon: Users }] : []),
+                        ...(user.role === 'admin' ? [{ id: 'billing', label: 'Seats & Billing', icon: BillingIcon }] : []),
                         ...(user.role === 'admin' ? [{ id: 'import', label: 'Import Leads', icon: UploadCloud }] : []),
                         ...(canManageMeta || user.role === 'admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
                         ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : []),
@@ -1705,7 +1722,14 @@ export default function DashboardView({ currentUser, onLogout }) {
               {/* Settings Content Pane */}
               <div key={adminSubTab} className="settings-content-pane tab-pane-animated">
                 {adminSubTab === 'users' && (canManageUsers || user.role === 'admin') && (
-                  <AdminUsersView currentUser={user} onLogout={onLogout} />
+                  <AdminUsersView
+                    currentUser={user}
+                    onLogout={onLogout}
+                    onNavigateToBilling={user.role === 'admin' ? () => navigateTo('Admin', 'billing') : undefined}
+                  />
+                )}
+                {adminSubTab === 'billing' && user.role === 'admin' && (
+                  <BillingSeatsView currentUser={user} onCompanyUpdated={onCompanyUpdated} />
                 )}
                 {adminSubTab === 'import' && user.role === 'admin' && (
                   <CsvImportView currentUser={user} onNavigate={navigateTo} />

@@ -43,7 +43,7 @@ export default function EmailIntegrationView({ currentUser }) {
   const [config, setConfig] = useState({
     provider: 'resend',
     api_key: '',
-    from_name: 'SimpleCRM',
+    from_name: 'simplecrm',
     from_email: 'onboarding@resend.dev',
     reply_to: '',
     is_connected: false
@@ -612,7 +612,7 @@ export default function EmailIntegrationView({ currentUser }) {
                   <input
                     type="text"
                     className="email-kv-input"
-                    placeholder="e.g. SimpleCRM or Pranav Patil"
+                    placeholder="e.g. simplecrm or Team Support"
                     value={config.from_name}
                     onChange={(e) => setConfig({ ...config, from_name: e.target.value })}
                   />
@@ -1006,7 +1006,7 @@ export default function EmailIntegrationView({ currentUser }) {
                       <div className="email-preview-meta-row sub">
                         <span className="email-preview-meta-label">From:</span>
                         <span className="email-preview-meta-value">
-                          {config.from_name || 'SimpleCRM'} &lt;{config.from_email || 'notifications@example.com'}&gt;
+                          {config.from_name || 'simplecrm'} &lt;{config.from_email || 'notifications@example.com'}&gt;
                         </span>
                       </div>
                       <div className="email-preview-meta-row sub">

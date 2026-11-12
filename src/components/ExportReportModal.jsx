@@ -31,7 +31,7 @@ export default function ExportReportModal({
   filteredLeads = [],
   selectedLeadIds = new Set(),
   pipelinesList = [],
-  activePipelineName = 'CapOasis CRM',
+  activePipelineName = 'Sales Pipeline',
   onSuccess
 }) {
   if (!isOpen) return null;

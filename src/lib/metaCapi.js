@@ -4,6 +4,7 @@
  */
 
 import { supabase } from './supabase';
+import { getActiveCompanyId } from './tenant';
 
 const API_VERSION = 'v20.0';
 
@@ -221,11 +222,16 @@ export async function sendMetaCapiEvent({
   }
 
   // 1. Fetch Meta Config (supporting SaaS multi-tenancy)
+  const companyId = getActiveCompanyId();
+  if (!companyId) {
+    return { success: false, reason: 'No active workspace' };
+  }
   let config = null;
   try {
     const { data, error } = await supabase
       .from('meta_config')
       .select('dataset_id, capi_enabled, test_event_code, access_token, capi_access_token')
+      .eq('company_id', companyId)
       .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle();
@@ -263,6 +269,7 @@ export async function sendMetaCapiEvent({
       const { data: existingLog } = await supabase
         .from('meta_capi_logs')
         .select('id')
+        .eq('company_id', companyId)
         .eq('lead_id', lead.id)
         .eq('stage_id', stageId)
         .eq('event_name', eventName)
@@ -329,6 +336,7 @@ export async function sendMetaCapiEvent({
   // 5. Audit Log in Supabase
   try {
     await supabase.from('meta_capi_logs').insert({
+      company_id: companyId,
       lead_id: lead.id || null,
       lead_name: lead.name || '',
       leadgen_id: lead.leadgen_id || null,
@@ -374,7 +382,7 @@ export async function sendMetaCapiTestEvent({
 
   const sampleLead = {
     id: 'test_lead_001',
-    name: 'SimpleCRM Test Customer',
+    name: 'simplecrm Test Customer',
     email: 'test.conversion@example.com',
     phone: '+919876543210',
     city: 'Mumbai',
@@ -406,22 +414,26 @@ export async function sendMetaCapiTestEvent({
 
   // Also log the test event in meta_capi_logs
   try {
-    await supabase.from('meta_capi_logs').insert({
-      lead_id: null,
-      lead_name: sampleLead.name,
-      leadgen_id: sampleLead.leadgen_id,
-      event_name: eventName,
-      event_id: eventId,
-      dataset_id: datasetId,
-      status: 'sent',
-      meta_trace_id: data.fbtrace_id || null,
-      events_received: data.events_received || 1,
-      error_message: null,
-      request_payload: payload,
-      response_payload: data,
-      is_test: true,
-      created_by: 'manual_test'
-    });
+    const companyId = getActiveCompanyId();
+    if (companyId) {
+      await supabase.from('meta_capi_logs').insert({
+        company_id: companyId,
+        lead_id: null,
+        lead_name: sampleLead.name,
+        leadgen_id: sampleLead.leadgen_id,
+        event_name: eventName,
+        event_id: eventId,
+        dataset_id: datasetId,
+        status: 'sent',
+        meta_trace_id: data.fbtrace_id || null,
+        events_received: data.events_received || 1,
+        error_message: null,
+        request_payload: payload,
+        response_payload: data,
+        is_test: true,
+        created_by: 'manual_test'
+      });
+    }
   } catch (e) {
     // ignore test log err
   }
@@ -433,9 +445,12 @@ export async function sendMetaCapiTestEvent({
  * Fetch recent CAPI sync logs
  */
 export async function fetchMetaCapiLogs(limit = 50) {
+  const companyId = getActiveCompanyId();
+  if (!companyId) return [];
   const { data, error } = await supabase
     .from('meta_capi_logs')
     .select('*')
+    .eq('company_id', companyId)
     .order('created_at', { ascending: false })
     .limit(limit);
 

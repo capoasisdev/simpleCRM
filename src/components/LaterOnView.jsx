@@ -31,7 +31,8 @@ export default function LaterOnView({ prefillData }) {
       if (activeData.message) query.set('message', activeData.message);
     }
 
-    return `https://lateron.capoasis.com/dashboard?${query.toString()}`;
+    const baseUrl = (import.meta.env.VITE_LATERON_URL || 'https://lateron.capoasis.com').replace(/\/$/, '');
+    return `${baseUrl}/dashboard?${query.toString()}`;
   });
 
   // Transmit prefill data into LaterOn iframe via postMessage

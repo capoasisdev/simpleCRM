@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { recordActivity } from './activities';
+import { getActiveCompanyId, readTenantCache, writeTenantCache } from './tenant';
 
 const FOLLOWUPS_STORAGE_KEY = 'crm_lead_followups';
 
@@ -7,15 +8,8 @@ const FOLLOWUPS_STORAGE_KEY = 'crm_lead_followups';
  * Read cached follow-ups from localStorage
  */
 export const getStoredFollowUps = () => {
-  try {
-    const raw = localStorage.getItem(FOLLOWUPS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    console.warn('Error reading stored follow-ups:', err);
-    return [];
-  }
+  const parsed = readTenantCache(FOLLOWUPS_STORAGE_KEY, []);
+  return Array.isArray(parsed) ? parsed : [];
 };
 
 /**
@@ -23,14 +17,17 @@ export const getStoredFollowUps = () => {
  */
 export const fetchFollowUps = async () => {
   const local = getStoredFollowUps();
+  const companyId = getActiveCompanyId();
+  if (!companyId) return local;
   try {
     const { data, error } = await supabase
       .from('follow_ups')
       .select('*')
+      .eq('company_id', companyId)
       .order('due_date', { ascending: true });
 
     if (!error && Array.isArray(data)) {
-      localStorage.setItem(FOLLOWUPS_STORAGE_KEY, JSON.stringify(data));
+      writeTenantCache(FOLLOWUPS_STORAGE_KEY, data);
       return data;
     }
   } catch (err) {
@@ -70,7 +67,7 @@ export const createFollowUp = async ({
   try {
     const current = getStoredFollowUps();
     const updated = [newFollowUp, ...current.filter((f) => f.id !== newFollowUp.id)];
-    localStorage.setItem(FOLLOWUPS_STORAGE_KEY, JSON.stringify(updated));
+    writeTenantCache(FOLLOWUPS_STORAGE_KEY, updated);
   } catch (e) {
     console.warn('Error caching follow-up:', e);
   }
@@ -91,7 +88,10 @@ export const createFollowUp = async ({
 
   // 4. Save to Supabase and update local cache with database row
   try {
+    const companyId = getActiveCompanyId();
+    if (!companyId) return newFollowUp;
     const payload = {
+      company_id: companyId,
       title: newFollowUp.title,
       description: newFollowUp.description,
       due_date: newFollowUp.due_date,
@@ -109,7 +109,7 @@ export const createFollowUp = async ({
       newFollowUp = data;
       const current = getStoredFollowUps();
       const updated = current.map((f) => (f.id === newFollowUp.id || f.id.startsWith('fu-') && f.title === newFollowUp.title ? data : f));
-      localStorage.setItem(FOLLOWUPS_STORAGE_KEY, JSON.stringify(updated));
+      writeTenantCache(FOLLOWUPS_STORAGE_KEY, updated);
       window.dispatchEvent(new CustomEvent('crm-followups-updated', { detail: data }));
     } else if (error) {
       console.warn('Supabase follow-up insert error:', error.message);
@@ -130,7 +130,7 @@ export const completeFollowUp = async (id, userName) => {
   const updated = current.map((f) =>
     f.id === id ? { ...f, status: 'completed', completed_at: new Date().toISOString() } : f
   );
-  localStorage.setItem(FOLLOWUPS_STORAGE_KEY, JSON.stringify(updated));
+  writeTenantCache(FOLLOWUPS_STORAGE_KEY, updated);
   window.dispatchEvent(new CustomEvent('crm-followups-updated', { detail: { id, status: 'completed' } }));
 
   if (target) {
@@ -144,8 +144,9 @@ export const completeFollowUp = async (id, userName) => {
   }
 
   try {
-    if (id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
-      await supabase.from('follow_ups').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', id);
+    const companyId = getActiveCompanyId();
+    if (companyId && id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+      await supabase.from('follow_ups').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', id).eq('company_id', companyId);
     }
   } catch (e) { }
 
@@ -161,7 +162,7 @@ export const reopenFollowUp = async (id, userName) => {
   const updated = current.map((f) =>
     f.id === id ? { ...f, status: 'pending', completed_at: null } : f
   );
-  localStorage.setItem(FOLLOWUPS_STORAGE_KEY, JSON.stringify(updated));
+  writeTenantCache(FOLLOWUPS_STORAGE_KEY, updated);
   window.dispatchEvent(new CustomEvent('crm-followups-updated', { detail: { id, status: 'pending' } }));
 
   if (target) {
@@ -175,8 +176,9 @@ export const reopenFollowUp = async (id, userName) => {
   }
 
   try {
-    if (id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
-      await supabase.from('follow_ups').update({ status: 'pending', completed_at: null }).eq('id', id);
+    const companyId = getActiveCompanyId();
+    if (companyId && id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+      await supabase.from('follow_ups').update({ status: 'pending', completed_at: null }).eq('id', id).eq('company_id', companyId);
     }
   } catch (e) { }
 
@@ -272,13 +274,16 @@ export const deleteFollowUp = async (id, userName) => {
 
   // 1. Delete from Supabase FIRST so database is updated before any event or fetch
   try {
-    if (id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
-      await supabase.from('follow_ups').delete().eq('id', id);
-    } else if (target) {
-      if (target.lead_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(target.lead_id)) {
-        await supabase.from('follow_ups').delete().eq('lead_id', target.lead_id).eq('title', target.title);
-      } else if (target.lead_name) {
-        await supabase.from('follow_ups').delete().eq('lead_name', target.lead_name).eq('title', target.title);
+    const companyId = getActiveCompanyId();
+    if (companyId) {
+      if (id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+        await supabase.from('follow_ups').delete().eq('id', id).eq('company_id', companyId);
+      } else if (target) {
+        if (target.lead_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(target.lead_id)) {
+          await supabase.from('follow_ups').delete().eq('lead_id', target.lead_id).eq('title', target.title).eq('company_id', companyId);
+        } else if (target.lead_name) {
+          await supabase.from('follow_ups').delete().eq('lead_name', target.lead_name).eq('title', target.title).eq('company_id', companyId);
+        }
       }
     }
   } catch (e) {
@@ -296,7 +301,7 @@ export const deleteFollowUp = async (id, userName) => {
     }
     return true;
   });
-  localStorage.setItem(FOLLOWUPS_STORAGE_KEY, JSON.stringify(updated));
+  writeTenantCache(FOLLOWUPS_STORAGE_KEY, updated);
 
   // 3. Record in Activity Log
   if (target) {

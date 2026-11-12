@@ -912,7 +912,7 @@ export default function AnalyticsView({
     if (users && users.length > 0) {
       return salesRepUserNames.has(clean);
     }
-    return clean !== 'pranav patil';
+    return true;
   };
 
   const pipelineMap = useMemo(() => {
@@ -2160,7 +2160,7 @@ export default function AnalyticsView({
     return repList;
   }, [leads, deals, activities, salesRepUserNames]);
 
-  // Clean Rep Performance Section matching SimpleCRM Visual Language with Column Cascade
+  // Clean Rep Performance Section matching simplecrm Visual Language with Column Cascade
   const repPerformanceSection = (
     <div className="analytics-visual-card" ref={repCardRef}>
       <div className="analytics-card-header" style={{ alignItems: 'center' }}>
