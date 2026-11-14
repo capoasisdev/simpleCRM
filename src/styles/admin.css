@@ -1267,9 +1267,14 @@
   pointer-events: none;
 }
 
-.perm-sections-stack.disabled-view .perm-leaderboard-btn {
+.perm-sections-stack.disabled-view .perm-leaderboard-btn,
+.perm-sections-stack.disabled-view .perm-billing-btn {
   opacity: 1;
   pointer-events: auto;
+}
+
+.perm-sections-stack.disabled-view .perm-leaderboard-btn:not(:disabled),
+.perm-sections-stack.disabled-view .perm-billing-btn:not(:disabled) {
   cursor: pointer;
 }
 

@@ -37,7 +37,13 @@ const FOLLOWUPS_SCOPE_OPTIONS = [
   { value: 'all', label: 'All Follow-ups' }
 ];
 
-export default function PermissionsEditor({ permissions, onChange, role = 'member' }) {
+export default function PermissionsEditor({
+  permissions,
+  onChange,
+  role = 'member',
+  canGrantBilling = true,
+  isBillingOwner = false
+}) {
   const isAdmin = role === 'admin';
   const perms = normalizePermissions({ role, permissions });
 
@@ -53,7 +59,11 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
   };
 
   const updateAdminField = (field, value) => {
-    if (isAdmin) return;
+    if (field === 'manage_billing') {
+      if (!canGrantBilling || isBillingOwner) return;
+    } else if (isAdmin) {
+      return;
+    }
     onChange({
       ...perms,
       admin: {
@@ -68,7 +78,7 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
       {isAdmin && (
         <div className="admin-unrestricted-banner">
           <Info size={14} className="banner-info-icon" />
-          <span>Administrators have unrestricted access to all modules and system settings.</span>
+          <span>Administrators have unrestricted CRM access (Leaderboard and Billing remain independently controlled).</span>
         </div>
       )}
 
@@ -360,6 +370,22 @@ export default function PermissionsEditor({ permissions, onChange, role = 'membe
             >
               {perms.admin.view_ad_budget && <Check size={11} strokeWidth={2.5} />}
               <span>Ad Budget</span>
+            </button>
+            <button
+              type="button"
+              className={`perm-pill-toggle perm-billing-btn ${perms.admin.manage_billing ? 'active' : ''}`}
+              onClick={() => updateAdminField('manage_billing', !perms.admin.manage_billing)}
+              disabled={!canGrantBilling || isBillingOwner}
+              title={
+                isBillingOwner
+                  ? 'Workspace owner always retains billing access'
+                  : !canGrantBilling
+                  ? 'Only billing managers can grant or revoke billing access'
+                  : 'Allow managing workspace seats, Razorpay billing, and granting billing access'
+              }
+            >
+              {perms.admin.manage_billing && <Check size={11} strokeWidth={2.5} />}
+              <span>Billing</span>
             </button>
           </div>
         </div>

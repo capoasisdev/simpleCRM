@@ -15,6 +15,7 @@ import {
   launchRazorpayCheckout
 } from '../../lib/billing';
 import { setActiveCompanyCache } from '../../lib/tenant';
+import { canUserManageBilling } from '../../lib/permissions';
 import '../../styles/billing.css';
 
 export default function TrialExpiredPaywall({ currentUser, company, onActivated, onLogout }) {
@@ -28,7 +29,7 @@ export default function TrialExpiredPaywall({ currentUser, company, onActivated,
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
-  const isAdmin = currentUser?.role === 'admin';
+  const canManageBilling = canUserManageBilling(currentUser, liveCompany);
   const companyId = liveCompany?.id || company?.id || currentUser?.company_id;
   const unitPriceInr = Math.max(1, Number(liveCompany?.price_per_seat_inr || 999));
   const minSeats = Math.max(1, activeUsersCount);
@@ -109,13 +110,13 @@ export default function TrialExpiredPaywall({ currentUser, company, onActivated,
           <div>
             <div className="billing-paywall-brand">simplecrm</div>
             <h1 className="billing-paywall-title">
-              {isAdmin ? 'Activate your workspace plan' : 'Workspace trial has ended'}
+              {canManageBilling ? 'Activate your workspace plan' : 'Workspace trial has ended'}
             </h1>
             <p className="billing-paywall-subtitle">
               {liveCompany?.name ? `${liveCompany.name} · ` : ''}
-              {isAdmin
+              {canManageBilling
                 ? 'Choose your active sales team seats below to continue seamlessly with all CRM leads, pipelines, and automations intact.'
-                : 'Your team workspace trial has expired. Please contact your workspace administrator to activate billing.'}
+                : 'Your team workspace trial has expired. Please contact a user with billing access to activate billing.'}
             </p>
           </div>
           <span className="billing-status-pill expired">
@@ -138,7 +139,7 @@ export default function TrialExpiredPaywall({ currentUser, company, onActivated,
             </div>
           )}
 
-          {isAdmin ? (
+          {canManageBilling ? (
             <>
               <div className="billing-summary-box">
                 <div className="billing-stepper-row">
@@ -239,7 +240,7 @@ export default function TrialExpiredPaywall({ currentUser, company, onActivated,
                 ) : (
                   <>
                     <CreditCard size={16} />
-                    <span>Pay ₹{totalInr.toLocaleString('en-IN')} with Razorpay</span>
+                    <span>Set up Autopay · ₹{totalInr.toLocaleString('en-IN')} / mo</span>
                   </>
                 )}
               </button>
@@ -248,10 +249,10 @@ export default function TrialExpiredPaywall({ currentUser, company, onActivated,
             <div className="billing-summary-box">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#09090b', fontWeight: 600, fontSize: 14 }}>
                 <Lock size={16} />
-                <span>Admin Action Required</span>
+                <span>Billing Manager Action Required</span>
               </div>
               <p style={{ margin: 0, fontSize: 13, color: '#52525b', lineHeight: 1.5 }}>
-                All your CRM leads, deals, and conversation history remain safely preserved. Ask your workspace administrator
+                All your CRM leads, deals, and conversation history remain safely preserved. Ask your workspace billing manager
                 {liveCompany?.owner_email ? ` (${liveCompany.owner_email})` : ''} to complete plan activation.
               </p>
               <div className="billing-summary-row">

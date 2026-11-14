@@ -6,10 +6,14 @@ import DownloadView from './components/DownloadView';
 import LandingView from './components/landing/LandingView';
 import PricingView from './components/landing/PricingView';
 import SecurityUpgradeModal from './components/common/SecurityUpgradeModal';
-import TrialExpiredPaywall from './components/billing/TrialExpiredPaywall';
+import MemberTrialSurveyView from './components/billing/MemberTrialSurveyView';
+import MasterAdminRoot from './components/master/MasterAdminRoot';
 import { fetchAuthenticatedProfile, clearAuthSessionStorage, setActiveCompanyCache } from './lib/auth';
+import { attachSupabaseSession } from './lib/supabase';
+import { consumeSupportHandoff } from './lib/masterAdmin';
 import { getActiveCompany } from './lib/tenant';
 import { isCompanyAccessLocked } from './lib/billing';
+import { canUserManageBilling } from './lib/permissions';
 
 const SESSION_STORAGE_KEY = 'simplecrm_user_session';
 
@@ -36,6 +40,13 @@ export default function App() {
   const [activeCompany, setActiveCompany] = useState(() => getActiveCompany());
   const [prefillLoginEmail, setPrefillLoginEmail] = useState('');
   const [showSecurityUpgrade, setShowSecurityUpgrade] = useState(false);
+  const [isAttachingSupportHandoff, setIsAttachingSupportHandoff] = useState(() => {
+    try {
+      return window.location.search.includes('support=1') && !window.location.pathname.startsWith('/master');
+    } catch {
+      return false;
+    }
+  });
 
   const navigateTo = (path) => {
     if (window.location.pathname !== path) {
@@ -115,9 +126,46 @@ export default function App() {
     }
   }, [currentUser?.id, currentUser?.password_updated_at, currentUser?.password_hash, currentUser?.is_secured, currentUser?.must_change_password]);
 
+  // Support Session Handoff from /master console (?support=1)
+  useEffect(() => {
+    if (!isAttachingSupportHandoff) return undefined;
+    let active = true;
+    const applyHandoff = async () => {
+      try {
+        const handoff = consumeSupportHandoff();
+        if (handoff?.user && handoff?.session) {
+          await attachSupabaseSession(handoff.session);
+          const supportUser = { ...handoff.user, must_change_password: false };
+          if (handoff.company) {
+            setActiveCompanyCache(handoff.company);
+            if (active) setActiveCompany(handoff.company);
+          }
+          try {
+            localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(supportUser));
+          } catch {}
+          if (active) {
+            setCurrentUser(supportUser);
+            setShowSecurityUpgrade(false);
+          }
+        }
+      } finally {
+        try {
+          if (window.location.search.includes('support=1')) {
+            window.history.replaceState({}, '', '/dashboard');
+          }
+        } catch {}
+        if (active) setIsAttachingSupportHandoff(false);
+      }
+    };
+    applyHandoff();
+    return () => {
+      active = false;
+    };
+  }, [isAttachingSupportHandoff]);
+
   // Verify the logged-in user holds a valid server JWT and refresh profile + company state
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || isAttachingSupportHandoff) return;
 
     let isMounted = true;
     const verifyUserExists = async () => {
@@ -152,7 +200,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, isAttachingSupportHandoff]);
 
   // 1. Android APK Download Page
   if (currentPath === '/download' || currentPath === '/download/') {
@@ -176,6 +224,15 @@ export default function App() {
     );
   }
 
+  // 1.75. Platform Master Admin Console (isolated founder session)
+  if (currentPath === '/master' || currentPath.startsWith('/master/')) {
+    return <MasterAdminRoot />;
+  }
+
+  if (isAttachingSupportHandoff) {
+    return <div style={{ minHeight: '100vh', background: '#ffffff' }} />;
+  }
+
   // 2. Authenticated Dashboard Session
   if (currentUser) {
     // If logged in user explicitly wants to preview the landing page
@@ -192,9 +249,16 @@ export default function App() {
     }
 
     const effectiveCompany = activeCompany || getActiveCompany();
-    if (effectiveCompany && isCompanyAccessLocked(effectiveCompany)) {
+    const isLocked = Boolean(effectiveCompany && isCompanyAccessLocked(effectiveCompany));
+    const canManageUsersOrAdmin =
+      currentUser?.role === 'admin' ||
+      currentUser?.permissions?.admin?.manage_users === true;
+    const isAdminOrBillingUser =
+      canUserManageBilling(currentUser, effectiveCompany) || canManageUsersOrAdmin;
+
+    if (isLocked && !isAdminOrBillingUser) {
       return (
-        <TrialExpiredPaywall
+        <MemberTrialSurveyView
           currentUser={currentUser}
           company={effectiveCompany}
           onActivated={(updatedCompany) => {
@@ -213,11 +277,22 @@ export default function App() {
         <DashboardView
           currentUser={currentUser}
           company={effectiveCompany}
+          isConversionMode={isLocked && isAdminOrBillingUser}
           onCompanyUpdated={(updatedCompany) => {
             if (updatedCompany) {
               setActiveCompanyCache(updatedCompany);
               setActiveCompany(updatedCompany);
             }
+          }}
+          onUserUpdated={(updatedUser) => {
+            if (!updatedUser) return;
+            setCurrentUser((prev) => {
+              const merged = prev ? { ...prev, ...updatedUser } : updatedUser;
+              try {
+                localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
           }}
           onLogout={handleLogout}
         />

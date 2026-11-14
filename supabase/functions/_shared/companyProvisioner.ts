@@ -8,7 +8,7 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
   dashboard: { scope: "all", view: true, view_deals: true, view_activity: true },
   analytics: { scope: "all", view: true, include_in_leaderboard: false },
   followups: { scope: "all", view: true, delete: true },
-  admin: { manage_users: true, manage_routing: true, manage_meta: true, view_ad_budget: true },
+  admin: { manage_users: true, manage_routing: true, manage_meta: true, view_ad_budget: true, manage_billing: true },
 };
 
 export const DEFAULT_SALES_PIPELINE_STAGES = [

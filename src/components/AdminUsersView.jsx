@@ -15,18 +15,19 @@ import {
   Sparkles,
   Mail,
   Copy,
-  CheckCircle2,
-  CreditCard
+  CheckCircle2
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getActiveCompany, getActiveCompanyId, readTenantCache, writeTenantCache } from '../lib/tenant';
-import { fetchCompanyBillingSnapshot } from '../lib/billing';
+import { fetchCompanyBillingSnapshot, syncSubscriptionSeats } from '../lib/billing';
 import PermissionsEditor from './PermissionsEditor';
 import {
   normalizePermissions,
   DEFAULT_MEMBER_PERMISSIONS,
   DEFAULT_ADMIN_PERMISSIONS,
-  isUserInSalesLeaderboard
+  isUserInSalesLeaderboard,
+  canUserManageBilling,
+  isWorkspaceBillingOwner
 } from '../lib/permissions';
 import {
   hashPassword,
@@ -51,8 +52,19 @@ const ROLE_OPTIONS = [
   { value: 'admin', label: 'Administrator' }
 ];
 
-export default function AdminUsersView({ currentUser, onLogout, onNavigateToBilling }) {
+export default function AdminUsersView({
+  currentUser,
+  onLogout,
+  onNavigateToBilling,
+  onCurrentUserUpdated
+}) {
   const [companyMeta, setCompanyMeta] = useState(() => getActiveCompany());
+  const effectiveCompany = companyMeta || getActiveCompany();
+  const callerCanManageBilling = canUserManageBilling(currentUser, effectiveCompany);
+  const callerIsAdmin = currentUser?.role === 'admin';
+  const availableRoleOptions = callerIsAdmin
+    ? ROLE_OPTIONS
+    : ROLE_OPTIONS.filter((opt) => opt.value !== 'admin');
   const [users, setUsers] = useState(() => {
     const parsed = readTenantCache('crm_cached_users', []);
     return Array.isArray(parsed) && parsed.length > 0 ? parsed : [];
@@ -276,11 +288,6 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
       setFormError('Workspace context missing. Please sign in again.');
       return;
     }
-    const activeSeatLimit = effectiveCompany?.seat_limit ? Number(effectiveCompany.seat_limit) : null;
-    if (!effectiveCompany?.is_billing_exempt && activeSeatLimit && users.length >= activeSeatLimit) {
-      setFormError(`Workspace seat limit reached (${users.length}/${activeSeatLimit}). Buy more seats in Billing & Seats to add more team members.`);
-      return;
-    }
 
     setIsSubmitting(true);
 
@@ -310,12 +317,7 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
       if (error || !data) {
         const msg = String(error?.message || '');
         const code = String(error?.code || '');
-        if (/seat limit|23514|check_violation/i.test(`${code} ${msg}`)) {
-          setFormError(`Workspace seat limit reached (${users.length}/${activeSeatLimit || effectiveCompany?.seat_limit || '?'}). Buy more seats to invite another user.`);
-          fetchCompanyBillingSnapshot(companyId).then((snap) => {
-            if (snap?.company) setCompanyMeta(snap.company);
-          }).catch(() => {});
-        } else if (/23505|duplicate|unique/i.test(`${code} ${msg}`)) {
+        if (/23505|duplicate|unique/i.test(`${code} ${msg}`)) {
           setFormError('This work email is already registered on simplecrm.');
         } else {
           setFormError(msg || 'Could not add team member. Please try again.');
@@ -329,6 +331,11 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
       setAddEmail('');
       setAddRole('member');
       setAddPerms(DEFAULT_MEMBER_PERMISSIONS);
+
+      // Dynamically sync Razorpay Subscription seat quantity if Autopay is active
+      if (activeCompanyId) {
+        syncSubscriptionSeats(activeCompanyId);
+      }
 
       // Dispatch automated Welcome & Invite Email via Resend only after persisted
       const inviteRes = await sendUserInviteEmail({
@@ -406,33 +413,43 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
     e.preventDefault();
     if (!selectedUser) return;
 
+    setFormError('');
     setIsSubmitting(true);
     const updatedUserId = selectedUser.id;
     const updatedPerms = selectedUser.permissions;
     const updatedRole = selectedUser.role;
 
-    setUsers((prev) =>
-      prev.map((u) =>
-        u.id === updatedUserId
-          ? { ...u, permissions: updatedPerms, role: updatedRole }
-          : u
-      )
-    );
-    setIsEditModalOpen(false);
-
     try {
-      if (!activeCompanyId) throw new Error('No active workspace selected.');
+      const companyId = activeCompanyId || currentUser?.company_id;
+      if (!companyId) throw new Error('No active workspace selected.');
+
       const { error } = await supabase
         .from('crm_users')
         .update({ permissions: updatedPerms, role: updatedRole })
         .eq('id', updatedUserId)
-        .eq('company_id', activeCompanyId);
+        .eq('company_id', companyId);
 
       if (error) {
-        console.warn('Note updating permissions in Supabase:', error.message);
+        setFormError(error.message || 'Could not update user permissions.');
+        return;
       }
+
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === updatedUserId
+            ? { ...u, permissions: updatedPerms, role: updatedRole }
+            : u
+        )
+      );
+
+      if (updatedUserId === currentUser?.id && typeof onCurrentUserUpdated === 'function') {
+        onCurrentUserUpdated({ permissions: updatedPerms, role: updatedRole });
+      }
+
+      setIsEditModalOpen(false);
     } catch (err) {
       console.warn('Error updating permissions:', err);
+      setFormError(err?.message || 'Could not update user permissions.');
     } finally {
       setIsSubmitting(false);
     }
@@ -442,6 +459,10 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
   const handlePromptDelete = (user) => {
     if (users.length <= 1) {
       alert('Cannot delete the last remaining user.');
+      return;
+    }
+    if (isWorkspaceBillingOwner(user, effectiveCompany)) {
+      alert('The workspace owner account cannot be deleted.');
       return;
     }
     setUserToDelete(user);
@@ -503,6 +524,9 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
         .eq('company_id', activeCompanyId);
       if (error) {
         console.warn('Note deleting user in Supabase:', error.message);
+      } else {
+        // Dynamically sync Razorpay Subscription seat quantity if Autopay is active
+        syncSubscriptionSeats(activeCompanyId);
       }
     } catch (err) {
       console.warn('Error deleting user:', err);
@@ -527,59 +551,42 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
     <div className="admin-view-container">
       <div className="admin-view-inner">
         {/* Master Header matching pipeline-master-header */}
-        {(() => {
-          const effectiveCompany = companyMeta || getActiveCompany();
-          const seatLimit = effectiveCompany?.seat_limit ? Number(effectiveCompany.seat_limit) : null;
-          const isSeatEnforced = Boolean(effectiveCompany && !effectiveCompany.is_billing_exempt && seatLimit);
-          const isAtSeatLimit = Boolean(isSeatEnforced && !isLoading && users.length >= seatLimit);
+        <div className="admin-master-header">
+          <div className="admin-master-title-group">
+            <h1 className="admin-master-title">Users</h1>
+            <span className="admin-master-count" style={{ minWidth: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              {isLoading ? <Skeleton width="18px" height="14px" borderRadius="4px" /> : users.length}
+            </span>
+            {!isLoading && (
+              <span className="billing-seat-pill">
+                {users.length} active {users.length === 1 ? 'user' : 'users'}
+              </span>
+            )}
+          </div>
 
-          return (
-            <div className="admin-master-header">
-              <div className="admin-master-title-group">
-                <h1 className="admin-master-title">Users</h1>
-                <span className="admin-master-count" style={{ minWidth: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {isLoading ? <Skeleton width="18px" height="14px" borderRadius="4px" /> : users.length}
-                </span>
-                {!isLoading && seatLimit && (
-                  <span className={`billing-seat-pill ${isAtSeatLimit ? 'at-limit' : ''}`}>
-                    {effectiveCompany?.is_billing_exempt
-                      ? `${users.length} active seats`
-                      : `${users.length} / ${seatLimit} seats`}
-                  </span>
-                )}
-              </div>
+          <div className="admin-actions-group">
+            <div className="admin-search-wrapper">
+              <Search size={15} strokeWidth={1.75} className="admin-search-icon" />
+              <input
+                type="text"
+                className="admin-search-input"
+                placeholder="Search users..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
 
-              <div className="admin-actions-group">
-                <div className="admin-search-wrapper">
-                  <Search size={15} strokeWidth={1.75} className="admin-search-icon" />
-                  <input
-                    type="text"
-                    className="admin-search-input"
-                    placeholder="Search users..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-
-                {isAtSeatLimit && currentUser?.role === 'admin' && typeof onNavigateToBilling === 'function' && (
-                  <button
-                    type="button"
-                    className="billing-secondary-btn"
-                    onClick={onNavigateToBilling}
-                  >
-                    <CreditCard size={14} strokeWidth={1.8} />
-                    <span>Buy More Seats</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  className="admin-add-user-btn"
-                  disabled={isAtSeatLimit}
-                  title={isAtSeatLimit ? 'Seat limit reached — buy more seats first' : 'Invite a new team member'}
-                  style={isAtSeatLimit ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
-                  onClick={() => {
+            <button
+              type="button"
+              className="admin-add-user-btn"
+              title="Invite a new team member"
+              onClick={() => {
                     setFormError('');
+                    setAddRole('member');
+                    setAddPerms({
+                      ...DEFAULT_MEMBER_PERMISSIONS,
+                      analytics: { ...DEFAULT_MEMBER_PERMISSIONS.analytics, include_in_leaderboard: true }
+                    });
                     setIsAddModalOpen(true);
                   }}
                 >
@@ -588,8 +595,6 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
                 </button>
               </div>
             </div>
-          );
-        })()}
 
         {/* Users Numbered List */}
         <div className="admin-users-numbered-list">
@@ -621,12 +626,16 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
             filteredUsers.map((user, idx) => {
               const isMasked = !showPins[user.id];
               const p = normalizePermissions(user);
+              const userHasBilling = canUserManageBilling(user, effectiveCompany);
+              const userIsOwner = isWorkspaceBillingOwner(user, effectiveCompany);
+              const canEditRow = callerIsAdmin || user.role !== 'admin';
               const activeModules = [
                 p.leads.view && `Leads (${p.leads.scope === 'all' ? 'All' : 'Assigned'})`,
                 p.pipeline.view && 'Pipeline',
                 p.dashboard.view && `Dashboard (${p.dashboard.scope === 'all' ? 'All' : 'Assigned'})`,
                 p.analytics?.view !== false && `Analytics (${p.analytics?.scope === 'all' ? 'All' : 'Assigned'})`,
-                (p.admin.manage_users || p.admin.manage_routing || p.admin.manage_meta || p.admin.view_ad_budget) && 'Admin'
+                (p.admin.manage_users || p.admin.manage_routing || p.admin.manage_meta || p.admin.view_ad_budget) && 'Admin',
+                userHasBilling && 'Billing'
               ].filter(Boolean);
 
               return (
@@ -698,13 +707,20 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
                   {/* Col 5: Permissions Badge */}
                   <div className="admin-col-perm">
                     {user.role === 'admin' ? (
-                      <span className="admin-perm-pill admin">Full Access</span>
+                      <span
+                        className="admin-perm-pill admin"
+                        title={userHasBilling ? 'Full Admin Access + Billing' : 'Admin Access (Billing Restricted)'}
+                      >
+                        {userHasBilling ? 'Full + Billing' : 'Admin Access'}
+                      </span>
                     ) : (
                       <button
                         type="button"
                         className="admin-perm-pill member"
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (!canEditRow) return;
+                          setFormError('');
                           setSelectedUser({
                             ...user,
                             permissions: p
@@ -713,7 +729,7 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
                         }}
                         data-tooltip={activeModules.length > 0 ? activeModules.join(' · ') : 'Restricted'}
                       >
-                        Custom Access
+                        {userHasBilling ? 'Custom · Billing' : 'Custom Access'}
                       </button>
                     )}
                   </div>
@@ -737,24 +753,27 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
                         <Key size={15} strokeWidth={1.75} />
                       </button>
 
-                      <button
-                        type="button"
-                        className="btn-admin-action"
-                        data-tooltip="Edit Permissions"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedUser({
-                            ...user,
-                            permissions: p
-                          });
-                          setIsEditModalOpen(true);
-                        }}
-                        aria-label="Edit Permissions"
-                      >
-                        <Sliders size={15} strokeWidth={1.75} />
-                      </button>
+                      {canEditRow && (
+                        <button
+                          type="button"
+                          className="btn-admin-action"
+                          data-tooltip="Edit Permissions"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFormError('');
+                            setSelectedUser({
+                              ...user,
+                              permissions: p
+                            });
+                            setIsEditModalOpen(true);
+                          }}
+                          aria-label="Edit Permissions"
+                        >
+                          <Sliders size={15} strokeWidth={1.75} />
+                        </button>
+                      )}
 
-                      {users.length > 1 && (
+                      {users.length > 1 && callerIsAdmin && !userIsOwner && (
                         <button
                           type="button"
                           className="btn-admin-action danger"
@@ -811,21 +830,8 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
             <form onSubmit={handleAddUser}>
               <div className="admin-modal-body">
                 {formError && (
-                  <div className="admin-modal-error-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <div className="admin-modal-error-banner">
                     <span>{formError}</span>
-                    {/seat limit/i.test(formError) && typeof onNavigateToBilling === 'function' && (
-                      <button
-                        type="button"
-                        className="billing-secondary-btn"
-                        style={{ height: 28, padding: '0 10px', fontSize: 12 }}
-                        onClick={() => {
-                          setIsAddModalOpen(false);
-                          onNavigateToBilling();
-                        }}
-                      >
-                        Buy More Seats
-                      </button>
-                    )}
                   </div>
                 )}
 
@@ -876,20 +882,23 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
                   <CustomSelect
                     value={addRole}
                     onChange={(role) => {
+                      const prevBilling = Boolean(addPerms?.admin?.manage_billing);
                       setAddRole(role);
                       if (role === 'admin') {
                         setAddPerms({
                           ...DEFAULT_ADMIN_PERMISSIONS,
-                          analytics: { ...DEFAULT_ADMIN_PERMISSIONS.analytics, include_in_leaderboard: false }
+                          analytics: { ...DEFAULT_ADMIN_PERMISSIONS.analytics, include_in_leaderboard: false },
+                          admin: { ...DEFAULT_ADMIN_PERMISSIONS.admin, manage_billing: prevBilling }
                         });
                       } else {
                         setAddPerms({
                           ...DEFAULT_MEMBER_PERMISSIONS,
-                          analytics: { ...DEFAULT_MEMBER_PERMISSIONS.analytics, include_in_leaderboard: true }
+                          analytics: { ...DEFAULT_MEMBER_PERMISSIONS.analytics, include_in_leaderboard: true },
+                          admin: { ...DEFAULT_MEMBER_PERMISSIONS.admin, manage_billing: prevBilling }
                         });
                       }
                     }}
-                    options={ROLE_OPTIONS}
+                    options={availableRoleOptions}
                     className="admin-role-select"
                   />
                 </div>
@@ -927,6 +936,8 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
                     permissions={addPerms}
                     onChange={setAddPerms}
                     role={addRole}
+                    canGrantBilling={callerCanManageBilling}
+                    isBillingOwner={false}
                   />
                 </div>
               </div>
@@ -1079,21 +1090,8 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
             <form onSubmit={handleSetPassword}>
               <div className="admin-modal-body">
                 {formError && (
-                  <div className="admin-modal-error-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <div className="admin-modal-error-banner">
                     <span>{formError}</span>
-                    {/seat limit/i.test(formError) && typeof onNavigateToBilling === 'function' && (
-                      <button
-                        type="button"
-                        className="billing-secondary-btn"
-                        style={{ height: 28, padding: '0 10px', fontSize: 12 }}
-                        onClick={() => {
-                          setIsAddModalOpen(false);
-                          onNavigateToBilling();
-                        }}
-                      >
-                        Buy More Seats
-                      </button>
-                    )}
                   </div>
                 )}
 
@@ -1202,25 +1200,37 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
 
             <form onSubmit={handleUpdatePermissions}>
               <div className="admin-modal-body">
+                {formError && (
+                  <div className="admin-modal-error-banner" style={{ marginBottom: 12 }}>
+                    <span>{formError}</span>
+                  </div>
+                )}
+
                 {/* Role Dropdown */}
                 <div className="admin-modal-role-row">
                   <span className="admin-modal-role-label">Member Role</span>
                   <CustomSelect
                     value={selectedUser.role || 'member'}
                     onChange={(newRole) => {
+                      const prevBilling = Boolean(selectedUser.permissions?.admin?.manage_billing);
+                      const base = newRole === 'admin' ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_MEMBER_PERMISSIONS;
                       setSelectedUser({
                         ...selectedUser,
                         role: newRole,
                         permissions: {
-                          ...(newRole === 'admin' ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_MEMBER_PERMISSIONS),
+                          ...base,
                           analytics: {
-                            ...((newRole === 'admin' ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_MEMBER_PERMISSIONS).analytics),
+                            ...base.analytics,
                             include_in_leaderboard: newRole !== 'admin'
+                          },
+                          admin: {
+                            ...base.admin,
+                            manage_billing: prevBilling
                           }
                         }
                       });
                     }}
-                    options={ROLE_OPTIONS}
+                    options={availableRoleOptions}
                     className="admin-role-select"
                   />
                 </div>
@@ -1262,6 +1272,8 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
                     setSelectedUser({ ...selectedUser, permissions: updated })
                   }
                   role={selectedUser.role || 'member'}
+                  canGrantBilling={callerCanManageBilling}
+                  isBillingOwner={isWorkspaceBillingOwner(selectedUser, effectiveCompany)}
                 />
               </div>
 
@@ -1400,12 +1412,16 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
         const currentUserData = users.find((u) => u.id === activeMobileUser.id) || activeMobileUser;
         const isMasked = !showPins[currentUserData.id];
         const p = normalizePermissions(currentUserData);
+        const mobileUserHasBilling = canUserManageBilling(currentUserData, effectiveCompany);
+        const mobileUserIsOwner = isWorkspaceBillingOwner(currentUserData, effectiveCompany);
+        const canEditMobileRow = callerIsAdmin || currentUserData.role !== 'admin';
         const activeModules = [
           p.leads?.view && `Leads (${p.leads?.scope === 'all' ? 'All' : 'Assigned'})`,
           p.pipeline?.view && 'Pipeline',
           p.dashboard?.view && `Dashboard (${p.dashboard?.scope === 'all' ? 'All' : 'Assigned'})`,
           p.analytics?.view !== false && `Analytics (${p.analytics?.scope === 'all' ? 'All' : 'Assigned'})`,
-          (p.admin?.manage_users || p.admin?.manage_routing || p.admin?.manage_meta || p.admin?.view_ad_budget) && 'Admin'
+          (p.admin?.manage_users || p.admin?.manage_routing || p.admin?.manage_meta || p.admin?.view_ad_budget) && 'Admin',
+          mobileUserHasBilling && 'Billing'
         ].filter(Boolean);
 
         return createPortal(
@@ -1488,17 +1504,18 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
                     <span className="admin-sheet-tile-label">Access Level</span>
                     <span className="admin-sheet-perm-status">
                       {currentUserData.role === 'admin'
-                        ? 'Full Administrator Access'
+                        ? (mobileUserHasBilling ? 'Full Administrator · Billing' : 'Administrator (Billing Restricted)')
                         : activeModules.length > 0
                         ? activeModules.join(' · ')
                         : 'Restricted Access'}
                     </span>
                   </div>
-                  {currentUserData.role !== 'admin' && (
+                  {canEditMobileRow && (
                     <button
                       type="button"
                       className="admin-sheet-tile-btn"
                       onClick={() => {
+                        setFormError('');
                         setSelectedUser({
                           ...currentUserData,
                           permissions: p
@@ -1514,7 +1531,7 @@ export default function AdminUsersView({ currentUser, onLogout, onNavigateToBill
                 </div>
 
                 {/* Delete Member Option */}
-                {users.length > 1 && (
+                {users.length > 1 && callerIsAdmin && !mobileUserIsOwner && (
                   <div className="admin-sheet-danger-section">
                     <button
                       type="button"

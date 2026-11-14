@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
 
       const { data: company } = await adminClient
         .from("companies")
-        .select("id, name, slug, subscription_status, trial_starts_at, trial_ends_at, seat_limit, price_per_seat_inr, is_billing_exempt, current_period_start, current_period_end, owner_email")
+        .select("id, name, slug, subscription_status, trial_starts_at, trial_ends_at, seat_limit, price_per_seat_inr, is_billing_exempt, current_period_start, current_period_end, owner_email, razorpay_subscription_id, razorpay_customer_id")
         .eq("id", caller.crmUser.company_id)
         .maybeSingle();
 
@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
 
     const { data: company } = await adminClient
       .from("companies")
-      .select("id, name, slug, subscription_status, trial_starts_at, trial_ends_at, seat_limit, price_per_seat_inr, is_billing_exempt, current_period_start, current_period_end, owner_email")
+      .select("id, name, slug, subscription_status, trial_starts_at, trial_ends_at, seat_limit, price_per_seat_inr, is_billing_exempt, current_period_start, current_period_end, owner_email, razorpay_subscription_id, razorpay_customer_id")
       .eq("id", user.company_id)
       .maybeSingle();
 

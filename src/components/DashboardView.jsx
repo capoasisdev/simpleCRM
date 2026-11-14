@@ -43,14 +43,13 @@ import {
   Headset
 } from 'lucide-react';
 import ProspectingView from './ProspectingView';
-import { CreditCard as BillingIcon } from 'lucide-react';
 import { checkAndRunDiscoveryAutopilot } from '../lib/coldDiscoveryScraper';
 import { supabase } from '../lib/supabase';
 import { getActiveCompany, getActiveCompanyId, tenantStorageKey, readTenantCache, writeTenantCache, readTenantString } from '../lib/tenant';
-import { getTrialDaysRemaining } from '../lib/billing';
+import { getTrialDaysRemaining, isWithinRenewalGrace } from '../lib/billing';
 import BillingSeatsView from './billing/BillingSeatsView';
 import '../styles/billing.css';
-import { hasPermission, getDashboardScope, getAnalyticsScope } from '../lib/permissions';
+import { hasPermission, getDashboardScope, getAnalyticsScope, canUserManageBilling } from '../lib/permissions';
 import { getStoredActivities } from '../lib/activities';
 import LeadsView from './LeadsView';
 import MessagesView from './MessagesView';
@@ -74,13 +73,26 @@ import Skeleton from './common/Skeleton';
 import '../styles/dashboard.css';
 import '../styles/analytics.css';
 
-export default function DashboardView({ currentUser, onLogout, company: activeCompanyProp = null, onCompanyUpdated }) {
+export default function DashboardView({
+  currentUser,
+  onLogout,
+  company: activeCompanyProp = null,
+  onCompanyUpdated,
+  onUserUpdated,
+  isConversionMode = false
+}) {
   const user = currentUser || {
     name: 'Admin',
     email: 'admin@simplecrm.com',
     role: 'admin'
   };
 
+  const handleCurrentUserUpdated = (updates) => {
+    if (!updates || typeof onUserUpdated !== 'function') return;
+    onUserUpdated(updates);
+  };
+
+  const activeCompanyMeta = activeCompanyProp || getActiveCompany();
   const isAdmin = user.role === 'admin' || hasPermission(user, 'admin', 'manage_users');
   const canViewDashboard = hasPermission(user, 'dashboard', 'view');
   const canViewDashboardDeals = hasPermission(user, 'dashboard', 'view_deals');
@@ -96,6 +108,7 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
   const canManageUsers = hasPermission(user, 'admin', 'manage_users');
   const canManageRouting = hasPermission(user, 'admin', 'manage_routing');
   const canManageMeta = hasPermission(user, 'admin', 'manage_meta');
+  const canManageBilling = canUserManageBilling(user, activeCompanyMeta);
   const canViewAdBudget = user.role === 'admin' || hasPermission(user, 'admin', 'view_ad_budget') || canManageMeta;
   const hasAdminAccess = user.role === 'admin' || canManageUsers || canManageRouting || canManageMeta || canViewPipelines;
   const toolsList = [
@@ -115,12 +128,16 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
     todos: 'Todos',
     tasks: 'Todos',
     lateron: 'LaterOn',
+    billing: 'Billing',
     admin: 'Admin'
   };
 
   const getRouteForTab = (tab, adminSub = 'users') => {
     if (tab === 'Prospecting') {
       return '/discovery';
+    }
+    if (tab === 'Billing') {
+      return '/billing';
     }
     if (tab === 'Admin') {
       if (adminSub === 'discovery' || adminSub === 'cold_engine') return '/admin/discovery';
@@ -159,6 +176,7 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
     if (path.startsWith('/admin')) {
       const parts = path.split('/').filter(Boolean);
       let sub = parts[1] || 'users';
+      if (sub === 'billing') return { tab: 'Billing', adminSub: 'users' };
       if (sub === 'routing' || sub === 'automations' || sub === 'meta') sub = 'integrations';
       if (sub === 'discovery' || sub === 'cold-engine' || sub === 'cold_engine' || sub === 'coldengine' || sub === 'cold-pipelines' || sub === 'coldpipelines') sub = 'discovery';
       return { tab: 'Admin', adminSub: sub };
@@ -175,8 +193,18 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
   };
 
   const initialLoc = parseLocation();
+  const conversionFallbackTab = canManageBilling
+    ? 'Billing'
+    : (canManageUsers || user.role === 'admin' ? 'Admin' : 'Billing');
+
   const validInitialTab = (() => {
     const requested = initialLoc.tab;
+    if (isConversionMode) {
+      if (requested === 'Admin' && (canManageUsers || user.role === 'admin')) return 'Admin';
+      if (requested === 'Billing' && canManageBilling) return 'Billing';
+      return conversionFallbackTab;
+    }
+    if (requested === 'Billing' && !canManageBilling) return canViewDashboard ? 'Dashboard' : canViewLeads ? 'Leads' : 'Admin';
     if (requested === 'Pipelines' && !canViewPipelines) return canViewLeads ? 'Leads' : 'Dashboard';
     if (requested === 'Admin' && !hasAdminAccess) return canViewLeads ? 'Leads' : 'Dashboard';
     if (requested === 'Dashboard' && !canViewDashboard) return canViewLeads ? 'Leads' : 'Admin';
@@ -186,9 +214,13 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
 
   const [activeTab, setActiveTab] = useState(validInitialTab);
   const [adminSubTab, setAdminSubTab] = useState(
-    (initialLoc.adminSub === 'routing' || initialLoc.adminSub === 'automations' || initialLoc.adminSub === 'meta')
+    isConversionMode
+      ? 'users'
+      : (initialLoc.adminSub === 'routing' || initialLoc.adminSub === 'automations' || initialLoc.adminSub === 'meta')
       ? 'integrations'
-      : (initialLoc.adminSub || (canManageUsers ? 'users' : 'integrations'))
+      : (initialLoc.adminSub && initialLoc.adminSub !== 'billing'
+        ? initialLoc.adminSub
+        : (canManageUsers ? 'users' : 'integrations'))
   );
 
   const [isPipelineConfiguring, setIsPipelineConfiguring] = useState(false);
@@ -239,14 +271,45 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
     }, 150);
   };
 
+  useEffect(() => {
+    if (isConversionMode) {
+      const targetTab =
+        activeTab === 'Admin' && (canManageUsers || user.role === 'admin')
+          ? 'Admin'
+          : canManageBilling
+          ? 'Billing'
+          : conversionFallbackTab;
+      if (activeTab !== targetTab || (targetTab === 'Admin' && adminSubTab !== 'users')) {
+        navigateTo(targetTab, 'users');
+      }
+      return;
+    }
+    if (activeTab === 'Billing' && !canManageBilling) {
+      navigateTo(canViewDashboard ? 'Dashboard' : canViewLeads ? 'Leads' : 'Admin');
+    }
+  }, [activeTab, adminSubTab, canManageBilling, canManageUsers, isConversionMode, user?.role]);
+
   const navigateTo = (tabName, subTab = 'users') => {
     haptic.selection();
-    const effectiveSub = (subTab === 'meta' || subTab === 'routing' || subTab === 'automations') ? 'integrations' : subTab;
-    setActiveTab(tabName);
-    if (tabName === 'LaterOn') {
+    let targetTab = tabName;
+    let effectiveSub = (subTab === 'meta' || subTab === 'routing' || subTab === 'automations') ? 'integrations' : subTab;
+
+    if (isConversionMode) {
+      if (targetTab === 'Admin' && (canManageUsers || user.role === 'admin')) {
+        effectiveSub = 'users';
+      } else if (canManageBilling) {
+        targetTab = 'Billing';
+      } else {
+        targetTab = conversionFallbackTab;
+        effectiveSub = 'users';
+      }
+    }
+
+    setActiveTab(targetTab);
+    if (targetTab === 'LaterOn') {
       setHasVisitedLaterOn(true);
     }
-    if (tabName === 'Admin') {
+    if (targetTab === 'Admin') {
       setAdminSubTab(effectiveSub);
       if (effectiveSub !== 'stages') {
         setIsPipelineConfiguring(false);
@@ -254,11 +317,11 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
     } else {
       setIsPipelineConfiguring(false);
     }
-    const path = getRouteForTab(tabName, effectiveSub);
+    const path = getRouteForTab(targetTab, effectiveSub);
     if (window.location.pathname !== path) {
-      window.history.pushState({ tab: tabName, adminSub: effectiveSub }, '', path);
+      window.history.pushState({ tab: targetTab, adminSub: effectiveSub }, '', path);
     }
-    writeTenantCache('simplecrm_last_active_tab', { tab: tabName, adminSub: effectiveSub });
+    writeTenantCache('simplecrm_last_active_tab', { tab: targetTab, adminSub: effectiveSub });
   };
 
   useEffect(() => {
@@ -270,6 +333,16 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
 
     const handlePopState = () => {
       const current = parseLocation();
+      if (isConversionMode) {
+        const clampedTab =
+          current.tab === 'Admin' && (canManageUsers || user.role === 'admin')
+            ? 'Admin'
+            : conversionFallbackTab;
+        setActiveTab(clampedTab);
+        setAdminSubTab('users');
+        writeTenantCache('simplecrm_last_active_tab', { tab: clampedTab, adminSub: 'users' });
+        return;
+      }
       setActiveTab(current.tab);
       if (current.tab === 'LaterOn') {
         setHasVisitedLaterOn(true);
@@ -351,7 +424,7 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
         return;
       }
       // 7. If on any other tab than Dashboard, navigate back to Dashboard
-      if (activeTab !== 'Dashboard') {
+      if (activeTab !== 'Dashboard' && !isConversionMode) {
         navigateTo('Dashboard');
         e.detail?.handled?.();
         return;
@@ -534,6 +607,9 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
           setUsersList((prev) => prev.filter((u) => u.id !== payload.old.id));
         } else if (payload.eventType === 'UPDATE') {
           setUsersList((prev) => prev.map((u) => (u.id === payload.new.id ? payload.new : u)));
+          if (payload.new.id === user?.id) {
+            handleCurrentUserUpdated({ role: payload.new.role, permissions: payload.new.permissions });
+          }
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pipelines', filter: `company_id=eq.${companyId}` }, (payload) => {
@@ -894,11 +970,14 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
   const [adBudget, setAdBudget] = useState(() => {
     return readTenantCache('crm_cached_ad_budget', null);
   });
+  const [hasConfiguredAdAccount, setHasConfiguredAdAccount] = useState(() => {
+    return Boolean(readTenantCache('crm_cached_meta_config', null)?.ad_account_id);
+  });
   const [isLoadingAdBudget, setIsLoadingAdBudget] = useState(() => {
     return !readTenantCache('crm_cached_ad_budget', null);
   });
   const [adBudgetError, setAdBudgetError] = useState('');
-  const isBudgetLoading = isLoadingAdBudget || (!adBudget && (isLoadingData || !adBudgetError));
+  const isBudgetLoading = isLoadingAdBudget && !adBudget;
 
   const formatCurrency = (val, curr = 'INR') => {
     if (val === null || val === undefined || isNaN(val)) return '—';
@@ -962,9 +1041,12 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
 
       const adAccountId = metaConf?.ad_account_id;
       if (!adAccountId) {
+        setHasConfiguredAdAccount(false);
+        setAdBudget(null);
         setIsLoadingAdBudget(false);
         return;
       }
+      setHasConfiguredAdAccount(true);
 
       const cachedUserToken = readTenantString('crm_meta_user_token', null, companyId);
       const waToken = metaConf?.whatsapp_access_token;
@@ -996,6 +1078,8 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
             });
           }
         }
+      } else {
+        setAdBudgetError('Unable to sync Meta Ad Budget right now');
       }
     } catch (err) {
       console.warn('Error loading ad account budget:', err);
@@ -1008,8 +1092,10 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
   useEffect(() => {
     if (canViewAdBudget) {
       loadAdAccountBudget(false);
+    } else {
+      setIsLoadingAdBudget(false);
     }
-  }, [canViewAdBudget]);
+  }, [canViewAdBudget, user?.company_id]);
 
   // October 2026 starts on Thursday (index 4) and has 31 days
   const calendarDays = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -1046,8 +1132,6 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
                     ? 'Integrations'
                     : adminSubTab === 'users'
                     ? 'Users'
-                    : adminSubTab === 'billing'
-                    ? 'Seats & Billing'
                     : adminSubTab === 'discovery' || adminSubTab === 'cold_engine'
                     ? 'Discovery'
                     : adminSubTab.charAt(0).toUpperCase() + adminSubTab.slice(1)}
@@ -1063,31 +1147,65 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
 
         <div className="header-right-cluster">
           {(() => {
+            const canSeeTrialChip = user?.role === 'admin' || canManageBilling;
+            if (!canSeeTrialChip || activeTab === 'Billing') return null;
             const comp = activeCompanyProp || getActiveCompany();
             if (!comp || comp.is_billing_exempt) return null;
             const status = String(comp.subscription_status || '').toLowerCase();
-            if (status !== 'trialing' && status !== 'pilot_extended') return null;
-            const daysLeft = getTrialDaysRemaining(comp);
-            if (daysLeft <= 0) return null;
+            const inGrace = isWithinRenewalGrace(comp);
+            let chipLabel = null;
+            let isUrgent = false;
+
+            if (isConversionMode) {
+              chipLabel = comp.current_period_end ? 'Renewal Required' : 'Trial Ended';
+              isUrgent = true;
+            } else if (inGrace) {
+              chipLabel = 'Renewal Grace';
+              isUrgent = true;
+            } else if (status === 'trialing' || status === 'pilot_extended') {
+              const daysLeft = getTrialDaysRemaining(comp);
+              if (daysLeft <= 0) return null;
+              chipLabel = `${status === 'pilot_extended' ? 'Pilot' : 'Trial'}: ${daysLeft}d left`;
+              isUrgent = daysLeft <= 3;
+            } else {
+              return null;
+            }
+
+            if (canManageBilling) {
+              return (
+                <button
+                  type="button"
+                  className={`header-trial-chip ${isUrgent ? 'urgent' : ''}`}
+                  onClick={() => navigateTo('Billing')}
+                  title="Manage billing & active users"
+                >
+                  <span>{chipLabel}</span>
+                </button>
+              );
+            }
+
             return (
-              <button
-                type="button"
-                className={`header-trial-chip ${daysLeft <= 3 ? 'urgent' : ''}`}
-                onClick={() => {
-                  if (user?.role === 'admin') {
-                    navigateTo('Admin', 'billing');
-                  }
-                }}
-                title={user?.role === 'admin' ? 'Manage seats & Razorpay subscription' : `${daysLeft} day(s) remaining in workspace trial`}
+              <span
+                className={`header-trial-chip readonly ${isUrgent ? 'urgent' : ''}`}
+                title="Contact a workspace billing manager to activate or renew billing"
               >
-                <span>{status === 'pilot_extended' ? 'Pilot' : 'Trial'}: {daysLeft}d left</span>
-              </button>
+                <span>{chipLabel}</span>
+              </span>
             );
           })()}
+          {canManageBilling && (
+            <button
+              type="button"
+              className={`header-billing-btn ${activeTab === 'Billing' ? 'active' : ''}`}
+              onClick={() => navigateTo('Billing')}
+              title="Billing & Seats"
+            >
+              <CreditCard size={15} strokeWidth={1.75} />
+              <span>Billing</span>
+            </button>
+          )}
           {canViewAdBudget && (
-            isBudgetLoading ? (
-              <Skeleton width="130px" height="28px" borderRadius="14px" />
-            ) : adBudget ? (
+            adBudget ? (
               <div
                 className={`header-meta-budget-chip ${adBudget.statusBadge}`}
                 onClick={() => {
@@ -1112,6 +1230,8 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
                   {formatCurrency(adBudget.prepaidBalance ?? adBudget.remainingSpendCap ?? 0, adBudget.currency)}
                 </strong>
               </div>
+            ) : (isBudgetLoading && hasConfiguredAdAccount) ? (
+              <Skeleton width="130px" height="28px" borderRadius="14px" />
             ) : null
           )}
           <button
@@ -1205,7 +1325,9 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
                         type="button"
                         className={`nav-item-btn ${activeTab === item.name ? 'active' : ''}`}
                         onClick={() => navigateTo(item.name)}
-                        title={item.label || item.name}
+                        disabled={isConversionMode}
+                        style={isConversionMode ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+                        title={isConversionMode ? 'Activate your workspace plan to unlock' : (item.label || item.name)}
                       >
                         <Icon size={20} strokeWidth={1.75} />
                         <span>{item.label || item.name}</span>
@@ -1230,7 +1352,9 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
                         type="button"
                         className={`nav-item-btn ${activeTab === tool.name ? 'active' : ''}`}
                         onClick={() => navigateTo(tool.name)}
-                        title={tool.name}
+                        disabled={isConversionMode}
+                        style={isConversionMode ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+                        title={isConversionMode ? 'Activate your workspace plan to unlock' : tool.name}
                       >
                         <ToolIcon size={20} strokeWidth={1.75} />
                         <span>{tool.label}</span>
@@ -1392,68 +1516,127 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
                         <h2 className="card-title">Meta Ad Budget</h2>
                       </div>
 
-                      <button
-                        type="button"
-                        className="card-action-link"
-                        onClick={() => loadAdAccountBudget(true)}
-                        disabled={isLoadingAdBudget}
-                      >
-                        {isLoadingAdBudget ? 'Syncing...' : 'Refresh'}
-                      </button>
+                      {(hasConfiguredAdAccount || isBudgetLoading) && (
+                        <button
+                          type="button"
+                          className="card-action-link"
+                          onClick={() => loadAdAccountBudget(true)}
+                          disabled={isLoadingAdBudget}
+                        >
+                          {isLoadingAdBudget ? 'Syncing...' : 'Refresh'}
+                        </button>
+                      )}
                     </div>
 
-                    <div className="metric-tiles-row">
-                      <div className="metric-tile">
-                        <div className="metric-tile-val">
-                          {isBudgetLoading ? (
-                            <Skeleton width="65px" height="22px" />
-                          ) : (
-                            <span className="fade-in-value">
-                              {formatCurrency(adBudget?.prepaidBalance ?? adBudget?.remainingSpendCap ?? 0, adBudget?.currency || 'INR')}
-                            </span>
-                          )}
-                        </div>
-                        <div className="metric-tile-lbl">Available Balance</div>
-                      </div>
+                    {isBudgetLoading ? (
+                      <>
+                        <div className="metric-tiles-row">
+                          <div className="metric-tile">
+                            <div className="metric-tile-val">
+                              <Skeleton width="65px" height="22px" />
+                            </div>
+                            <div className="metric-tile-lbl">Available Balance</div>
+                          </div>
 
-                      <div className="metric-tile">
-                        <div className="metric-tile-val">
-                          {isBudgetLoading ? (
-                            <Skeleton width="55px" height="22px" />
-                          ) : (
-                            <span className="fade-in-value">
-                              {formatCurrency(adBudget?.todayInsights?.spend || 0, adBudget?.currency || 'INR')}
-                            </span>
-                          )}
-                        </div>
-                        <div className="metric-tile-lbl">Today's Spend</div>
-                      </div>
+                          <div className="metric-tile">
+                            <div className="metric-tile-val">
+                              <Skeleton width="55px" height="22px" />
+                            </div>
+                            <div className="metric-tile-lbl">Today's Spend</div>
+                          </div>
 
-                      <div
-                        className="metric-tile"
-                        data-tooltip={adBudget?.amountSpent ? `Lifetime: ₹${Math.round(adBudget.amountSpent).toLocaleString('en-IN')}` : undefined}
-                      >
-                        <div className="metric-tile-val">
-                          {isBudgetLoading ? (
-                            <Skeleton width="65px" height="22px" />
-                          ) : (
-                            <span className="fade-in-value">
-                              {formatCompactCurrency(adBudget?.amountSpent || 0, adBudget?.currency || 'INR')}
-                            </span>
-                          )}
+                          <div className="metric-tile">
+                            <div className="metric-tile-val">
+                              <Skeleton width="65px" height="22px" />
+                            </div>
+                            <div className="metric-tile-lbl">Lifetime Spent</div>
+                          </div>
                         </div>
-                        <div className="metric-tile-lbl">Lifetime Spent</div>
-                      </div>
-                    </div>
 
-                    <div className="card-buttons-row">
-                      {isBudgetLoading ? (
-                        <>
+                        <div className="card-buttons-row">
                           <Skeleton width="86px" height="34px" borderRadius="8px" />
                           {hasAdminAccess && <Skeleton width="115px" height="34px" borderRadius="8px" />}
-                        </>
-                      ) : (
-                        <>
+                        </div>
+                      </>
+                    ) : !adBudget ? (
+                      <>
+                        <div
+                          className="deals-empty-state"
+                          style={{ marginBottom: hasAdminAccess || hasConfiguredAdAccount ? 'var(--spacing-md)' : 0 }}
+                        >
+                          {hasConfiguredAdAccount
+                            ? (adBudgetError || 'Unable to sync Meta Ad Budget right now')
+                            : 'No Meta Ad Account connected yet'}
+                        </div>
+                        {(hasAdminAccess || hasConfiguredAdAccount) && (
+                          <div className="card-buttons-row">
+                            {hasConfiguredAdAccount ? (
+                              <button
+                                type="button"
+                                className="card-btn-primary"
+                                onClick={() => loadAdAccountBudget(true)}
+                                disabled={isLoadingAdBudget}
+                              >
+                                <span>Retry Sync</span>
+                              </button>
+                            ) : (
+                              hasAdminAccess && (
+                                <button
+                                  type="button"
+                                  className="card-btn-primary"
+                                  onClick={() => navigateTo('Admin', 'integrations')}
+                                >
+                                  <span>Connect Meta Ads</span>
+                                </button>
+                              )
+                            )}
+                            {hasConfiguredAdAccount && hasAdminAccess && (
+                              <button
+                                type="button"
+                                className="card-btn-secondary"
+                                onClick={() => navigateTo('Admin', 'integrations')}
+                              >
+                                <span>Meta Settings</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="metric-tiles-row">
+                          <div className="metric-tile">
+                            <div className="metric-tile-val">
+                              <span className="fade-in-value">
+                                {formatCurrency(adBudget?.prepaidBalance ?? adBudget?.remainingSpendCap ?? 0, adBudget?.currency || 'INR')}
+                              </span>
+                            </div>
+                            <div className="metric-tile-lbl">Available Balance</div>
+                          </div>
+
+                          <div className="metric-tile">
+                            <div className="metric-tile-val">
+                              <span className="fade-in-value">
+                                {formatCurrency(adBudget?.todayInsights?.spend || 0, adBudget?.currency || 'INR')}
+                              </span>
+                            </div>
+                            <div className="metric-tile-lbl">Today's Spend</div>
+                          </div>
+
+                          <div
+                            className="metric-tile"
+                            data-tooltip={adBudget?.amountSpent ? `Lifetime: ₹${Math.round(adBudget.amountSpent).toLocaleString('en-IN')}` : undefined}
+                          >
+                            <div className="metric-tile-val">
+                              <span className="fade-in-value">
+                                {formatCompactCurrency(adBudget?.amountSpent || 0, adBudget?.currency || 'INR')}
+                              </span>
+                            </div>
+                            <div className="metric-tile-lbl">Lifetime Spent</div>
+                          </div>
+                        </div>
+
+                        <div className="card-buttons-row">
                           <a
                             href={
                               adBudget?.accountId
@@ -1477,9 +1660,9 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
                               <span>Meta Settings</span>
                             </button>
                           )}
-                        </>
-                      )}
-                    </div>
+                        </div>
+                      </>
+                    )}
                   </section>
                 )}
 
@@ -1692,7 +1875,6 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
                     <ul className="settings-subnav-list">
                       {[
                         ...(canManageUsers || user.role === 'admin' ? [{ id: 'users', label: 'Users', icon: Users }] : []),
-                        ...(user.role === 'admin' ? [{ id: 'billing', label: 'Seats & Billing', icon: BillingIcon }] : []),
                         ...(user.role === 'admin' ? [{ id: 'import', label: 'Import Leads', icon: UploadCloud }] : []),
                         ...(canManageMeta || user.role === 'admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
                         ...(canViewPipelines ? [{ id: 'stages', label: 'Pipeline', icon: GitFork }] : []),
@@ -1700,12 +1882,16 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
                         ...(user.role === 'admin' ? [{ id: 'backups', label: 'Backups', icon: Database }] : [])
                       ].map((sub) => {
                         const SubIcon = sub.icon;
+                        const subDisabled = isConversionMode && sub.id !== 'users';
                         return (
                           <li key={sub.id}>
                             <button
                               type="button"
                               className={`settings-subnav-btn ${(adminSubTab === sub.id || (sub.id === 'discovery' && adminSubTab === 'cold_engine')) ? 'active' : ''}`}
                               onClick={() => navigateTo('Admin', sub.id)}
+                              disabled={subDisabled}
+                              style={subDisabled ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+                              title={subDisabled ? 'Activate your workspace plan to unlock' : undefined}
                               data-tooltip={isSettingsSubnavCollapsed ? sub.label : undefined}
                             >
                               <SubIcon size={20} strokeWidth={1.75} />
@@ -1725,11 +1911,9 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
                   <AdminUsersView
                     currentUser={user}
                     onLogout={onLogout}
-                    onNavigateToBilling={user.role === 'admin' ? () => navigateTo('Admin', 'billing') : undefined}
+                    onNavigateToBilling={canManageBilling ? () => navigateTo('Billing') : undefined}
+                    onCurrentUserUpdated={handleCurrentUserUpdated}
                   />
-                )}
-                {adminSubTab === 'billing' && user.role === 'admin' && (
-                  <BillingSeatsView currentUser={user} onCompanyUpdated={onCompanyUpdated} />
                 )}
                 {adminSubTab === 'import' && user.role === 'admin' && (
                   <CsvImportView currentUser={user} onNavigate={navigateTo} />
@@ -1756,7 +1940,17 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
             </div>
           )}
 
-          {activeTab !== 'Dashboard' && activeTab !== 'Analytics' && activeTab !== 'Leads' && activeTab !== 'Messages' && activeTab !== 'Todos' && activeTab !== 'LaterOn' && activeTab !== 'Admin' && activeTab !== 'Prospecting' && (
+          {activeTab === 'Billing' && canManageBilling && (
+            <BillingSeatsView
+              currentUser={user}
+              isConversionMode={isConversionMode}
+              onNavigateToUsers={(canManageUsers || user.role === 'admin') ? () => navigateTo('Admin', 'users') : undefined}
+              onCompanyUpdated={onCompanyUpdated}
+              onCurrentUserUpdated={handleCurrentUserUpdated}
+            />
+          )}
+
+          {activeTab !== 'Dashboard' && activeTab !== 'Analytics' && activeTab !== 'Leads' && activeTab !== 'Messages' && activeTab !== 'Todos' && activeTab !== 'LaterOn' && activeTab !== 'Admin' && activeTab !== 'Billing' && activeTab !== 'Prospecting' && (
             <div className="tab-placeholder-view">
               <h2 className="placeholder-title">{activeTab}</h2>
               <p className="placeholder-desc">This section is currently under development.</p>
@@ -2103,24 +2297,38 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
               </div>
               <span>Help & Support</span>
             </button>
+            {(canManageBilling || hasAdminAccess) && <div className="mobile-more-divider" />}
+            {canManageBilling && (
+              <button
+                type="button"
+                className={`mobile-more-item ${activeTab === 'Billing' ? 'active' : ''}`}
+                onClick={() => {
+                  setIsMobileMoreOpen(false);
+                  navigateTo('Billing');
+                }}
+                role="menuitem"
+              >
+                <div className="mobile-more-icon-wrap">
+                  <CreditCard size={18} strokeWidth={1.75} />
+                </div>
+                <span>Billing</span>
+              </button>
+            )}
             {hasAdminAccess && (
-              <>
-                <div className="mobile-more-divider" />
-                <button
-                  type="button"
-                  className={`mobile-more-item ${activeTab === 'Admin' ? 'active' : ''}`}
-                  onClick={() => {
-                    setIsMobileMoreOpen(false);
-                    navigateTo('Admin', adminSubTab || 'users');
-                  }}
-                  role="menuitem"
-                >
-                  <div className="mobile-more-icon-wrap">
-                    <Settings size={18} strokeWidth={1.75} />
-                  </div>
-                  <span>Admin Settings</span>
-                </button>
-              </>
+              <button
+                type="button"
+                className={`mobile-more-item ${activeTab === 'Admin' ? 'active' : ''}`}
+                onClick={() => {
+                  setIsMobileMoreOpen(false);
+                  navigateTo('Admin', adminSubTab || 'users');
+                }}
+                role="menuitem"
+              >
+                <div className="mobile-more-icon-wrap">
+                  <Settings size={18} strokeWidth={1.75} />
+                </div>
+                <span>Admin Settings</span>
+              </button>
             )}
           </div>
         </>
@@ -2132,6 +2340,8 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
         <button
           type="button"
           aria-label="Dashboard"
+          disabled={isConversionMode}
+          style={isConversionMode ? { opacity: 0.35 } : undefined}
           className={`mobile-nav-cell ${activeTab === 'Dashboard' || activeTab === 'Analytics' ? 'active' : ''}`}
           onClick={() => {
             setIsMobileActivityOpen(false);
@@ -2149,6 +2359,8 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
           <button
             type="button"
             aria-label="Leads"
+            disabled={isConversionMode}
+            style={isConversionMode ? { opacity: 0.35 } : undefined}
             className={`mobile-nav-cell ${activeTab === 'Leads' ? 'active' : ''}`}
             onClick={() => {
               setIsMobileActivityOpen(false);
@@ -2167,6 +2379,8 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
           <button
             type="button"
             aria-label="Messages"
+            disabled={isConversionMode}
+            style={isConversionMode ? { opacity: 0.35 } : undefined}
             className={`mobile-nav-cell ${activeTab === 'Messages' ? 'active' : ''}`}
             onClick={() => {
               setIsMobileActivityOpen(false);
@@ -2184,6 +2398,8 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
         <button
           type="button"
           aria-label="To-Do's"
+          disabled={isConversionMode}
+          style={isConversionMode ? { opacity: 0.35 } : undefined}
           className={`mobile-nav-cell ${activeTab === 'Todos' ? 'active' : ''}`}
           onClick={() => {
             setIsMobileActivityOpen(false);
@@ -2201,7 +2417,7 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
           <button
             type="button"
             aria-label="More Tools & Admin"
-            className={`mobile-nav-cell ${isMobileMoreOpen || activeTab === 'Admin' || activeTab === 'Prospecting' || toolsList.some((t) => t.name === activeTab) ? 'active' : ''}`}
+            className={`mobile-nav-cell ${isMobileMoreOpen || activeTab === 'Admin' || activeTab === 'Billing' || activeTab === 'Prospecting' || toolsList.some((t) => t.name === activeTab) ? 'active' : ''}`}
             onClick={() => {
               haptic.selection();
               setIsMobileActivityOpen(false);
@@ -2209,7 +2425,7 @@ export default function DashboardView({ currentUser, onLogout, company: activeCo
             }}
           >
             <div className="mobile-nav-icon-wrap">
-              <MoreHorizontal size={22} strokeWidth={1.75} fill={isMobileMoreOpen || activeTab === 'Admin' || activeTab === 'Prospecting' || toolsList.some((t) => t.name === activeTab) ? 'currentColor' : 'none'} />
+              <MoreHorizontal size={22} strokeWidth={1.75} fill={isMobileMoreOpen || activeTab === 'Admin' || activeTab === 'Billing' || activeTab === 'Prospecting' || toolsList.some((t) => t.name === activeTab) ? 'currentColor' : 'none'} />
             </div>
           </button>
         ) : toolsList.length === 1 ? (

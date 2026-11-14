@@ -38,7 +38,8 @@ export const DEFAULT_MEMBER_PERMISSIONS = {
     manage_users: false,
     manage_routing: false,
     manage_meta: false,
-    view_ad_budget: false
+    view_ad_budget: false,
+    manage_billing: false
   }
 };
 
@@ -78,7 +79,8 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
     manage_users: true,
     manage_routing: true,
     manage_meta: true,
-    view_ad_budget: true
+    view_ad_budget: true,
+    manage_billing: false
   }
 };
 
@@ -88,18 +90,23 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
 export function normalizePermissions(user) {
   if (!user) return DEFAULT_MEMBER_PERMISSIONS;
 
-  // Admins always have full access, preserving any custom leaderboard toggle
+  // Admins always have full operational access, while preserving explicit leaderboard & billing flags
   if (user.role === 'admin') {
     const isLeaderboard = Boolean(
       user.permissions?.analytics?.include_in_leaderboard ??
       user.permissions?.include_in_leaderboard ??
       false
     );
+    const hasBilling = user.permissions?.admin?.manage_billing === true;
     return {
       ...DEFAULT_ADMIN_PERMISSIONS,
       analytics: {
         ...DEFAULT_ADMIN_PERMISSIONS.analytics,
         include_in_leaderboard: isLeaderboard
+      },
+      admin: {
+        ...DEFAULT_ADMIN_PERMISSIONS.admin,
+        manage_billing: hasBilling
       }
     };
   }
@@ -153,7 +160,8 @@ export function normalizePermissions(user) {
         manage_users: raw.admin?.manage_users === true || raw.manage_users === true,
         manage_routing: raw.admin?.manage_routing === true,
         manage_meta: raw.admin?.manage_meta === true,
-        view_ad_budget: raw.admin?.view_ad_budget === true || raw.admin?.manage_meta === true
+        view_ad_budget: raw.admin?.view_ad_budget === true || raw.admin?.manage_meta === true,
+        manage_billing: raw.admin?.manage_billing === true
       }
     };
   }
@@ -194,7 +202,8 @@ export function normalizePermissions(user) {
       manage_users: raw.manage_users === true,
       manage_routing: raw.manage_users === true,
       manage_meta: raw.manage_users === true,
-      view_ad_budget: raw.manage_users === true
+      view_ad_budget: raw.manage_users === true,
+      manage_billing: false
     }
   };
 }
@@ -203,13 +212,19 @@ export function normalizePermissions(user) {
  * Check if user has permission for a specific section and action
  * @param {object} user
  * @param {string} section - 'leads' | 'pipeline' | 'dashboard' | 'followups' | 'admin'
- * @param {string} action - 'view' | 'edit' | 'delete' | 'manage_users' | etc.
+ * @param {string} action - 'view' | 'edit' | 'delete' | 'manage_users' | 'manage_billing' | etc.
  */
 export function hasPermission(user, section, action) {
   if (!user) return false;
-  if (user.role === 'admin') return true;
 
   const perms = normalizePermissions(user);
+
+  // Billing access must always be explicitly granted (never implicit for all admins)
+  if (section === 'admin' && action === 'manage_billing') {
+    return perms.admin?.manage_billing === true;
+  }
+
+  if (user.role === 'admin') return true;
 
   if (section === 'leads') {
     if (action === 'all_leads') return perms.leads?.scope === 'all';
@@ -440,5 +455,17 @@ export function isUserInSalesLeaderboard(user) {
   }
   return user.role !== 'admin';
 }
+
+export function isWorkspaceBillingOwner(user, company) {
+  if (!user?.email || !company?.owner_email) return false;
+  return String(user.email).trim().toLowerCase() === String(company.owner_email).trim().toLowerCase();
+}
+
+export function canUserManageBilling(user, company = null) {
+  if (!user) return false;
+  if (hasPermission(user, 'admin', 'manage_billing')) return true;
+  return isWorkspaceBillingOwner(user, company);
+}
+
 
 

@@ -4,7 +4,12 @@ import {
   getAuthenticatedCrmCaller,
   jsonResponse,
 } from "../_shared/authBridge.ts";
-import { isCompanySubscriptionActive } from "../_shared/billing.ts";
+import {
+  hasBillingAccess,
+  isCompanySubscriptionActive,
+  createOrFetchRazorpayPlan,
+  createRazorpaySubscription,
+} from "../_shared/billing.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -31,9 +36,10 @@ Deno.serve(async (req) => {
     if (!caller) {
       return jsonResponse({ success: false, error: "Authentication required." }, 401);
     }
-    if (caller.crmUser.role !== "admin") {
+    const canBill = await hasBillingAccess(adminClient, caller.crmUser);
+    if (!canBill) {
       return jsonResponse(
-        { success: false, error: "Only workspace administrators can initiate billing checkout." },
+        { success: false, error: "Only workspace billing managers can initiate billing checkout." },
         403
       );
     }
@@ -46,7 +52,8 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: false, error: "Unsupported transactionType." }, 400);
     }
 
-    const rawSeats = Number(body.seatsRequested);
+    const hasSeatsInput = body.seatsRequested !== undefined && body.seatsRequested !== null && body.seatsRequested !== "";
+    const rawSeats = hasSeatsInput ? Number(body.seatsRequested) : 1;
     const seatsRequested = Math.round(rawSeats);
     if (!Number.isFinite(rawSeats) || seatsRequested < 1 || seatsRequested > 500) {
       return jsonResponse(
@@ -89,14 +96,21 @@ Deno.serve(async (req) => {
     }
 
     const currentUsers = Number(activeUserCount || 0);
+    const activeUserBillCount = Math.max(1, currentUsers);
+    const seatsToBill =
+      transactionType === "initial_activation" || transactionType === "renewal"
+        ? activeUserBillCount
+        : seatsRequested;
+
     if (
       (transactionType === "initial_activation" || transactionType === "renewal") &&
-      seatsRequested < Math.max(1, currentUsers)
+      hasSeatsInput &&
+      seatsRequested < activeUserBillCount
     ) {
       return jsonResponse(
         {
           success: false,
-          error: `Your workspace currently has ${currentUsers} active team member(s). Please select at least ${currentUsers} seat(s).`,
+          error: `Your workspace currently has ${currentUsers} active team member(s). Billing covers all active users.`,
         },
         400
       );
@@ -104,7 +118,7 @@ Deno.serve(async (req) => {
 
     // Authoritative price computation from DB row (never trusts client amounts)
     const unitPriceInr = Math.max(1, Number(company.price_per_seat_inr || 999));
-    const amountInr = seatsRequested * unitPriceInr;
+    const amountInr = seatsToBill * unitPriceInr;
     const amountPaise = Math.round(amountInr * 100);
 
     const keyId = (Deno.env.get("RAZORPAY_KEY_ID") ?? "").trim();
@@ -119,7 +133,7 @@ Deno.serve(async (req) => {
             "Online Razorpay checkout keys are not configured yet. Configure RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Supabase Secrets to enable payments.",
           summary: {
             transactionType,
-            seatsRequested,
+            seatsRequested: seatsToBill,
             unitPriceInr,
             amountInr,
             currency: "INR",
@@ -131,54 +145,88 @@ Deno.serve(async (req) => {
 
     const receipt = `scrm_${company.id.slice(0, 8)}_${Date.now()}`.slice(0, 40);
     const basicAuth = btoa(`${keyId}:${keySecret}`);
-    const orderRes = await fetch("https://api.razorpay.com/v1/orders", {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${basicAuth}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        amount: amountPaise,
-        currency: "INR",
-        receipt,
-        notes: {
-          company_id: company.id,
-          company_name: company.name,
-          transaction_type: transactionType,
-          seats_delta: String(seatsRequested),
-          unit_price_inr: String(unitPriceInr),
-          initiated_by: caller.crmUser.email,
-        },
-      }),
-    });
 
-    const orderData = await orderRes.json().catch(() => null);
-    if (!orderRes.ok || !orderData?.id) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            orderData?.error?.description ||
-            orderData?.error?.reason ||
-            "Failed to create Razorpay payment order.",
-        },
-        502
-      );
+    // Autopay subscription mode for plan activation / renewal
+    const preferSubscription =
+      transactionType === "initial_activation" ||
+      transactionType === "renewal" ||
+      body.mode === "subscription";
+
+    let subscriptionData: { id: string; status: string; shortUrl?: string } | null = null;
+    let planId: string | null = null;
+
+    if (preferSubscription) {
+      const planRes = await createOrFetchRazorpayPlan(basicAuth, unitPriceInr);
+      if (planRes?.id) {
+        planId = planRes.id;
+        subscriptionData = await createRazorpaySubscription(basicAuth, {
+          planId: planRes.id,
+          quantity: seatsToBill,
+          companyId: company.id,
+          companyName: company.name,
+          userEmail: caller.crmUser.email,
+        });
+      }
     }
+
+    let orderData: { id: string } | null = null;
+    if (!subscriptionData?.id) {
+      // Standard one-time order fallback
+      const orderRes = await fetch("https://api.razorpay.com/v1/orders", {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          amount: amountPaise,
+          currency: "INR",
+          receipt,
+          notes: {
+            company_id: company.id,
+            company_name: company.name,
+            transaction_type: transactionType,
+            seats_delta: String(seatsToBill),
+            unit_price_inr: String(unitPriceInr),
+            initiated_by: caller.crmUser.email,
+          },
+        }),
+      });
+
+      orderData = await orderRes.json().catch(() => null);
+      if (!orderRes.ok || !orderData?.id) {
+        return jsonResponse(
+          {
+            success: false,
+            error:
+              (orderData as any)?.error?.description ||
+              (orderData as any)?.error?.reason ||
+              "Failed to initialize Razorpay checkout.",
+          },
+          502
+        );
+      }
+    }
+
+    const effectiveCheckoutId = subscriptionData?.id || orderData?.id || "";
+    const isSubscriptionMode = Boolean(subscriptionData?.id);
 
     const { data: txRow, error: txInsertErr } = await adminClient
       .from("billing_transactions")
       .insert([{
         company_id: company.id,
         transaction_type: transactionType,
-        seats_delta: seatsRequested,
+        seats_delta: seatsToBill,
         amount_inr: amountInr,
         unit_price_inr: unitPriceInr,
         currency: "INR",
-        razorpay_order_id: orderData.id,
+        razorpay_order_id: effectiveCheckoutId,
         status: "created",
         metadata: {
           receipt,
+          mode: isSubscriptionMode ? "subscription" : "order",
+          razorpay_subscription_id: subscriptionData?.id || null,
+          razorpay_plan_id: planId,
           initiated_by_user_id: caller.crmUser.id,
           initiated_by_email: caller.crmUser.email,
           billing_gstin: body.gstin ? String(body.gstin).trim().slice(0, 20) : null,
@@ -198,7 +246,9 @@ Deno.serve(async (req) => {
     return jsonResponse({
       success: true,
       keyId,
-      orderId: orderData.id,
+      orderId: effectiveCheckoutId,
+      subscriptionId: subscriptionData?.id || null,
+      mode: isSubscriptionMode ? "subscription" : "order",
       amountPaise,
       amountInr,
       unitPriceInr,
