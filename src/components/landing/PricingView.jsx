@@ -22,7 +22,7 @@ const CURRENT_YEAR = new Date().getFullYear();
 export default function PricingView({ onGoToHome, onGoToLogin }) {
   const pageRef = useRef(null);
   const ctaRef = useRef(null);
-  const [teamSize, setTeamSize] = useState(15);
+  const [teamSize, setTeamSize] = useState(5);
   const [openFaq, setOpenFaq] = useState(0);
 
   useScrollReveal(pageRef);
