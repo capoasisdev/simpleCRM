@@ -14,16 +14,29 @@ import { consumeSupportHandoff } from './lib/masterAdmin';
 import { getActiveCompany } from './lib/tenant';
 import { isCompanyAccessLocked } from './lib/billing';
 import { canUserManageBilling } from './lib/permissions';
+import { isDirectPortalDomain } from './lib/domainRouting';
 
 const SESSION_STORAGE_KEY = 'simplecrm_user_session';
 
 export default function App() {
   const isNativeApp = typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform();
+  const isDirectPortal = isDirectPortalDomain();
+  const isPortalMode = isNativeApp || isDirectPortal;
 
   const [currentPath, setCurrentPath] = useState(() => {
     const p = window.location.pathname;
-    if (isNativeApp && (p === '/' || !p)) {
-      return '/login';
+    const isRoot = p === '/' || !p || p === '/home' || p === '/landing';
+    if (isPortalMode && isRoot) {
+      try {
+        const saved = localStorage.getItem(SESSION_STORAGE_KEY);
+        const target = saved ? '/dashboard' : '/login';
+        if (typeof window !== 'undefined' && window.location.pathname !== target) {
+          window.history.replaceState({}, '', target);
+        }
+        return target;
+      } catch {
+        return '/login';
+      }
     }
     return p;
   });
@@ -98,16 +111,18 @@ export default function App() {
     setCurrentUser(null);
     setActiveCompany(null);
     setShowSecurityUpgrade(false);
-    navigateTo(isNativeApp ? '/login' : '/');
+    navigateTo(isPortalMode ? '/login' : '/');
     await clearAuthSessionStorage();
   };
 
-  // If user is already logged in and visits /login, redirect to /dashboard
+  // If user is already logged in and visits /login or marketing route on portal domain, redirect to /dashboard
   useEffect(() => {
-    if (currentUser && currentPath === '/login') {
-      navigateTo('/dashboard');
+    if (currentUser) {
+      if (currentPath === '/login' || (isPortalMode && (currentPath === '/' || currentPath === '/home' || currentPath === '/landing' || currentPath === '/pricing'))) {
+        navigateTo('/dashboard');
+      }
     }
-  }, [currentUser, currentPath]);
+  }, [currentUser, currentPath, isPortalMode]);
 
   // Prompt active users still using legacy PIN or users who must change temporary password on first login
   useEffect(() => {
@@ -204,15 +219,56 @@ export default function App() {
 
   // 1. Android APK Download Page
   if (currentPath === '/download' || currentPath === '/download/') {
+    if (isPortalMode && !currentUser) {
+      return (
+        <LoginView
+          onLoginSuccess={handleLoginSuccess}
+          initialEmail={prefillLoginEmail}
+        />
+      );
+    }
     return (
       <DownloadView
-        onGoToWeb={() => navigateTo(currentUser ? '/dashboard' : '/')}
+        onGoToWeb={() => navigateTo(currentUser ? '/dashboard' : (isPortalMode ? '/login' : '/'))}
       />
     );
   }
 
   // 1.5. Pricing Page
   if (currentPath === '/pricing' || currentPath === '/pricing/') {
+    if (isPortalMode) {
+      if (currentUser) {
+        return (
+          <DashboardView
+            currentUser={currentUser}
+            company={activeCompany || getActiveCompany()}
+            onCompanyUpdated={(updatedCompany) => {
+              if (updatedCompany) {
+                setActiveCompanyCache(updatedCompany);
+                setActiveCompany(updatedCompany);
+              }
+            }}
+            onUserUpdated={(updatedUser) => {
+              if (!updatedUser) return;
+              setCurrentUser((prev) => {
+                const merged = prev ? { ...prev, ...updatedUser } : updatedUser;
+                try {
+                  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(merged));
+                } catch {}
+                return merged;
+              });
+            }}
+            onLogout={handleLogout}
+          />
+        );
+      }
+      return (
+        <LoginView
+          onLoginSuccess={handleLoginSuccess}
+          initialEmail={prefillLoginEmail}
+        />
+      );
+    }
     return (
       <PricingView
         onGoToHome={() => navigateTo('/')}
@@ -235,8 +291,8 @@ export default function App() {
 
   // 2. Authenticated Dashboard Session
   if (currentUser) {
-    // If logged in user explicitly wants to preview the landing page
-    if (currentPath === '/home' || currentPath === '/landing') {
+    // If logged in user explicitly wants to preview the landing page (only allowed on marketing domains)
+    if (!isPortalMode && (currentPath === '/home' || currentPath === '/landing')) {
       return (
         <LandingView
           currentUser={currentUser}
@@ -312,8 +368,8 @@ export default function App() {
     );
   }
 
-  // 3. Unauthenticated Login Route (or native mobile app)
-  if (currentPath === '/login' || currentPath === '/login/' || isNativeApp) {
+  // 3. Unauthenticated Login Route (or native mobile app or direct portal domain)
+  if (currentPath === '/login' || currentPath === '/login/' || isPortalMode) {
     return (
       <LoginView
         onLoginSuccess={handleLoginSuccess}
@@ -322,7 +378,7 @@ export default function App() {
     );
   }
 
-  // 4. Default Web Landing / Homepage
+  // 4. Default Web Landing / Homepage (Primary marketing domain only)
   return (
     <LandingView
       currentUser={null}
